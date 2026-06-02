@@ -1,0 +1,337 @@
+﻿{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "xiaomi/mimo-v2.5-pro",
+  "small_model": "deepseek/deepseek-v4-pro",
+  "agent": {
+    "oracle-rust": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/oracle-rust.md}",
+      "description": "Rust systems oracle: advisory expert on ownership, lifetimes, unsafe, async, zero-cost abstractions (read-only)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "oracle-go": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/oracle-go.md}",
+      "description": "Go systems oracle: advisory expert on concurrency, memory model, escape analysis, GC tuning (read-only)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "oracle-typescript": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/oracle-typescript.md}",
+      "description": "TypeScript/React oracle: advisory expert on React patterns, WebGL, performance, accessibility (read-only)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "oracle-security": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/oracle-security.md}",
+      "description": "Security oracle: advisory expert on OWASP, CWE, threat modeling, vulnerability assessment (read-only)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "oracle-contracts": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/oracle-contracts.md}",
+      "description": "Contracts oracle: advisory expert on protobuf design, schema evolution, cross-language compatibility (read-only)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "paryty-metal-scraper": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-metal-scraper.md}",
+      "description": "Metal Scraper specialist: CPU/memory/disk/network metrics, process tree, container detection (Rust)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-ebpf-observer": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-ebpf-observer.md}",
+      "description": "eBPF Observer specialist: TCP tracking, DNS resolution, HTTP/DB protocol inspection (Rust/aya)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-supervisor": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-supervisor.md}",
+      "description": "Supervisor specialist: health checks, log tailing, config detection, dependency discovery (Rust)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-comm-layer": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-comm-layer.md}",
+      "description": "Communication Layer specialist: gRPC streaming, edge buffering, compression, flow control (Rust)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-sdk": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-sdk.md}",
+      "description": "Go SDK specialist: self-reporting SDK, OTel compatibility, batching, context propagation",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-ingestion": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-ingestion.md}",
+      "description": "Ingestion Layer specialist: gRPC server, tenant routing, load balancing, backpressure (Go)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-stream-engine": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-stream-engine.md}",
+      "description": "Stream Engine specialist: Redpanda, exactly-once delivery, schema registry, consumer groups (Go)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-processing": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-processing.md}",
+      "description": "Processing Layer specialist: Aggregator, Correlator, Enricher, windowing, idempotency (Go)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-storage-tier": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-storage-tier.md}",
+      "description": "Storage Tier specialist: Dragonfly hot, QuestDB warm, SeaweedFS cold, data lifecycle (Go)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-query-layer": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-query-layer.md}",
+      "description": "Query Layer specialist: REST, GraphQL, WebSocket, SSE, caching, rate limiting (Go)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-gpu-engine": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-gpu-engine.md}",
+      "description": "GPU Engine specialist: PixiJS, D3-force, WebGL rendering, particle systems, 60fps (TypeScript)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-visualization": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-visualization.md}",
+      "description": "Visualization specialist: topology view, visual encoding, animations, accessibility (TypeScript)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-intelligence": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-intelligence.md}",
+      "description": "Intelligence Layer specialist: forecasting, anomaly detection, simulation, timeline (TypeScript/Python)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-bridge-agent-cluster": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-bridge-agent-cluster.md}",
+      "description": "Agent-Cluster bridge: gRPC contract, Rust-Go interop, version negotiation, reconnection",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-bridge-stream-storage": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-bridge-stream-storage.md}",
+      "description": "Stream-Storage bridge: Redpanda to Dragonfly/QuestDB/SeaweedFS, consumer offsets, idempotent writes",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-bridge-cluster-frontend": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-bridge-cluster-frontend.md}",
+      "description": "Cluster-Frontend bridge: REST/GraphQL/WS/SSE contract, type safety, CORS/CSP/JWT",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-bridge-processing-pipeline": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-bridge-processing-pipeline.md}",
+      "description": "Processing Pipeline bridge: end-to-end data flow, backpressure, exactly-once, dead letter queue",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.2,
+      "permission": {
+        "edit": "allow",
+        "bash": "allow"
+      }
+    },
+    "paryty-security-auditor": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-security-auditor.md}",
+      "description": "Security auditor: OWASP/CWE audits, container security, supply chain, tenant isolation (read-only)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "paryty-performance-engineer": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-performance-engineer.md}",
+      "description": "Performance engineer: USE method, profiling, flame graphs, benchmarks, capacity planning (read-only)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "paryty-contract-guardian": {
+      "mode": "subagent",
+      "prompt": "{file:.opencode/agents/paryty-contract-guardian.md}",
+      "description": "Contract guardian: buf lint/breaking, schema evolution, code generation verification (read-only)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "go-backend": {
+      "mode": "subagent",
+      "prompt": "{file:~/.config/opencode/agents/go-backend.md}",
+      "description": "Global Go systems oracle: concurrency, performance, error handling, testing (advisory)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "typescript-frontend": {
+      "mode": "subagent",
+      "prompt": "{file:~/.config/opencode/agents/typescript-frontend.md}",
+      "description": "Global TypeScript/React oracle: patterns, state management, performance, testing (advisory)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "rust-systems": {
+      "mode": "subagent",
+      "prompt": "{file:~/.config/opencode/agents/rust-systems.md}",
+      "description": "Global Rust systems oracle: ownership, lifetimes, unsafe, async, memory model (advisory)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "contract-guardian": {
+      "mode": "subagent",
+      "prompt": "{file:~/.config/opencode/agents/contract-guardian.md}",
+      "description": "Global protobuf contract oracle: schema design, evolution, compatibility (advisory)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    },
+    "security-auditor": {
+      "mode": "subagent",
+      "prompt": "{file:~/.config/opencode/agents/security-auditor.md}",
+      "description": "Global security oracle: OWASP, CWE, threat modeling, vulnerability assessment (advisory)",
+      "model": "xiaomi/mimo-v2.5-pro",
+      "temperature": 0.1,
+      "permission": {
+        "edit": "deny",
+        "bash": "deny"
+      }
+    }
+  }
+}

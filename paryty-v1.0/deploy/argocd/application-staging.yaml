@@ -1,0 +1,43 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: paryty-staging
+  namespace: argocd
+spec:
+  project: paryty
+
+  source:
+    repoURL: https://github.com/paryty/paryty-v1.0.git
+    targetRevision: main
+    path: deploy/kubernetes/overlays/staging
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: paryty-staging
+
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  healthChecks:
+    - kind: Deployment
+      name: paryty-cluster
+      namespace: paryty-staging
+    - kind: Deployment
+      name: paryty-frontend
+      namespace: paryty-staging
+    - kind: Deployment
+      name: paryty-ingestion
+      namespace: paryty-staging
+    - kind: Deployment
+      name: paryty-query
+      namespace: paryty-staging
+    - kind: DaemonSet
+      name: paryty-agent
+      namespace: paryty-staging

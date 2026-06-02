@@ -1,0 +1,36 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: paryty
+
+resources:
+  - namespace.yaml
+  - cluster-deployment.yaml
+  - cluster-service.yaml
+  - frontend-deployment.yaml
+  - frontend-service.yaml
+  - ingestion-deployment.yaml
+  - ingestion-service.yaml
+  - query-deployment.yaml
+  - query-service.yaml
+  - aggregator-deployment.yaml
+  - correlator-deployment.yaml
+  - enricher-deployment.yaml
+  - agent-daemonset.yaml
+  - network-policy.yaml
+
+commonLabels:
+  app.kubernetes.io/name: paryty
+  app.kubernetes.io/part-of: paryty
+  app.kubernetes.io/managed-by: kustomize
+
+configMapGenerator:
+  - name: paryty-config
+    literals:
+      - REDPANDA_URL=PLAINTEXT://redpanda:9092
+      - DRAGONFLY_URL=redis://dragonfly:6379
+      - QUESTDB_URL=postgres://paryty:paryty@questdb:8812/paryty
+      - SEAWEEDFS_URL=http://seaweedfs:8333
+      - CLUSTER_ADDR=paryty-cluster:50051
+      - LOG_LEVEL=info
+      - LOG_FORMAT=json

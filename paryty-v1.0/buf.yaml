@@ -1,0 +1,17 @@
+# Buf configuration for Paryty proto files
+# https://buf.build/docs/configuration/v2/
+
+version: v2
+modules:
+  - path: proto
+lint:
+  use:
+    - STANDARD
+  except:
+    - FIELD_NOT_REQUIRED
+    - SERVICE_SUFFIX
+  enum_zero_value_suffix: _UNSPECIFIED
+  rpc_allow_google_protobuf_empty_requests: true
+breaking:
+  use:
+    - FILE

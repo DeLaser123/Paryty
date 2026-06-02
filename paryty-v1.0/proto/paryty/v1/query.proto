@@ -1,0 +1,511 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "paryty/v1/common.proto";
+
+// ============================================================================
+// Query Service — Frontend-to-Cluster communication
+// ============================================================================
+
+// QueryService provides all read APIs for the Paryty frontend.
+service QueryService {
+  // Topology
+  rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse);
+  rpc GetServices(GetServicesRequest) returns (GetServicesResponse);
+  rpc GetService(GetServiceRequest) returns (ServiceDetail);
+  rpc GetDependencies(GetDependenciesRequest) returns (GetDependenciesResponse);
+
+  // Metrics
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+  rpc GetServiceMetrics(GetServiceMetricsRequest) returns (GetServiceMetricsResponse);
+  rpc GetMetricHistory(GetMetricHistoryRequest) returns (GetMetricHistoryResponse);
+
+  // Traces
+  rpc GetTraces(GetTracesRequest) returns (GetTracesResponse);
+  rpc GetTrace(GetTraceRequest) returns (TraceDetail);
+
+  // Events
+  rpc GetEvents(GetEventsRequest) returns (GetEventsResponse);
+  rpc GetServiceEvents(GetServiceEventsRequest) returns (GetServiceEventsResponse);
+
+  // Alerts
+  rpc GetAlerts(GetAlertsRequest) returns (GetAlertsResponse);
+  rpc GetAlert(GetAlertRequest) returns (AlertDetail);
+  rpc AcknowledgeAlert(AcknowledgeAlertRequest) returns (AcknowledgeAlertResponse);
+
+  // Forecasting
+  rpc GetForecast(GetForecastRequest) returns (GetForecastResponse);
+
+  // Timeline
+  rpc GetSnapshots(GetSnapshotsRequest) returns (GetSnapshotsResponse);
+  rpc GetSnapshot(GetSnapshotRequest) returns (SnapshotDetail);
+  rpc GetReplay(GetReplayRequest) returns (stream ReplayFrame);
+}
+
+// ============================================================================
+// Topology Messages
+// ============================================================================
+
+message GetTopologyRequest {
+  // Time range for topology snapshot. Empty = current.
+  TimeRange time_range = 1;
+  // Filter by labels.
+  Labels label_filter = 2;
+  // Maximum depth of dependency graph.
+  int32 max_depth = 3;
+}
+
+message GetTopologyResponse {
+  // Nodes in the topology graph.
+  repeated TopologyNode nodes = 1;
+  // Edges in the topology graph.
+  repeated TopologyEdge edges = 2;
+  // When this topology was captured.
+  google.protobuf.Timestamp captured_at = 3;
+  // Total number of nodes.
+  int32 total_nodes = 4;
+  // Total number of edges.
+  int32 total_edges = 5;
+}
+
+message TopologyNode {
+  // Unique node identifier.
+  string id = 1;
+  // Display name.
+  string name = 2;
+  // Node type (service, host, container, process).
+  string type = 3;
+  // Current health status.
+  HealthStatus health = 4;
+  // Labels/metadata.
+  Labels labels = 5;
+  // Current CPU usage (0-100).
+  double cpu_usage = 6;
+  // Current memory usage (0-100).
+  double memory_usage = 7;
+  // Request rate (requests/sec).
+  double request_rate = 8;
+  // Error rate (errors/sec).
+  double error_rate = 9;
+  // P99 latency in milliseconds.
+  double p99_latency_ms = 10;
+  // Position for visualization (x, y).
+  double position_x = 11;
+  double position_y = 12;
+}
+
+message TopologyEdge {
+  // Source node ID.
+  string source_id = 1;
+  // Target node ID.
+  string target_id = 2;
+  // Protocol (http, grpc, tcp, postgres, redis, etc.).
+  string protocol = 3;
+  // Throughput (requests/sec).
+  double throughput = 4;
+  // Error rate (0-1).
+  double error_rate = 5;
+  // Average latency in milliseconds.
+  double latency_ms = 6;
+}
+
+message GetServicesRequest {
+  PaginationRequest pagination = 1;
+  Labels label_filter = 2;
+  string search_query = 3;
+}
+
+message GetServicesResponse {
+  repeated ServiceSummary services = 1;
+  PaginationResponse pagination = 2;
+}
+
+message ServiceSummary {
+  string id = 1;
+  string name = 2;
+  HealthStatus health = 3;
+  double cpu_usage = 4;
+  double memory_usage = 5;
+  double request_rate = 6;
+  double error_rate = 7;
+  int32 instance_count = 8;
+  Labels labels = 9;
+  google.protobuf.Timestamp last_seen = 10;
+}
+
+message GetServiceRequest {
+  string service_id = 1;
+}
+
+message ServiceDetail {
+  string id = 1;
+  string name = 2;
+  HealthStatus health = 3;
+  double cpu_usage = 4;
+  double memory_usage = 5;
+  double request_rate = 6;
+  double error_rate = 7;
+  double p50_latency_ms = 8;
+  double p90_latency_ms = 9;
+  double p99_latency_ms = 10;
+  int32 instance_count = 11;
+  repeated string dependencies = 12;
+  repeated string dependents = 13;
+  Labels labels = 14;
+  repeated MetricPoint cpu_history = 15;
+  repeated MetricPoint memory_history = 16;
+  google.protobuf.Timestamp created_at = 17;
+  google.protobuf.Timestamp last_seen = 18;
+}
+
+message GetDependenciesRequest {
+  string service_id = 1;
+  int32 depth = 2;
+}
+
+message GetDependenciesResponse {
+  repeated TopologyEdge dependencies = 1;
+  repeated TopologyEdge dependents = 2;
+}
+
+// ============================================================================
+// Metrics Messages
+// ============================================================================
+
+message GetMetricsRequest {
+  TimeRange time_range = 1;
+  Labels label_filter = 2;
+}
+
+message GetMetricsResponse {
+  // Aggregate metrics across all services.
+  double total_cpu_usage = 1;
+  double total_memory_usage = 2;
+  double total_request_rate = 3;
+  double total_error_rate = 4;
+  int32 total_services = 5;
+  int32 total_agents = 6;
+  HealthStatus overall_health = 7;
+  repeated AlertSummary active_alerts = 8;
+}
+
+message GetServiceMetricsRequest {
+  string service_id = 1;
+  TimeRange time_range = 2;
+}
+
+message GetServiceMetricsResponse {
+  repeated MetricPoint cpu = 1;
+  repeated MetricPoint memory = 2;
+  repeated MetricPoint request_rate = 3;
+  repeated MetricPoint error_rate = 4;
+  repeated MetricPoint latency = 5;
+}
+
+message GetMetricHistoryRequest {
+  string service_id = 1;
+  string metric_name = 2;
+  TimeRange time_range = 3;
+  // Aggregation interval (e.g., "1m", "5m", "1h").
+  string aggregation = 4;
+}
+
+message GetMetricHistoryResponse {
+  repeated MetricPoint data_points = 1;
+  // Statistical summary.
+  MetricSummary summary = 2;
+}
+
+message MetricPoint {
+  google.protobuf.Timestamp timestamp = 1;
+  double value = 2;
+}
+
+message MetricSummary {
+  double min = 1;
+  double max = 2;
+  double avg = 3;
+  double p50 = 4;
+  double p90 = 5;
+  double p99 = 6;
+  int64 sample_count = 7;
+}
+
+// ============================================================================
+// Traces Messages
+// ============================================================================
+
+message GetTracesRequest {
+  TimeRange time_range = 1;
+  PaginationRequest pagination = 2;
+  string service_id = 3;
+  string search_query = 4;
+  int64 min_duration_ms = 5;
+  int64 max_duration_ms = 6;
+}
+
+message GetTracesResponse {
+  repeated TraceSummary traces = 1;
+  PaginationResponse pagination = 2;
+}
+
+message TraceSummary {
+  string trace_id = 1;
+  string root_service = 2;
+  string root_operation = 3;
+  int64 duration_ms = 4;
+  int32 span_count = 5;
+  bool has_error = 6;
+  google.protobuf.Timestamp started_at = 7;
+  Labels attributes = 8;
+}
+
+message GetTraceRequest {
+  string trace_id = 1;
+}
+
+message TraceDetail {
+  string trace_id = 1;
+  repeated Span spans = 2;
+  google.protobuf.Timestamp started_at = 3;
+  int64 total_duration_ms = 4;
+  string root_service = 5;
+}
+
+message Span {
+  string span_id = 1;
+  string parent_span_id = 2;
+  string trace_id = 3;
+  string service_name = 4;
+  string operation = 5;
+  int64 start_time_ms = 6;
+  int64 duration_ms = 7;
+  bool has_error = 8;
+  string error_message = 9;
+  Labels attributes = 10;
+}
+
+// ============================================================================
+// Events Messages
+// ============================================================================
+
+message GetEventsRequest {
+  TimeRange time_range = 1;
+  PaginationRequest pagination = 2;
+  Severity min_severity = 3;
+}
+
+message GetEventsResponse {
+  repeated EventSummary events = 1;
+  PaginationResponse pagination = 2;
+}
+
+message EventSummary {
+  string id = 1;
+  string service_id = 2;
+  string service_name = 3;
+  string event_type = 4;
+  Severity severity = 5;
+  string message = 6;
+  Labels attributes = 7;
+  google.protobuf.Timestamp timestamp = 8;
+}
+
+message GetServiceEventsRequest {
+  string service_id = 1;
+  TimeRange time_range = 2;
+  PaginationRequest pagination = 3;
+}
+
+message GetServiceEventsResponse {
+  repeated EventSummary events = 1;
+  PaginationResponse pagination = 2;
+}
+
+// ============================================================================
+// Alerts Messages
+// ============================================================================
+
+message GetAlertsRequest {
+  // Filter by status.
+  AlertStatus status = 1;
+  // Filter by severity.
+  Severity min_severity = 2;
+  PaginationRequest pagination = 3;
+}
+
+message GetAlertsResponse {
+  repeated AlertSummary alerts = 1;
+  PaginationResponse pagination = 2;
+}
+
+enum AlertStatus {
+  ALERT_STATUS_UNSPECIFIED = 0;
+  ALERT_STATUS_ACTIVE = 1;
+  ALERT_STATUS_ACKNOWLEDGED = 2;
+  ALERT_STATUS_RESOLVED = 3;
+}
+
+message AlertSummary {
+  string id = 1;
+  string service_id = 2;
+  string service_name = 3;
+  string alert_type = 4;
+  Severity severity = 5;
+  string message = 6;
+  AlertStatus status = 7;
+  google.protobuf.Timestamp triggered_at = 8;
+  google.protobuf.Timestamp acknowledged_at = 9;
+  string acknowledged_by = 10;
+}
+
+message GetAlertRequest {
+  string alert_id = 1;
+}
+
+message AlertDetail {
+  string id = 1;
+  string service_id = 2;
+  string service_name = 3;
+  string alert_type = 4;
+  Severity severity = 5;
+  string message = 6;
+  string description = 7;
+  AlertStatus status = 8;
+  // Trigger condition details.
+  string condition = 9;
+  // Current metric value that triggered the alert.
+  double current_value = 10;
+  // Threshold that was breached.
+  double threshold = 11;
+  google.protobuf.Timestamp triggered_at = 12;
+  google.protobuf.Timestamp acknowledged_at = 13;
+  string acknowledged_by = 14;
+  google.protobuf.Timestamp resolved_at = 15;
+  Labels attributes = 16;
+  // Related trace IDs.
+  repeated string related_trace_ids = 17;
+}
+
+message AcknowledgeAlertRequest {
+  string alert_id = 1;
+  string acknowledged_by = 2;
+  string comment = 3;
+}
+
+message AcknowledgeAlertResponse {
+  bool success = 1;
+  google.protobuf.Timestamp acknowledged_at = 2;
+}
+
+// ============================================================================
+// Forecast Messages
+// ============================================================================
+
+message GetForecastRequest {
+  string service_id = 1;
+  string metric_name = 2;
+  // How far into the future to forecast.
+  google.protobuf.Duration horizon = 3;
+  // Confidence level (0.0 to 1.0).
+  float confidence_level = 4;
+}
+
+message GetForecastResponse {
+  string service_id = 1;
+  string metric_name = 2;
+  repeated ForecastPoint forecast = 3;
+  // Model used for forecasting.
+  string model = 4;
+  // Model confidence score.
+  float confidence_score = 5;
+  // Forecast generated at.
+  google.protobuf.Timestamp generated_at = 6;
+}
+
+message ForecastPoint {
+  google.protobuf.Timestamp timestamp = 1;
+  double predicted_value = 2;
+  double lower_bound = 3;
+  double upper_bound = 4;
+}
+
+// ============================================================================
+// Timeline / Replay Messages
+// ============================================================================
+
+message GetSnapshotsRequest {
+  TimeRange time_range = 1;
+  PaginationRequest pagination = 2;
+}
+
+message GetSnapshotsResponse {
+  repeated SnapshotSummary snapshots = 1;
+  PaginationResponse pagination = 2;
+}
+
+message SnapshotSummary {
+  string id = 1;
+  google.protobuf.Timestamp captured_at = 2;
+  int64 size_bytes = 3;
+  int32 node_count = 4;
+  int32 edge_count = 5;
+}
+
+message GetSnapshotRequest {
+  string snapshot_id = 1;
+}
+
+message SnapshotDetail {
+  string id = 1;
+  google.protobuf.Timestamp captured_at = 2;
+  GetTopologyResponse topology = 3;
+  GetMetricsResponse metrics = 4;
+  repeated AlertSummary alerts = 5;
+}
+
+message GetReplayRequest {
+  // Start of replay window.
+  google.protobuf.Timestamp start_time = 1;
+  // End of replay window.
+  google.protobuf.Timestamp end_time = 2;
+  // Playback speed (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0).
+  float speed = 3;
+  // Labels filter.
+  Labels label_filter = 4;
+}
+
+message ReplayFrame {
+  // Frame timestamp.
+  google.protobuf.Timestamp timestamp = 1;
+  // Topology at this point.
+  GetTopologyResponse topology = 2;
+  // Metrics at this point.
+  GetMetricsResponse metrics = 3;
+  // Active alerts at this point.
+  repeated AlertSummary alerts = 4;
+  // Changes since last frame.
+  repeated TopologyDelta deltas = 5;
+}
+
+message TopologyDelta {
+  enum DeltaType {
+    DELTA_TYPE_UNSPECIFIED = 0;
+    DELTA_TYPE_NODE_ADDED = 1;
+    DELTA_TYPE_NODE_REMOVED = 2;
+    DELTA_TYPE_NODE_UPDATED = 3;
+    DELTA_TYPE_EDGE_ADDED = 4;
+    DELTA_TYPE_EDGE_REMOVED = 5;
+    DELTA_TYPE_EDGE_UPDATED = 6;
+  }
+  DeltaType type = 1;
+  string node_id = 2;
+  string source_id = 3;
+  string target_id = 4;
+  Labels changes = 5;
+}

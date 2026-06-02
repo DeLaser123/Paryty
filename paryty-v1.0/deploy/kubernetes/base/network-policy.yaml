@@ -1,0 +1,52 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: paryty
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-cluster-ingress
+  namespace: paryty
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: paryty-cluster
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: paryty-frontend
+      ports:
+        - port: 8080
+          protocol: TCP
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 443
+          protocol: TCP
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-frontend-ingress
+  namespace: paryty
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: paryty-frontend
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - port: 3000
+          protocol: TCP

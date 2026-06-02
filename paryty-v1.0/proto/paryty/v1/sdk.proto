@@ -1,0 +1,225 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "paryty/v1/common.proto";
+
+// ============================================================================
+// SDK Service — Application-to-Agent communication
+// ============================================================================
+
+// SDKService is the gRPC service for application self-reporting.
+// Applications use this to send custom metrics, traces, and health status
+// to the Paryty Agent running on the same node.
+service SDKService {
+  // ReportMetric sends custom application metrics.
+  rpc ReportMetric(ReportMetricRequest) returns (ReportMetricResponse);
+
+  // ReportMetrics sends a batch of custom metrics.
+  rpc ReportMetrics(ReportMetricsRequest) returns (ReportMetricsResponse);
+
+  // ReportTrace sends a business logic trace.
+  rpc ReportTrace(ReportTraceRequest) returns (ReportTraceResponse);
+
+  // ReportHealth reports application health status.
+  rpc ReportHealth(ReportHealthRequest) returns (ReportHealthResponse);
+
+  // StreamMetrics opens a streaming connection for continuous metric reporting.
+  rpc StreamMetrics(stream CustomMetric) returns (ReportMetricsResponse);
+
+  // GetConfig retrieves SDK configuration from the agent.
+  rpc GetConfig(GetSdkConfigRequest) returns (GetSdkConfigResponse);
+}
+
+// ============================================================================
+// Custom Metric Messages
+// ============================================================================
+
+// MetricType defines the type of custom metric.
+enum MetricType {
+  METRIC_TYPE_UNSPECIFIED = 0;
+  // Monotonically increasing counter.
+  METRIC_TYPE_COUNTER = 1;
+  // Value that can go up and down.
+  METRIC_TYPE_GAUGE = 2;
+  // Distribution of values (histogram).
+  METRIC_TYPE_HISTOGRAM = 3;
+  // Summary with quantiles.
+  METRIC_TYPE_SUMMARY = 4;
+}
+
+// CustomMetric represents a single application-defined metric.
+message CustomMetric {
+  // Metric name (e.g., "orders.total", "cart.items.count").
+  string name = 1;
+  // Metric type.
+  MetricType type = 2;
+  // Metric value.
+  double value = 3;
+  // For histograms: bucket boundaries.
+  repeated double histogram_buckets = 4;
+  // For histograms: bucket counts (parallel to histogram_buckets).
+  repeated int64 histogram_counts = 5;
+  // Labels/dimensions for this metric.
+  Labels labels = 6;
+  // When the metric was recorded.
+  google.protobuf.Timestamp timestamp = 7;
+  // Unit of measurement (e.g., "bytes", "seconds", "requests").
+  string unit = 8;
+  // Help text describing this metric.
+  string description = 9;
+}
+
+message ReportMetricRequest {
+  // Application identifier.
+  string application_id = 1;
+  // The metric to report.
+  CustomMetric metric = 2;
+}
+
+message ReportMetricResponse {
+  bool accepted = 1;
+  Error error = 2;
+}
+
+message ReportMetricsRequest {
+  // Application identifier.
+  string application_id = 1;
+  // Batch of metrics.
+  repeated CustomMetric metrics = 2;
+}
+
+message ReportMetricsResponse {
+  int64 accepted_count = 1;
+  int64 rejected_count = 2;
+  map<int32, string> rejection_reasons = 3;
+}
+
+// ============================================================================
+// Business Trace Messages
+// ============================================================================
+
+// BusinessTrace represents a high-level business operation trace.
+message BusinessTrace {
+  // Unique trace identifier.
+  string trace_id = 1;
+  // Span identifier.
+  string span_id = 2;
+  // Parent span identifier (empty for root span).
+  string parent_span_id = 3;
+  // Operation name (e.g., "process_order", "send_notification").
+  string operation = 4;
+  // Service name.
+  string service_name = 5;
+  // When the operation started.
+  google.protobuf.Timestamp start_time = 6;
+  // When the operation ended.
+  google.protobuf.Timestamp end_time = 7;
+  // Duration (computed from start/end time).
+  google.protobuf.Duration duration = 8;
+  // Whether the operation succeeded.
+  bool success = 9;
+  // Error message (if failed).
+  string error_message = 10;
+  // Error type (e.g., "TimeoutError", "ValidationError").
+  string error_type = 11;
+  // Additional attributes.
+  Labels attributes = 12;
+  // Events within this span.
+  repeated TraceEvent events = 13;
+}
+
+// TraceEvent is a timestamped event within a trace span.
+message TraceEvent {
+  // Event name.
+  string name = 1;
+  // When the event occurred.
+  google.protobuf.Timestamp timestamp = 2;
+  // Event attributes.
+  Labels attributes = 3;
+}
+
+message ReportTraceRequest {
+  // Application identifier.
+  string application_id = 1;
+  // The trace to report.
+  BusinessTrace trace = 2;
+}
+
+message ReportTraceResponse {
+  bool accepted = 1;
+  Error error = 2;
+}
+
+// ============================================================================
+// Health Report Messages
+// ============================================================================
+
+// HealthReport represents the health status of an application.
+message HealthReport {
+  // Application identifier.
+  string application_id = 1;
+  // Overall health status.
+  HealthStatus status = 2;
+  // Individual health check results.
+  repeated HealthCheckItem checks = 3;
+  // When the health check was performed.
+  google.protobuf.Timestamp checked_at = 4;
+  // Application version.
+  string version = 5;
+  // Application uptime.
+  google.protobuf.Duration uptime = 6;
+}
+
+// HealthCheckItem is a single health check within a health report.
+message HealthCheckItem {
+  // Check name (e.g., "database", "cache", "external_api").
+  string name = 1;
+  // Check status.
+  HealthStatus status = 2;
+  // Response time for this check.
+  google.protobuf.Duration response_time = 3;
+  // Error message (if unhealthy).
+  string error_message = 4;
+  // Additional details.
+  Labels details = 5;
+}
+
+message ReportHealthRequest {
+  HealthReport health = 1;
+}
+
+message ReportHealthResponse {
+  bool acknowledged = 1;
+  Error error = 2;
+}
+
+// ============================================================================
+// SDK Config Messages
+// ============================================================================
+
+message GetSdkConfigRequest {
+  // Application identifier.
+  string application_id = 1;
+  // SDK version.
+  string sdk_version = 2;
+}
+
+message GetSdkConfigResponse {
+  // Metric reporting interval.
+  int32 report_interval_ms = 1;
+  // Health check interval.
+  int32 health_check_interval_ms = 2;
+  // Whether tracing is enabled.
+  bool tracing_enabled = 3;
+  // Sampling rate for traces (0.0 to 1.0).
+  float trace_sampling_rate = 4;
+  // Maximum metrics per batch.
+  int32 max_batch_size = 5;
+  // Labels to apply to all metrics from this application.
+  Labels default_labels = 6;
+}

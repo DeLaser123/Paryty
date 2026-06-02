@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// PaginationRequest controls result set pagination.
+message PaginationRequest {
+  // Token for the next page. Empty for first page.
+  string page_token = 1;
+  // Maximum number of results per page. Default 50, max 500.
+  int32 page_size = 2;
+}
+
+// PaginationResponse provides pagination metadata.
+message PaginationResponse {
+  // Token for the next page. Empty if no more results.
+  string next_page_token = 1;
+  // Total number of results available.
+  int64 total_count = 2;
+}
+
+// Labels is a set of key-value metadata pairs.
+message Labels {
+  map<string, string> entries = 1;
+}
+
+// TimeRange represents a time window for queries.
+message TimeRange {
+  google.protobuf.Timestamp start_time = 1;
+  google.protobuf.Timestamp end_time = 2;
+}
+
+// Error represents a structured error response.
+message Error {
+  // Machine-readable error code.
+  string code = 1;
+  // Human-readable error message.
+  string message = 2;
+  // Additional error details.
+  map<string, string> details = 3;
+}
+
+// HealthStatus represents the health state of a component.
+enum HealthStatus {
+  HEALTH_STATUS_UNSPECIFIED = 0;
+  HEALTH_STATUS_HEALTHY = 1;
+  HEALTH_STATUS_DEGRADED = 2;
+  HEALTH_STATUS_UNHEALTHY = 3;
+  HEALTH_STATUS_UNKNOWN = 4;
+}
+
+// Severity represents alert/event severity levels.
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  SEVERITY_CRITICAL = 1;
+  SEVERITY_HIGH = 2;
+  SEVERITY_MEDIUM = 3;
+  SEVERITY_LOW = 4;
+  SEVERITY_INFO = 5;
+}
+
+// AgentCapabilities describes what an agent can collect.
+message AgentCapabilities {
+  bool has_metal_scraper = 1;
+  bool has_ebpf_observer = 2;
+  bool has_supervisor = 3;
+  bool has_sdk = 4;
+  // Supported compression algorithms.
+  repeated string supported_compression = 5;
+  // Agent platform info.
+  string os = 6;
+  string arch = 7;
+}

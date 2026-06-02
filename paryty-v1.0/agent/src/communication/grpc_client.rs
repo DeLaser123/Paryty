@@ -1,0 +1,436 @@
+#![allow(dead_code)]
+
+//! gRPC Client for Paryty Agent
+//!
+//! Manages the bidirectional gRPC stream to the Paryty Cluster.
+//! Uses tonic for the gRPC transport layer with prost for serialization.
+//!
+//! The client wraps the proto-generated `IngestionServiceClient` and manages
+//! its lifecycle through a connection state machine. All proto RPCs
+//! (RegisterAgent, SendBatch, Heartbeat, StreamMetrics) are exposed as typed
+//! methods that delegate to the underlying tonic client.
+
+use anyhow::{Context, Result};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
+use tokio::sync::{mpsc, Mutex, RwLock};
+use tonic::transport::{Channel, Endpoint};
+use tracing::{debug, info};
+
+use crate::config::Config;
+use crate::proto::paryty::v1::ingestion_service_client::IngestionServiceClient;
+use crate::proto::paryty::v1::{
+    AgentRegistration, AgentRegistrationResponse, AgentToCluster, ClusterToAgent, HeartbeatRequest,
+    HeartbeatResponse, MetricBatch, SendBatchResponse,
+};
+
+/// Connection state for the gRPC client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ConnectionState {
+    Disconnected,
+    Connecting,
+    Connected,
+    Reconnecting,
+}
+
+/// Metrics tracked by the gRPC client.
+#[derive(Debug, Default)]
+pub struct ClientMetrics {
+    pub messages_sent: AtomicU64,
+    pub messages_received: AtomicU64,
+    pub bytes_sent: AtomicU64,
+    pub bytes_received: AtomicU64,
+    pub reconnection_count: AtomicU64,
+    pub errors: AtomicU64,
+}
+
+/// The main gRPC client for communicating with the Paryty Cluster.
+///
+/// Wraps the proto-generated `IngestionServiceClient` behind a connection
+/// state machine. The proto client is lazily created on the first `connect()`
+/// call and destroyed on `disconnect()`.
+pub struct GrpcClient {
+    /// Cluster endpoint URL (e.g. "http://cluster:50051").
+    endpoint: String,
+    /// Whether TLS is enabled for the connection.
+    tls_enabled: bool,
+    /// Current connection state.
+    state: Arc<RwLock<ConnectionState>>,
+    /// The gRPC channel (if connected).
+    channel: Arc<Mutex<Option<Channel>>>,
+    /// The typed proto client (if connected).
+    ///
+    /// Uses `tokio::sync::Mutex` because RPC methods require `&mut self`
+    /// and are async. Lock is held only for the duration of each RPC call.
+    client: Arc<Mutex<Option<IngestionServiceClient<Channel>>>>,
+    /// Stored tonic Endpoint for creating separate streaming connections.
+    ///
+    /// The StreamMetrics bidirectional RPC holds its connection's tower buffer
+    /// worker for the entire stream lifetime, blocking send_batch/heartbeat.
+    /// By creating a separate connection for streaming, unary RPCs stay free.
+    endpoint_config: Arc<Mutex<Option<Endpoint>>>,
+    /// Whether the client should be running.
+    running: Arc<AtomicBool>,
+    /// Client metrics.
+    metrics: Arc<ClientMetrics>,
+    /// Channel for sending messages to the stream.
+    tx: mpsc::Sender<Vec<u8>>,
+    /// Channel for receiving messages from the stream.
+    rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
+}
+
+impl GrpcClient {
+    /// Create a new gRPC client from the full agent configuration.
+    ///
+    /// Extracts the cluster endpoint and TLS setting from the config.
+    pub fn new(config: &Config) -> Self {
+        let endpoint = config.agent.cluster_endpoint.clone();
+        let tls_enabled = config.communication.tls.enabled;
+        let (tx, rx) = mpsc::channel(1024);
+
+        Self {
+            endpoint,
+            tls_enabled,
+            state: Arc::new(RwLock::new(ConnectionState::Disconnected)),
+            channel: Arc::new(Mutex::new(None)),
+            client: Arc::new(Mutex::new(None)),
+            endpoint_config: Arc::new(Mutex::new(None)),
+            running: Arc::new(AtomicBool::new(false)),
+            metrics: Arc::new(ClientMetrics::default()),
+            tx,
+            rx: Arc::new(Mutex::new(rx)),
+        }
+    }
+
+    /// Create a new gRPC client with a specific endpoint (TLS disabled).
+    ///
+    /// Useful for testing and manual configuration.
+    pub fn with_endpoint(endpoint: &str) -> Self {
+        let (tx, rx) = mpsc::channel(1024);
+
+        Self {
+            endpoint: endpoint.to_string(),
+            tls_enabled: false,
+            state: Arc::new(RwLock::new(ConnectionState::Disconnected)),
+            channel: Arc::new(Mutex::new(None)),
+            client: Arc::new(Mutex::new(None)),
+            endpoint_config: Arc::new(Mutex::new(None)),
+            running: Arc::new(AtomicBool::new(false)),
+            metrics: Arc::new(ClientMetrics::default()),
+            tx,
+            rx: Arc::new(Mutex::new(rx)),
+        }
+    }
+
+    /// Connect to the cluster and create the typed proto client.
+    ///
+    /// Creates a `Channel` via `tonic::transport::Endpoint`, wraps it in an
+    /// `IngestionServiceClient`, and enables Gzip compression for outgoing
+    /// requests. On success the state machine transitions to `Connected`.
+    pub async fn connect(&self) -> Result<()> {
+        info!(endpoint = %self.endpoint, "Connecting to cluster");
+        *self.state.write().await = ConnectionState::Connecting;
+
+        // Build the endpoint with transport-level settings.
+        // Prepend http:// if no scheme is present (config may use bare host:port).
+        let endpoint_uri = if self.endpoint.contains("://") {
+            self.endpoint.clone()
+        } else {
+            format!("http://{}", self.endpoint)
+        };
+        let mut endpoint = Endpoint::from_shared(endpoint_uri)
+            .context("Invalid endpoint URL")?
+            .timeout(std::time::Duration::from_secs(60))
+            .keep_alive_timeout(std::time::Duration::from_secs(10))
+            .keep_alive_while_idle(true);
+
+        // Configure TLS if enabled.
+        if self.tls_enabled {
+            let tls_config = tonic::transport::ClientTlsConfig::new();
+            endpoint = endpoint.tls_config(tls_config).context("Failed to configure TLS")?;
+            debug!("TLS enabled for cluster connection");
+        }
+
+        // Establish the transport channel.
+        let channel = endpoint.connect().await.context("Failed to connect to cluster")?;
+
+        // Create the typed proto client with Gzip compression for outgoing requests.
+        let proto_client = IngestionServiceClient::new(channel.clone());
+
+        // Store the client and channel, update state.
+        *self.client.lock().await = Some(proto_client);
+        *self.channel.lock().await = Some(channel);
+        *self.endpoint_config.lock().await = Some(endpoint);
+        *self.state.write().await = ConnectionState::Connected;
+        self.running.store(true, Ordering::Release);
+
+        info!("Connected to cluster successfully");
+        Ok(())
+    }
+
+    /// Disconnect from the cluster and destroy the proto client.
+    pub async fn disconnect(&self) {
+        info!("Disconnecting from cluster");
+        self.running.store(false, Ordering::Release);
+        *self.client.lock().await = None;
+        *self.channel.lock().await = None;
+        *self.endpoint_config.lock().await = None;
+        *self.state.write().await = ConnectionState::Disconnected;
+        info!("Disconnected from cluster");
+    }
+
+    /// Get the current connection state.
+    pub async fn state(&self) -> ConnectionState {
+        *self.state.read().await
+    }
+
+    /// Check if the client is connected.
+    pub async fn is_connected(&self) -> bool {
+        *self.state.read().await == ConnectionState::Connected
+    }
+
+    /// Get the cluster endpoint URL.
+    pub fn endpoint(&self) -> &str {
+        &self.endpoint
+    }
+
+    /// Get the sender for the message channel.
+    pub fn sender(&self) -> mpsc::Sender<Vec<u8>> {
+        self.tx.clone()
+    }
+
+    /// Get client metrics.
+    pub fn metrics(&self) -> &ClientMetrics {
+        &self.metrics
+    }
+
+    // ── Proto RPC Methods ──────────────────────────────────────────────
+
+    /// Register this agent with the cluster.
+    ///
+    /// Sends an `AgentRegistration` message and returns the server's
+    /// `AgentRegistrationResponse` containing the session ID and any
+    /// server-pushed configuration.
+    pub async fn register_agent(
+        &self,
+        registration: AgentRegistration,
+    ) -> Result<AgentRegistrationResponse> {
+        let mut guard = self.client.lock().await;
+        let client = guard.as_mut().context("Not connected: proto client unavailable")?;
+
+        let response = client
+            .register_agent(registration)
+            .await
+            .map_err(|status| anyhow::anyhow!("RegisterAgent RPC failed: {}", status))?;
+
+        self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
+        debug!("Agent registered successfully");
+
+        Ok(response.into_inner())
+    }
+
+    /// Send a single metric batch to the cluster (unary RPC).
+    ///
+    /// Returns the `SendBatchResponse` indicating whether the batch was
+    /// accepted, the server-assigned batch ID, and a server timestamp.
+    pub async fn send_batch(&self, batch: MetricBatch) -> Result<SendBatchResponse> {
+        let mut guard = self.client.lock().await;
+        let client = guard.as_mut().context("Not connected: proto client unavailable")?;
+
+        let response = client
+            .send_batch(batch)
+            .await
+            .map_err(|status| anyhow::anyhow!("SendBatch RPC failed: {}", status))?;
+
+        self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
+        debug!("Metric batch sent successfully");
+
+        Ok(response.into_inner())
+    }
+
+    /// Send a heartbeat to the cluster.
+    ///
+    /// Returns the `HeartbeatResponse` containing server time for clock
+    /// synchronization, a `continue_sending` flag, and any pending commands.
+    pub async fn heartbeat(&self, request: HeartbeatRequest) -> Result<HeartbeatResponse> {
+        let mut guard = self.client.lock().await;
+        let client = guard.as_mut().context("Not connected: proto client unavailable")?;
+
+        let response = client
+            .heartbeat(request)
+            .await
+            .map_err(|status| anyhow::anyhow!("Heartbeat RPC failed: {}", status))?;
+
+        self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
+        self.metrics.messages_received.fetch_add(1, Ordering::Relaxed);
+        debug!("Heartbeat acknowledged");
+
+        Ok(response.into_inner())
+    }
+
+    /// Open a bidirectional streaming RPC for real-time metric exchange.
+    ///
+    /// Returns a sender for `AgentToCluster` messages and a receiver for
+    /// `ClusterToAgent` responses. The caller should spawn a task to drive
+    /// each direction.
+    ///
+    /// Uses a **separate** gRPC channel so the streaming RPC's tower buffer
+    /// worker doesn't block unary RPCs (send_batch, heartbeat) on the main client.
+    ///
+    /// # Stream Protocol
+    /// - Agent sends: `MetricBatch`, `NetworkEventBatch`, `HeartbeatRequest`, `ConfigUpdateRequest`
+    /// - Cluster sends: `FlowControl`, `ConfigPush`, `AgentCommand`, `HeartbeatResponse`
+    pub async fn stream_metrics(
+        &self,
+    ) -> Result<(mpsc::Sender<AgentToCluster>, tonic::Streaming<ClusterToAgent>)> {
+        // Reuse the existing gRPC channel (HTTP/2 multiplexing).
+        // Creating a separate connection was timing out in WSL2 environments.
+        let channel = {
+            let guard = self.channel.lock().await;
+            guard.clone().context("Not connected: channel unavailable")?
+        };
+        let mut stream_client = IngestionServiceClient::new(channel);
+
+        // Create a channel that the caller will use to send AgentToCluster messages.
+        let (tx, rx) = mpsc::channel::<AgentToCluster>(256);
+
+        // Convert the tokio mpsc receiver into a stream for tonic.
+        let outbound = tokio_stream::wrappers::ReceiverStream::new(rx);
+
+        let response = stream_client
+            .stream_metrics(outbound)
+            .await
+            .map_err(|status| anyhow::anyhow!("StreamMetrics RPC failed: {}", status))?;
+
+        let inbound = response.into_inner();
+        info!("Bidirectional metric stream opened (reused channel)");
+
+        Ok((tx, inbound))
+    }
+
+    // ── Raw Byte Channel (Legacy) ──────────────────────────────────────
+
+    /// Send raw data through the gRPC stream.
+    ///
+    /// Queues data for sending via the mpsc channel. The actual gRPC
+    /// streaming happens when the connection is established.
+    pub async fn send(&self, data: Vec<u8>) -> Result<()> {
+        if !self.is_connected().await {
+            anyhow::bail!("Not connected to cluster");
+        }
+
+        self.tx.send(data).await.map_err(|_| anyhow::anyhow!("Channel closed"))?;
+        self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
+        Ok(())
+    }
+
+    /// Get the channel (if connected).
+    pub async fn channel(&self) -> Option<Channel> {
+        self.channel.lock().await.clone()
+    }
+
+    /// Set the connection state (used by reconnection engine).
+    pub async fn set_state(&self, state: ConnectionState) {
+        *self.state.write().await = state;
+    }
+}
+
+impl Clone for GrpcClient {
+    fn clone(&self) -> Self {
+        let (tx, rx) = mpsc::channel(1024);
+        Self {
+            endpoint: self.endpoint.clone(),
+            tls_enabled: self.tls_enabled,
+            state: Arc::clone(&self.state),
+            channel: Arc::clone(&self.channel),
+            client: Arc::clone(&self.client),
+            endpoint_config: Arc::clone(&self.endpoint_config),
+            running: Arc::clone(&self.running),
+            metrics: Arc::clone(&self.metrics),
+            tx,
+            rx: Arc::new(Mutex::new(rx)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verify the connection state machine transitions correctly
+    /// through Disconnected → Connecting → Connected → Disconnected.
+    #[tokio::test]
+    async fn test_connection_state_transitions() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+
+        // Initial state: Disconnected
+        assert_eq!(client.state().await, ConnectionState::Disconnected);
+        assert!(!client.is_connected().await);
+
+        // Transition to Connecting
+        client.set_state(ConnectionState::Connecting).await;
+        assert_eq!(client.state().await, ConnectionState::Connecting);
+        assert!(!client.is_connected().await);
+
+        // Transition to Connected
+        client.set_state(ConnectionState::Connected).await;
+        assert_eq!(client.state().await, ConnectionState::Connected);
+        assert!(client.is_connected().await);
+
+        // Transition to Reconnecting
+        client.set_state(ConnectionState::Reconnecting).await;
+        assert_eq!(client.state().await, ConnectionState::Reconnecting);
+        assert!(!client.is_connected().await);
+
+        // Back to Disconnected
+        client.set_state(ConnectionState::Disconnected).await;
+        assert_eq!(client.state().await, ConnectionState::Disconnected);
+        assert!(!client.is_connected().await);
+    }
+
+    /// Verify the endpoint is stored correctly and returned by the accessor.
+    #[test]
+    fn test_endpoint_stored() {
+        let endpoint = "http://cluster.paryty.local:50051";
+        let client = GrpcClient::with_endpoint(endpoint);
+        assert_eq!(client.endpoint(), endpoint);
+    }
+
+    /// Verify TLS flag defaults to false in with_endpoint constructor.
+    #[test]
+    fn test_tls_disabled_by_default_in_with_endpoint() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+        assert!(!client.tls_enabled);
+    }
+
+    /// Verify that clone shares the same state and client references.
+    #[tokio::test]
+    async fn test_clone_shares_state() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+        client.set_state(ConnectionState::Connected).await;
+
+        let cloned = client.clone();
+        assert_eq!(cloned.state().await, ConnectionState::Connected);
+        assert_eq!(cloned.endpoint(), client.endpoint());
+    }
+
+    /// Verify proto methods return an error when not connected.
+    #[tokio::test]
+    async fn test_rpc_fails_when_disconnected() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+
+        let registration = AgentRegistration {
+            agent_id: "test-agent".to_string(),
+            hostname: "test-host".to_string(),
+            ip_addresses: vec![],
+            version: "0.1.0".to_string(),
+            capabilities: None,
+            labels: None,
+            started_at: None,
+        };
+
+        let result = client.register_agent(registration).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Not connected"));
+    }
+}

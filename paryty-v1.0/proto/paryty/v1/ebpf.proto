@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+
+// NetworkEvent is a network-level observation from eBPF.
+message NetworkEvent {
+  // When the event was captured.
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Event type.
+  oneof event {
+    TcpConnectionEvent tcp_connection = 2;
+    DnsQueryEvent dns_query = 3;
+    HttpRequestEvent http_request = 4;
+    DbQueryEvent db_query = 5;
+  }
+}
+
+// TcpConnectionEvent represents a TCP connection lifecycle event.
+message TcpConnectionEvent {
+  // Event type.
+  TcpEventType type = 1;
+  // Source IP address.
+  string source_ip = 2;
+  // Source port.
+  int32 source_port = 3;
+  // Destination IP address.
+  string destination_ip = 4;
+  // Destination port.
+  int32 destination_port = 5;
+  // Connection state.
+  TcpState state = 6;
+  // Duration of the connection (for close events).
+  int64 duration_ms = 7;
+  // Bytes sent on this connection.
+  int64 bytes_sent = 8;
+  // Bytes received on this connection.
+  int64 bytes_received = 9;
+  // PID of the process that owns this connection.
+  int32 pid = 10;
+  // Process name.
+  string process_name = 11;
+}
+
+// TcpEventType describes what happened to a TCP connection.
+enum TcpEventType {
+  TCP_EVENT_TYPE_UNSPECIFIED = 0;
+  TCP_EVENT_TYPE_CONNECT = 1;
+  TCP_EVENT_TYPE_ACCEPT = 2;
+  TCP_EVENT_TYPE_CLOSE = 3;
+  TCP_EVENT_TYPE_RESET = 4;
+}
+
+// TcpState represents the state of a TCP connection.
+enum TcpState {
+  TCP_STATE_UNSPECIFIED = 0;
+  TCP_STATE_ESTABLISHED = 1;
+  TCP_STATE_SYN_SENT = 2;
+  TCP_STATE_SYN_RECEIVED = 3;
+  TCP_STATE_FIN_WAIT_1 = 4;
+  TCP_STATE_FIN_WAIT_2 = 5;
+  TCP_STATE_TIME_WAIT = 6;
+  TCP_STATE_CLOSE_WAIT = 7;
+  TCP_STATE_LAST_ACK = 8;
+  TCP_STATE_CLOSING = 9;
+  TCP_STATE_LISTEN = 10;
+}
+
+// DnsQueryEvent represents a DNS resolution event.
+message DnsQueryEvent {
+  // Query name (e.g., "api.example.com").
+  string query_name = 1;
+  // Query type (A, AAAA, CNAME, etc.).
+  string query_type = 2;
+  // Resolved IP addresses.
+  repeated string resolved_ips = 3;
+  // Response code (NOERROR, NXDOMAIN, etc.).
+  string response_code = 4;
+  // Time to live in seconds.
+  int32 ttl_seconds = 5;
+  // Query latency in milliseconds.
+  double latency_ms = 6;
+  // PID of the process that made the query.
+  int32 pid = 7;
+  // Process name.
+  string process_name = 8;
+}
+
+// HttpRequestEvent represents an HTTP request/response pair.
+message HttpRequestEvent {
+  // HTTP method (GET, POST, etc.).
+  string method = 1;
+  // Request path.
+  string path = 2;
+  // HTTP version (1.1, 2.0).
+  string http_version = 3;
+  // Response status code.
+  int32 status_code = 4;
+  // Request latency in milliseconds.
+  double latency_ms = 5;
+  // Request content length in bytes.
+  int64 request_bytes = 6;
+  // Response content length in bytes.
+  int64 response_bytes = 7;
+  // Source IP.
+  string source_ip = 8;
+  // Destination IP.
+  string destination_ip = 9;
+  // Destination port.
+  int32 destination_port = 10;
+  // PID of the process.
+  int32 pid = 11;
+  // Process name.
+  string process_name = 12;
+  // Host header value.
+  string host = 13;
+  // User agent.
+  string user_agent = 14;
+}
+
+// DbQueryEvent represents a database query event.
+message DbQueryEvent {
+  // Database protocol (postgresql, mysql, redis).
+  string protocol = 1;
+  // Query/command text (truncated to 1KB).
+  string query = 2;
+  // Query type (SELECT, INSERT, UPDATE, DELETE, etc.).
+  string query_type = 3;
+  // Target database name.
+  string database = 4;
+  // Query latency in milliseconds.
+  double latency_ms = 5;
+  // Number of rows affected/returned.
+  int64 row_count = 6;
+  // Error message (if query failed).
+  string error_message = 7;
+  // Source IP.
+  string source_ip = 8;
+  // Destination IP.
+  string destination_ip = 9;
+  // Destination port.
+  int32 destination_port = 10;
+  // PID of the process.
+  int32 pid = 11;
+  // Process name.
+  string process_name = 12;
+}

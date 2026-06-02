@@ -1,0 +1,161 @@
+# Paryty CD Pipeline
+# Builds and pushes container images on main branch
+
+name: CD
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/paryty
+
+jobs:
+  # ──────────────────────────────────────────────────────────────
+  # Build Container Images
+  # ──────────────────────────────────────────────────────────────
+  build-cluster:
+    name: Build Cluster Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-cluster
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - uses: docker/build-push-action@v5
+        with:
+          context: cluster
+          file: deploy/docker/Dockerfile.cluster
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  build-frontend:
+    name: Build Frontend Image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/metadata-action@v5
+        id: meta
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+      - uses: docker/build-push-action@v5
+        with:
+          context: frontend
+          file: deploy/docker/Dockerfile.frontend
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ──────────────────────────────────────────────────────────────
+  # Deploy to Dev (Automatic on main)
+  # ──────────────────────────────────────────────────────────────
+  deploy-dev:
+    name: Deploy to Dev
+    runs-on: ubuntu-latest
+    needs: [build-cluster, build-frontend]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment: dev
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_DEV }}" | base64 -d > $HOME/.kube/config
+      - name: Deploy to dev
+        run: kubectl apply -k deploy/kubernetes/overlays/dev/
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/paryty-cluster -n paryty-dev --timeout=120s
+          kubectl rollout status deployment/paryty-frontend -n paryty-dev --timeout=120s
+
+  # ──────────────────────────────────────────────────────────────
+  # Deploy to Staging (Manual approval)
+  # ──────────────────────────────────────────────────────────────
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: deploy-dev
+    environment: staging
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+      - name: Deploy to staging
+        run: kubectl apply -k deploy/kubernetes/overlays/staging/
+      - name: Verify deployment
+        run: |
+          kubectl rollout status deployment/paryty-cluster -n paryty-staging --timeout=120s
+          kubectl rollout status deployment/paryty-frontend -n paryty-staging --timeout=120s
+
+  # ──────────────────────────────────────────────────────────────
+  # Deploy to Production (Manual approval + Canary)
+  # ──────────────────────────────────────────────────────────────
+  deploy-prod:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    environment: prod
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v3
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > $HOME/.kube/config
+      - name: Deploy canary (10% traffic)
+        run: |
+          kubectl apply -k deploy/kubernetes/overlays/prod/
+          kubectl scale deployment/paryty-cluster-canary -n paryty-prod --replicas=1
+      - name: Monitor canary (5 min)
+        run: |
+          sleep 300
+          kubectl logs -n paryty-prod -l app=paryty-cluster,track=canary --tail=100
+      - name: Promote canary to stable
+        run: |
+          kubectl scale deployment/paryty-cluster -n paryty-prod --replicas=3
+          kubectl scale deployment/paryty-cluster-canary -n paryty-prod --replicas=0

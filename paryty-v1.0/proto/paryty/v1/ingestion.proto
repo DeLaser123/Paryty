@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "paryty/v1/common.proto";
+import "paryty/v1/agent.proto";
+import "paryty/v1/ebpf.proto";
+
+// ============================================================================
+// Ingestion Service — Agent-to-Cluster communication
+// ============================================================================
+
+// IngestionService is the gRPC service for agent data ingestion.
+service IngestionService {
+  // RegisterAgent registers a new agent with the cluster.
+  rpc RegisterAgent(AgentRegistration) returns (AgentRegistrationResponse);
+
+  // StreamMetrics opens a bidirectional stream for real-time metric exchange.
+  // Agent sends MetricBatch, cluster sends FlowControl messages.
+  rpc StreamMetrics(stream AgentToCluster) returns (stream ClusterToAgent);
+
+  // SendBatch sends a single metric batch (unary, for low-frequency data).
+  rpc SendBatch(MetricBatch) returns (SendBatchResponse);
+
+  // ReportNetworkEvents sends eBPF network events.
+  rpc ReportNetworkEvents(stream NetworkEventBatch) returns (NetworkEventResponse);
+
+  // Heartbeat keeps the connection alive and reports agent health.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+// AgentToCluster is a message from agent to cluster in the bidirectional stream.
+message AgentToCluster {
+  oneof message {
+    // A batch of metrics.
+    MetricBatch metrics = 1;
+    // A batch of network events.
+    NetworkEventBatch network_events = 2;
+    // A heartbeat ping.
+    HeartbeatRequest heartbeat = 3;
+    // Agent config update request.
+    AgentConfigUpdateRequest config_update = 4;
+  }
+}
+
+// ClusterToAgent is a message from cluster to agent in the bidirectional stream.
+message ClusterToAgent {
+  oneof message {
+    // Flow control signal.
+    FlowControl flow_control = 1;
+    // Config push from cluster.
+    AgentConfig config_push = 2;
+    // Server-side command.
+    AgentCommand command = 3;
+    // Heartbeat response.
+    HeartbeatResponse heartbeat = 4;
+  }
+}
+
+// NetworkEventBatch wraps multiple network events.
+message NetworkEventBatch {
+  // Agent identifier.
+  string agent_id = 1;
+  // Session identifier.
+  string session_id = 2;
+  // Batch sequence number.
+  int64 sequence_number = 3;
+  // When the batch was created.
+  google.protobuf.Timestamp timestamp = 4;
+  // Network events in this batch.
+  repeated NetworkEvent events = 5;
+}
+
+// NetworkEventResponse is the response after receiving network events.
+message NetworkEventResponse {
+  // Number of events accepted.
+  int64 accepted_count = 1;
+  // Number of events rejected.
+  int64 rejected_count = 2;
+  // Rejection reasons (keyed by event index).
+  map<int32, string> rejection_reasons = 3;
+}
+
+// SendBatchResponse is the response after receiving a metric batch.
+message SendBatchResponse {
+  // Whether the batch was accepted.
+  bool accepted = 1;
+  // Server-assigned batch ID for tracking.
+  string batch_id = 2;
+  // Error details (if not accepted).
+  Error error = 3;
+  // Server timestamp.
+  google.protobuf.Timestamp server_time = 4;
+}
+
+// FlowControl is a signal from cluster to agent for rate control.
+message FlowControl {
+  // Desired collection interval in milliseconds (0 = keep current).
+  int32 desired_interval_ms = 1;
+  // Sampling rate (0.0 = keep current, 1.0 = full collection).
+  float sampling_rate = 2;
+  // Whether the agent should pause sending.
+  bool pause = 3;
+  // Reason for the flow control signal.
+  string reason = 4;
+}
+
+// AgentCommand is a command from cluster to agent.
+message AgentCommand {
+  // Command type.
+  AgentCommandType type = 1;
+  // Command-specific payload.
+  string payload = 2;
+}
+
+// AgentCommandType defines commands the cluster can send to agents.
+enum AgentCommandType {
+  AGENT_COMMAND_TYPE_UNSPECIFIED = 0;
+  // Agent should restart collection.
+  AGENT_COMMAND_TYPE_RESTART = 1;
+  // Agent should update its configuration.
+  AGENT_COMMAND_TYPE_UPDATE_CONFIG = 2;
+  // Agent should flush its edge buffer.
+  AGENT_COMMAND_TYPE_FLUSH_BUFFER = 3;
+  // Agent should enable/disable a specific layer.
+  AGENT_COMMAND_TYPE_TOGGLE_LAYER = 4;
+}
+
+// HeartbeatRequest is sent by the agent periodically.
+message HeartbeatRequest {
+  // Agent identifier.
+  string agent_id = 1;
+  // Session identifier.
+  string session_id = 2;
+  // Agent uptime in seconds.
+  int64 uptime_seconds = 3;
+  // Edge buffer size in bytes.
+  int64 edge_buffer_bytes = 4;
+  // Edge buffer entry count.
+  int64 edge_buffer_count = 5;
+  // Agent self-metrics.
+  AgentSelfMetrics self_metrics = 6;
+}
+
+// HeartbeatResponse is returned by the cluster.
+message HeartbeatResponse {
+  // Server time for clock synchronization.
+  google.protobuf.Timestamp server_time = 1;
+  // Whether the agent should continue.
+  bool continue_sending = 2;
+  // Any pending commands.
+  repeated AgentCommand pending_commands = 3;
+}
+
+// AgentConfigUpdateRequest is sent by agent when it wants config changes.
+message AgentConfigUpdateRequest {
+  // Current agent version.
+  string agent_version = 1;
+  // Requested config changes.
+  map<string, string> requested_changes = 2;
+}

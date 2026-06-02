@@ -1,0 +1,42 @@
+# Buf code generation configuration for Paryty
+# Generates code for Rust (prost/tonic), Go (protobuf-go), TypeScript (protobuf-es)
+
+version: v2
+plugins:
+  # Rust - prost for message types
+  - remote: buf.build/prost/prost
+    out: agent/src/proto
+    opt:
+      - bytes=.
+      - compile_well_known_types
+      - extern_path=.google.protobuf=::prost_types
+
+  # Rust - tonic for gRPC services
+  - remote: buf.build/prost/tonic
+    out: agent/src/proto
+    opt:
+      - compile_well_known_types
+
+  # Go - protobuf-go for message types
+  - remote: buf.build/protocolbuffers/go
+    out: cluster/internal/proto
+    opt:
+      - paths=source_relative
+
+  # Go - grpc-go for gRPC services
+  - remote: buf.build/grpc/go
+    out: cluster/internal/proto
+    opt:
+      - paths=source_relative
+
+  # TypeScript - protobuf-es for message types
+  - remote: buf.build/bufbuild/es
+    out: frontend/src/proto
+    opt:
+      - target=ts
+
+  # TypeScript - connect-es for gRPC-web
+  - remote: buf.build/bufbuild/connect-es
+    out: frontend/src/proto
+    opt:
+      - target=ts

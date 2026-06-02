@@ -1,0 +1,41 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: paryty
+  namespace: argocd
+spec:
+  description: Paryty Observability Platform
+
+  sourceRepos:
+    - 'https://github.com/paryty/paryty-v1.0.git'
+
+  destinations:
+    - namespace: paryty-dev
+      server: https://kubernetes.default.svc
+    - namespace: paryty-staging
+      server: https://kubernetes.default.svc
+    - namespace: paryty-prod
+      server: https://kubernetes.default.svc
+
+  clusterResourceWhitelist:
+    - group: ''
+      kind: Namespace
+
+  namespaceResourceWhitelist:
+    - group: ''
+      kind: '*'
+    - group: apps
+      kind: '*'
+    - group: networking.k8s.io
+      kind: '*'
+
+  roles:
+    - name: developer
+      description: Developer access to dev environment
+      policies:
+        - p, proj:paryty:developer, applications, get, paryty/*, allow
+        - p, proj:paryty:developer, applications, sync, paryty/paryty-dev, allow
+    - name: admin
+      description: Admin access to all environments
+      policies:
+        - p, proj:paryty:admin, applications, *, paryty/*, allow

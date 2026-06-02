@@ -1,0 +1,157 @@
+# simulated-services.yaml - M9: Simulated Client Environment
+#
+# A realistic microservice stack for testing Paryty's topology inference,
+# network monitoring, and service discovery capabilities.
+#
+# Services:
+#   nginx         - Reverse proxy / load balancer
+#   api-gateway   - Go API gateway service
+#   user-service  - User management microservice
+#   order-service - Order processing microservice
+#   payment-service - Payment processing microservice
+#   postgres      - Primary database
+#   redis         - Cache layer
+#   rabbitmq      - Message queue
+#
+# Usage:
+#   podman-compose -f tests/deploy/simulated-services.yaml up -d
+
+version: '3.8'
+
+services:
+  # --- Load Balancer ---
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "8090:80"
+    volumes:
+      - ./nginx-sim.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - api-gateway
+    networks:
+      - paryty-sim
+
+  # --- Application Services ---
+  api-gateway:
+    image: nginx:alpine
+    ports:
+      - "8091:80"
+    environment:
+      SERVICE_NAME: api-gateway
+      UPSTREAM_SERVICES: "user-service:8080,order-service:8080"
+    networks:
+      - paryty-sim
+    depends_on:
+      - user-service
+      - order-service
+
+  user-service:
+    image: nginx:alpine
+    ports:
+      - "8092:80"
+    environment:
+      SERVICE_NAME: user-service
+      DATABASE_URL: "postgres://paryty:paryty@postgres:5432/users"
+      REDIS_URL: "redis://redis:6379/0"
+    networks:
+      - paryty-sim
+    depends_on:
+      - postgres
+      - redis
+
+  order-service:
+    image: nginx:alpine
+    ports:
+      - "8093:80"
+    environment:
+      SERVICE_NAME: order-service
+      DATABASE_URL: "postgres://paryty:paryty@postgres:5432/orders"
+      PAYMENT_SERVICE_URL: "http://payment-service:8080"
+      RABBITMQ_URL: "amqp://guest:guest@rabbitmq:5672"
+    networks:
+      - paryty-sim
+    depends_on:
+      - postgres
+      - payment-service
+      - rabbitmq
+
+  payment-service:
+    image: nginx:alpine
+    ports:
+      - "8094:80"
+    environment:
+      SERVICE_NAME: payment-service
+      DATABASE_URL: "postgres://paryty:paryty@postgres:5432/payments"
+    networks:
+      - paryty-sim
+    depends_on:
+      - postgres
+
+  # --- Data Stores ---
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: paryty
+      POSTGRES_USER: paryty
+      POSTGRES_PASSWORD: paryty
+    volumes:
+      - sim-postgres-data:/var/lib/postgresql/data
+      - ./init-sim-db.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - paryty-sim
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6380:6379"
+    volumes:
+      - sim-redis-data:/data
+    networks:
+      - paryty-sim
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    ports:
+      - "5673:5672"
+      - "15673:15672"  # Management UI
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - sim-rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - paryty-sim
+
+  # --- Load Generator ---
+  load-generator:
+    image: alpine:latest
+    networks:
+      - paryty-sim
+    depends_on:
+      - nginx
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        apk add --no-cache curl
+        echo "Starting load generator..."
+        while true; do
+          # Simulate API requests
+          for path in /api/users /api/orders /api/payments /health; do
+            curl -s -o /dev/null -w "%{http_code}" "http://nginx:80${path}" 2>/dev/null || true
+            sleep 0.1
+          done
+          # Vary request rate
+          sleep $$(shuf -i 1-5 -n 1)
+        done
+
+networks:
+  paryty-sim:
+    driver: bridge
+
+volumes:
+  sim-postgres-data:
+  sim-redis-data:
+  sim-rabbitmq-data:

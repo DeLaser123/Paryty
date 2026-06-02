@@ -1,0 +1,44 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: paryty-prod
+  namespace: argocd
+spec:
+  project: paryty
+
+  source:
+    repoURL: https://github.com/paryty/paryty-v1.0.git
+    targetRevision: main
+    path: deploy/kubernetes/overlays/prod
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: paryty-prod
+
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  healthChecks:
+    - kind: Deployment
+      name: paryty-cluster
+      namespace: paryty-prod
+    - kind: Deployment
+      name: paryty-frontend
+      namespace: paryty-prod
+    - kind: Deployment
+      name: paryty-ingestion
+      namespace: paryty-prod
+    - kind: Deployment
+      name: paryty-query
+      namespace: paryty-prod
+    - kind: DaemonSet
+      name: paryty-agent
+      namespace: paryty-prod

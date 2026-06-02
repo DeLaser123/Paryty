@@ -1,0 +1,3 @@
+# Clippy configuration for Paryty workspace.
+# Lint levels (e.g., clippy::unwrap_used) are set in lib.rs, not here.
+# This file configures clippy lint options only.

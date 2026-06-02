@@ -1,0 +1,299 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "paryty/v1/common.proto";
+import "paryty/v1/ebpf.proto";
+
+// ============================================================================
+// Agent Registration
+// ============================================================================
+
+// AgentRegistration is sent by an agent when it first connects.
+message AgentRegistration {
+  // Unique agent identifier (UUID).
+  string agent_id = 1;
+  // Hostname of the node.
+  string hostname = 2;
+  // IP addresses of the node.
+  repeated string ip_addresses = 3;
+  // Agent version (semver).
+  string version = 4;
+  // What the agent can collect.
+  AgentCapabilities capabilities = 5;
+  // Labels (e.g., environment=prod, region=us-east-1).
+  Labels labels = 6;
+  // When the agent started.
+  google.protobuf.Timestamp started_at = 7;
+}
+
+// AgentRegistrationResponse is returned by the cluster after registration.
+message AgentRegistrationResponse {
+  // Server-assigned session ID for this connection.
+  string session_id = 1;
+  // Server-provided configuration overrides.
+  AgentConfig config = 2;
+  // Server timestamp for clock synchronization.
+  google.protobuf.Timestamp server_time = 3;
+}
+
+// AgentConfig is pushed from cluster to agent.
+message AgentConfig {
+  // Collection interval override.
+  int32 collection_interval_ms = 1;
+  // Sampling rate (0.0 to 1.0).
+  float sampling_rate = 2;
+  // Whether metal scraper is enabled.
+  bool metal_enabled = 3;
+  // Whether eBPF observer is enabled.
+  bool ebpf_enabled = 4;
+  // Whether supervisor is enabled.
+  bool supervisor_enabled = 5;
+  // Compression algorithm to use.
+  string compression = 6;
+  // Maximum batch size before forced flush.
+  int32 max_batch_size = 7;
+  // Maximum batch age before forced flush (ms).
+  int32 max_batch_age_ms = 8;
+}
+
+// ============================================================================
+// Agent Telemetry Messages
+// ============================================================================
+
+// MetricBatch is the top-level message sent from agent to cluster.
+message MetricBatch {
+  // Agent identifier.
+  string agent_id = 1;
+  // Session identifier.
+  string session_id = 2;
+  // Batch sequence number (for deduplication and ordering).
+  int64 sequence_number = 3;
+  // When the batch was created.
+  google.protobuf.Timestamp timestamp = 4;
+
+  // Metal scraper metrics.
+  CpuMetric cpu = 10;
+  MemoryMetric memory = 11;
+  repeated DiskMetric disks = 12;
+  repeated NetworkMetric interfaces = 13;
+  repeated ProcessMetric processes = 14;
+  repeated ContainerMetric containers = 15;
+
+  // Supervisor data.
+  repeated HealthCheckResult health_checks = 20;
+  repeated LogEntry log_entries = 21;
+
+  // eBPF observation data.
+  repeated NetworkEvent network_events = 30;
+
+  // Agent self-metrics.
+  AgentSelfMetrics self_metrics = 40;
+}
+
+// CpuMetric contains CPU usage data.
+message CpuMetric {
+  // Total CPU usage percentage (0-100 per core).
+  double total_usage_percent = 1;
+  // Per-core usage percentages.
+  repeated double per_core_percent = 2;
+  // Load averages.
+  double load_average_1m = 3;
+  double load_average_5m = 4;
+  double load_average_15m = 5;
+  // CPU frequency in MHz.
+  double frequency_mhz = 6;
+  // Context switches since boot.
+  int64 context_switches = 7;
+}
+
+// MemoryMetric contains memory usage data.
+message MemoryMetric {
+  // Total physical memory in bytes.
+  int64 total_bytes = 1;
+  // Used memory in bytes.
+  int64 used_bytes = 2;
+  // Free memory in bytes.
+  int64 free_bytes = 3;
+  // Available memory in bytes.
+  int64 available_bytes = 4;
+  // Cached memory in bytes.
+  int64 cached_bytes = 5;
+  // Buffer memory in bytes.
+  int64 buffer_bytes = 6;
+  // Total swap in bytes.
+  int64 swap_total_bytes = 7;
+  // Used swap in bytes.
+  int64 swap_used_bytes = 8;
+  // Usage percentage (0-100).
+  double usage_percent = 9;
+}
+
+// DiskMetric contains disk usage and I/O data for one device.
+message DiskMetric {
+  // Device name (e.g., "sda", "nvme0n1").
+  string device_name = 1;
+  // Mount point (e.g., "/", "/data").
+  string mount_point = 2;
+  // Filesystem type (e.g., "ext4", "xfs").
+  string filesystem_type = 3;
+  // Total space in bytes.
+  int64 total_bytes = 4;
+  // Used space in bytes.
+  int64 used_bytes = 5;
+  // Free space in bytes.
+  int64 free_bytes = 6;
+  // Read operations per second.
+  double read_ops_per_sec = 7;
+  // Write operations per second.
+  double write_ops_per_sec = 8;
+  // Read throughput in bytes/sec.
+  double read_bytes_per_sec = 9;
+  // Write throughput in bytes/sec.
+  double write_bytes_per_sec = 10;
+  // Average I/O latency in milliseconds.
+  double io_latency_ms = 11;
+  // Queue depth.
+  double queue_depth = 12;
+}
+
+// NetworkMetric contains network usage data for one interface.
+message NetworkMetric {
+  // Interface name (e.g., "eth0", "lo").
+  string interface_name = 1;
+  // Received bytes per second.
+  double rx_bytes_per_sec = 2;
+  // Transmitted bytes per second.
+  double tx_bytes_per_sec = 3;
+  // Received packets per second.
+  double rx_packets_per_sec = 4;
+  // Transmitted packets per second.
+  double tx_packets_per_sec = 5;
+  // Receive errors.
+  int64 rx_errors = 6;
+  // Transmit errors.
+  int64 tx_errors = 7;
+  // Receive drops.
+  int64 rx_dropped = 8;
+  // Transmit drops.
+  int64 tx_dropped = 9;
+  // TCP retransmits.
+  int64 tcp_retransmits = 10;
+  // Estimated RTT in milliseconds.
+  double estimated_rtt_ms = 11;
+}
+
+// ProcessMetric contains per-process data.
+message ProcessMetric {
+  // Process ID.
+  int32 pid = 1;
+  // Parent PID (0 if none).
+  int32 parent_pid = 2;
+  // Process name.
+  string name = 3;
+  // Command line.
+  string command_line = 4;
+  // CPU usage percentage.
+  double cpu_usage_percent = 5;
+  // RSS memory in bytes.
+  int64 rss_bytes = 6;
+  // VSZ memory in bytes.
+  int64 vsz_bytes = 7;
+  // Process status (running, sleeping, stopped, zombie).
+  string status = 8;
+  // Number of threads.
+  int32 thread_count = 9;
+  // Number of open file descriptors.
+  int32 fd_count = 10;
+  // Container ID (empty if not in container).
+  string container_id = 11;
+  // Start time.
+  google.protobuf.Timestamp started_at = 12;
+}
+
+// ContainerMetric contains container detection data.
+message ContainerMetric {
+  // Container ID (from cgroup).
+  string container_id = 1;
+  // Container runtime (docker, podman, containerd).
+  string runtime = 2;
+  // Container name (if available).
+  string name = 3;
+  // Image name.
+  string image = 4;
+  // Container status.
+  string status = 5;
+  // cgroup version (v1 or v2).
+  string cgroup_version = 6;
+  // Container labels.
+  Labels labels = 7;
+  // Processes in this container.
+  repeated int32 pids = 8;
+}
+
+// ============================================================================
+// Supervisor Messages
+// ============================================================================
+
+// HealthCheckResult is the result of a single health check.
+message HealthCheckResult {
+  // Health check name.
+  string name = 1;
+  // Target URL/address.
+  string target = 2;
+  // Check type (http, tcp, grpc).
+  string check_type = 3;
+  // Result status.
+  HealthStatus status = 4;
+  // Response time in milliseconds.
+  double response_time_ms = 5;
+  // Error message (if unhealthy).
+  string error_message = 6;
+  // When the check was performed.
+  google.protobuf.Timestamp checked_at = 7;
+}
+
+// LogEntry is a log line captured by the supervisor.
+message LogEntry {
+  // Source file path.
+  string source = 1;
+  // Log level (INFO, WARN, ERROR, DEBUG).
+  string level = 2;
+  // Log message.
+  string message = 3;
+  // When the log was written.
+  google.protobuf.Timestamp timestamp = 4;
+  // Additional structured fields.
+  Labels fields = 5;
+}
+
+// ============================================================================
+// Agent Self-Metrics
+// ============================================================================
+
+// AgentSelfMetrics contains metrics about the agent itself.
+message AgentSelfMetrics {
+  // CPU usage of the agent process in percent.
+  double cpu_usage_percent = 1;
+  // RSS memory of the agent process in bytes.
+  int64 rss_bytes = 2;
+  // Number of goroutines/threads.
+  int32 thread_count = 3;
+  // Number of active connections.
+  int32 active_connections = 4;
+  // Edge buffer usage in bytes.
+  int64 edge_buffer_bytes = 5;
+  // Edge buffer entry count.
+  int64 edge_buffer_count = 6;
+  // Uptime in seconds.
+  int64 uptime_seconds = 7;
+  // Total batches sent.
+  int64 batches_sent = 8;
+  // Total bytes sent (after compression).
+  int64 bytes_sent = 9;
+  // Total compression ratio.
+  double compression_ratio = 10;
+}

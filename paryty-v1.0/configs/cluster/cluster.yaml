@@ -1,0 +1,163 @@
+﻿# Paryty Cluster Configuration
+
+cluster:
+  name: "paryty-prod"
+  tenant: "default"
+
+  # Ingestion layer
+  ingestion:
+    # Runtime connection config (read by internal/config package)
+    port: 50051
+    tls: false
+    max_connections: 10000
+    # Deployment topology
+    replicas: 3
+    resources:
+      cpu: "2"
+      memory: "4Gi"
+    grpc:
+      port: 443
+      tls: true
+      max_connections: 10000
+
+  # Stream engine (runtime connection config)
+  stream:
+    brokers:
+      - "localhost:9092"
+    client_id: "paryty-cluster"
+    topics:
+      - name: "paryty.metrics.raw"
+        partitions: 12
+        retention: "7d"
+      - name: "paryty.metrics.aggregated"
+        partitions: 6
+        retention: "30d"
+      - name: "paryty.traces"
+        partitions: 12
+        retention: "7d"
+      - name: "paryty.topology"
+        partitions: 3
+        retention: "90d"
+
+  # Stream engine (deployment topology)
+  stream_engine:
+    type: "redpanda"
+    replicas: 3
+    storage:
+      class: "ssd"
+      size: "100Gi"
+    topics:
+      - name: "paryty.metrics.raw"
+        partitions: 12
+        retention: "7d"
+      - name: "paryty.metrics.aggregated"
+        partitions: 6
+        retention: "30d"
+      - name: "paryty.traces"
+        partitions: 12
+        retention: "7d"
+      - name: "paryty.topology"
+        partitions: 3
+        retention: "90d"
+
+  # Processing layer
+  processing:
+    aggregator:
+      replicas: 2
+      resources:
+        cpu: "4"
+        memory: "8Gi"
+    correlator:
+      replicas: 2
+      resources:
+        cpu: "4"
+        memory: "8Gi"
+    enricher:
+      replicas: 1
+      resources:
+        cpu: "2"
+        memory: "4Gi"
+
+  # Storage layer
+  storage:
+    hot:
+      # Runtime connection config
+      addr: "localhost:6379"
+      password: ""
+      db: 0
+      pool_size: 10
+      ttl: "5m"
+      # Deployment topology
+      type: "dragonfly"
+      replicas: 1
+      memory: "16Gi"
+    warm:
+      # Runtime connection config
+      addr: "localhost:8812"
+      ilp_addr: "localhost:9009"
+      database: "paryty"
+      username: "admin"
+      password: "quest"
+      max_conns: 20
+      # Deployment topology
+      type: "questdb"
+      replicas: 1
+      storage:
+        class: "ssd"
+        size: "500Gi"
+    cold:
+      # Runtime connection config
+      endpoint: "localhost:8333"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+      use_ssl: false
+      region: "us-east-1"
+      bucket: "paryty-cold-storage"
+      # Deployment topology
+      type: "seaweedfs"
+      retention: "1y"
+
+  # Rate limiting
+  rate_limit:
+    max_batches_per_minute: 10000
+
+  # Flow control
+  flow_control:
+    desired_interval_ms: 10000
+    sampling_rate: 1.0
+
+  # Query layer
+  query:
+    replicas: 2
+    resources:
+      cpu: "2"
+      memory: "4Gi"
+    cache:
+      type: "dragonfly"
+      ttl: "5m"
+
+  # Intelligence layer
+  intelligence:
+    forecasting:
+      enabled: true
+      models:
+        - prophet
+        - neural_prophet
+        - linear_regression
+      forecast_horizon: "7d"
+    anomaly_detection:
+      enabled: true
+      methods:
+        - z_score
+        - isolation_forest
+        - lstm
+    simulation:
+      enabled: true
+      integrations:
+        - gremlin
+        - litmuschaos
+        - k6
+    timeline:
+      enabled: true
+      snapshot_interval: "5m"
+      retention: "1y"

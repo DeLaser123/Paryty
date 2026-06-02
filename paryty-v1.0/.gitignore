@@ -1,0 +1,50 @@
+﻿# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Rust
+agent/target/
+**/*.rs.bk
+
+# Go
+cluster/vendor/
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.vite/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Build
+dist/
+build/
+
+# Cache
+.cache/
+*.cache
+
+# Temporary
+tmp/
+temp/

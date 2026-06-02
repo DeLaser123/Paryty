@@ -1,0 +1,157 @@
+package stream
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/twmb/franz-go/pkg/kadm"
+	"github.com/twmb/franz-go/pkg/kgo"
+	"go.uber.org/zap"
+)
+
+// TopicManager manages Redpanda topics.
+type TopicManager struct {
+	client *kadm.Client
+	logger *zap.Logger
+	cfg    Config
+}
+
+// NewTopicManager creates a new topic manager.
+func NewTopicManager(cfg Config, logger *zap.Logger) (*TopicManager, error) {
+	client, err := kgo.NewClient(kgo.SeedBrokers(cfg.Brokers...))
+	if err != nil {
+		return nil, fmt.Errorf("create kafka client: %w", err)
+	}
+
+	return &TopicManager{
+		client: kadm.NewClient(client),
+		logger: logger,
+		cfg:    cfg,
+	}, nil
+}
+
+// Close closes the topic manager.
+func (m *TopicManager) Close() {
+	m.client.Close()
+}
+
+// CreateTopic creates a topic with the given configuration.
+func (m *TopicManager) CreateTopic(ctx context.Context, topic string, partitions int32, replication int16) error {
+	_, err := m.client.CreateTopic(ctx, partitions, replication, nil, topic)
+	if err != nil {
+		return fmt.Errorf("create topic %s: %w", topic, err)
+	}
+
+	m.logger.Info("Topic created",
+		zap.String("topic", topic),
+		zap.Int32("partitions", partitions),
+		zap.Int16("replication", replication),
+	)
+
+	return nil
+}
+
+// DeleteTopic deletes a topic.
+func (m *TopicManager) DeleteTopic(ctx context.Context, topic string) error {
+	_, err := m.client.DeleteTopics(ctx, topic)
+	if err != nil {
+		return fmt.Errorf("delete topic %s: %w", topic, err)
+	}
+
+	m.logger.Info("Topic deleted", zap.String("topic", topic))
+	return nil
+}
+
+// ListTopics lists all topics.
+func (m *TopicManager) ListTopics(ctx context.Context) ([]string, error) {
+	topics, err := m.client.ListTopics(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list topics: %w", err)
+	}
+
+	var names []string
+	for name := range topics {
+		names = append(names, name)
+	}
+	return names, nil
+}
+
+// EnsureTopic creates a topic if it doesn't exist.
+func (m *TopicManager) EnsureTopic(ctx context.Context, topic string, partitions int32, replication int16) error {
+	exists, err := m.client.ListTopics(ctx)
+	if err != nil {
+		return fmt.Errorf("list topics: %w", err)
+	}
+
+	if _, ok := exists[topic]; ok {
+		return nil
+	}
+
+	return m.CreateTopic(ctx, topic, partitions, replication)
+}
+
+// topicConfig defines partition and replication settings for a topic.
+type topicConfig struct {
+	name        string
+	partitions  int32
+	replication int16
+}
+
+// Tenant-scoped topic name functions.
+// Each function produces a namespaced topic name: paryty.<tenant>.<topic>.
+
+func TopicMetricsRaw(tenant string) string      { return fmt.Sprintf("paryty.%s.metrics.raw", tenant) }
+func TopicMetricsAgg(tenant string) string      { return fmt.Sprintf("paryty.%s.metrics.aggregated", tenant) }
+func TopicTraces(tenant string) string          { return fmt.Sprintf("paryty.%s.traces", tenant) }
+func TopicEvents(tenant string) string          { return fmt.Sprintf("paryty.%s.events", tenant) }
+func TopicNetworkEvents(tenant string) string   { return fmt.Sprintf("paryty.%s.network.events", tenant) }
+func TopicTopologyChanges(tenant string) string { return fmt.Sprintf("paryty.%s.topology.changes", tenant) }
+func TopicAlerts(tenant string) string          { return fmt.Sprintf("paryty.%s.alerts", tenant) }
+func TopicDLQ(tenant string) string             { return fmt.Sprintf("paryty.%s.dead-letter", tenant) }
+
+// Default-tenant convenience functions. Use these when tenant context is not yet available.
+func DefaultTopicMetricsRaw() string      { return TopicMetricsRaw("default") }
+func DefaultTopicMetricsAgg() string      { return TopicMetricsAgg("default") }
+func DefaultTopicTraces() string          { return TopicTraces("default") }
+func DefaultTopicEvents() string          { return TopicEvents("default") }
+func DefaultTopicNetworkEvents() string   { return TopicNetworkEvents("default") }
+func DefaultTopicTopologyChanges() string { return TopicTopologyChanges("default") }
+func DefaultTopicAlerts() string          { return TopicAlerts("default") }
+func DefaultTopicDLQ() string             { return TopicDLQ("default") }
+
+// requiredTopics returns the topic configurations for a tenant.
+func requiredTopics(tenant string) []topicConfig {
+	return []topicConfig{
+		{TopicMetricsRaw(tenant), 12, 1},
+		{TopicMetricsAgg(tenant), 6, 1},
+		{TopicTraces(tenant), 12, 1},
+		{TopicEvents(tenant), 6, 1},
+		{TopicNetworkEvents(tenant), 6, 1},
+		{TopicTopologyChanges(tenant), 3, 1},
+		{TopicAlerts(tenant), 3, 1},
+		{TopicDLQ(tenant), 3, 1},
+	}
+}
+
+// InitializeTopics creates all required topics for a given tenant.
+// Uses a single ListTopics call to avoid redundant broker round-trips.
+func InitializeTopics(ctx context.Context, admin *kadm.Client, tenant string) error {
+	topics := requiredTopics(tenant)
+
+	existing, err := admin.ListTopics(ctx)
+	if err != nil {
+		return fmt.Errorf("list topics: %w", err)
+	}
+
+	for _, tc := range topics {
+		if _, ok := existing[tc.name]; ok {
+			continue
+		}
+		_, err := admin.CreateTopic(ctx, tc.partitions, tc.replication, nil, tc.name)
+		if err != nil {
+			return fmt.Errorf("create topic %s: %w", tc.name, err)
+		}
+	}
+
+	return nil
+}

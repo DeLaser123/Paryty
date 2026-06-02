@@ -1,0 +1,143 @@
+# Paryty Infrastructure-Only Compose
+# Contains only infrastructure services (no Paryty application services)
+# Use this for development when you want to run Paryty services locally (outside containers)
+#
+# Usage: podman-compose -f docker-compose.infra.yaml up -d
+# Verify: scripts/check-infra.ps1
+
+version: '3.8'
+
+services:
+  redpanda:
+    image: docker.io/redpandadata/redpanda:latest
+    container_name: paryty-redpanda
+    ports:
+      - "9092:9092"     # Kafka API
+      - "9644:9644"     # Admin API
+      - "8081:8081"     # Schema registry
+      - "8082:8082"     # Pandaproxy
+    cap_add:
+      - SYS_NICE
+      - IPC_LOCK
+    security_opt:
+      - label=disable
+    command:
+      - redpanda
+      - start
+      - --smp
+      - '1'
+      - --memory
+      - 1G
+      - --overprovisioned
+      - --node-id
+      - '0'
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://redpanda:9092
+      - --pandaproxy-addr
+      - PLAINTEXT://0.0.0.0:8082
+      - --advertise-pandaproxy-addr
+      - PLAINTEXT://redpanda:8082
+      - --schema-registry-addr
+      - PLAINTEXT://0.0.0.0:8081
+      - --rpc-addr
+      - 0.0.0.0:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health", "--api-urls", "localhost:9644"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    container_name: paryty-dragonfly
+    ports:
+      - "6379:6379"
+    volumes:
+      - dragonfly-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  questdb:
+    image: questdb/questdb:latest
+    container_name: paryty-questdb
+    ports:
+      - "9000:9000"     # Web console
+      - "9009:9009"     # InfluxDB line protocol
+      - "8812:8812"     # PostgreSQL wire protocol
+    volumes:
+      - questdb-data:/var/lib/questdb
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9000/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:latest
+    container_name: paryty-seaweedfs-master
+    ports:
+      - "9333:9333"
+    command: master -ip=seaweedfs-master -port=9333 -volumePreallocate=false
+    volumes:
+      - seaweedfs-master-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9333/cluster/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:latest
+    container_name: paryty-seaweedfs-volume
+    ports:
+      - "8080:8080"
+    command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:8080
+    volumes:
+      - seaweedfs-volume-data:/data
+    depends_on:
+      seaweedfs-master:
+        condition: service_healthy
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:latest
+    container_name: paryty-seaweedfs-filer
+    ports:
+      - "8888:8888"
+    command: filer -master=seaweedfs-master:9333 -port=8888
+    volumes:
+      - seaweedfs-filer-data:/data
+    depends_on:
+      seaweedfs-master:
+        condition: service_healthy
+      seaweedfs-volume:
+        condition: service_started
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:latest
+    container_name: paryty-seaweedfs-s3
+    ports:
+      - "8333:8333"
+    command: s3 -filer=seaweedfs-filer:8888 -port=8333
+    depends_on:
+      seaweedfs-filer:
+        condition: service_started
+
+volumes:
+  redpanda-data:
+  dragonfly-data:
+  questdb-data:
+  seaweedfs-master-data:
+  seaweedfs-volume-data:
+  seaweedfs-filer-data:

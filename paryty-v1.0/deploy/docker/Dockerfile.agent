@@ -1,0 +1,54 @@
+# Paryty Agent Dockerfile
+# Multi-stage build for Rust agent
+# Build context must be project root (for proto/ directory access)
+# Usage: podman build -t paryty/agent -f deploy/docker/Dockerfile.agent .
+
+# Build stage
+FROM rust:1.82-alpine AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apk add --no-cache musl-dev protobuf-dev
+
+# Copy proto files first (from project root context)
+COPY proto/ /app/proto/
+
+# Copy agent Cargo files
+COPY agent/Cargo.toml agent/Cargo.lock ./
+
+# Copy agent source code
+COPY agent/src/ src/
+COPY agent/build.rs ./
+
+# Set PROTO_DIR for build.rs to find proto files in container
+ENV PROTO_DIR=/app/proto
+
+# Build release binary
+RUN cargo build --release && \
+    strip target/release/paryty-agent
+
+# Runtime stage
+FROM alpine:3.19
+
+WORKDIR /app
+
+# Install runtime dependencies
+RUN apk add --no-cache ca-certificates tzdata
+
+# Copy binary from builder
+COPY --from=builder /app/target/release/paryty-agent /app/paryty-agent
+
+# Non-root user
+RUN addgroup -S paryty && adduser -S paryty -G paryty
+USER paryty
+
+# Expose gRPC port
+EXPOSE 9090
+
+# Health check
+HEALTHCHECK --interval=10s --timeout=3s --start-period=5s --retries=3 \
+    CMD ["/app/paryty-agent", "--health-check"]
+
+# Run the agent
+ENTRYPOINT ["/app/paryty-agent"]

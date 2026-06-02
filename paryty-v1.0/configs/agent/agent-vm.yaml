@@ -1,0 +1,68 @@
+# Paryty Agent Configuration — WSL2 Client Node
+#
+# This config is for a WSL2 Ubuntu distro acting as a monitored node.
+# The agent connects to the ingestion service on the Windows host
+# via the WSL2 gateway IP.
+#
+# Usage:
+#   paryty-agent -c ~/paryty/configs/agent.yaml
+
+agent:
+  id: "auto"
+  cluster_endpoint: "10.255.255.254:50051"
+  api_key: ""
+  self_metrics:
+    enabled: true
+    port: 9100
+
+layers:
+  metal:
+    enabled: true
+    interval: "10s"
+    cpu_per_core: true
+    cpu_per_process: true
+    memory_rss: true
+    disk_io: true
+    network_io: true
+    process_tree: true
+    container_detection: true
+
+  ebpf:
+    enabled: false
+    tcp_connections: false
+    dns_resolution: false
+    http_inspection: false
+    db_inspection: false
+    exclude_ports: [22, 53, 443]
+    exclude_ips: ["127.0.0.1", "::1"]
+
+  supervisor:
+    enabled: false
+    health_checks: []
+    log_tailing: []
+
+communication:
+  protocol: grpc
+  tls:
+    enabled: false
+  compression: zstd
+  edge_buffer:
+    enabled: true
+    max_size_mb: 100
+    retention_hours: 24
+    sqlite_path: "/tmp/paryty-buffer.db"
+  flow_control:
+    backpressure_enabled: true
+    adaptive_sampling: true
+    priority_queues:
+      - name: "critical"
+        topics: ["alerts", "errors"]
+        priority: 1
+      - name: "normal"
+        topics: ["metrics", "traces"]
+        priority: 2
+
+logging:
+  level: info
+  format: json
+  output: stdout

@@ -1,0 +1,223 @@
+﻿# Paryty Development Docker Compose
+version: '3.8'
+
+services:
+  redpanda:
+    image: docker.io/redpandadata/redpanda:latest
+    ports:
+      - "9092:9092"
+      - "9644:9644"
+    cap_add:
+      - SYS_NICE
+      - IPC_LOCK
+    security_opt:
+      - label=disable
+    command:
+      - redpanda
+      - start
+      - --smp
+      - '1'
+      - --memory
+      - 1G
+      - --overprovisioned
+      - --node-id
+      - '0'
+      - --check=false
+      - --kafka-addr
+      - PLAINTEXT://0.0.0.0:9092
+      - --advertise-kafka-addr
+      - PLAINTEXT://localhost:9092
+      - --pandaproxy-addr
+      - PLAINTEXT://0.0.0.0:8082
+      - --advertise-pandaproxy-addr
+      - PLAINTEXT://redpanda:8082
+      - --schema-registry-addr
+      - PLAINTEXT://0.0.0.0:8081
+      - --rpc-addr
+      - 0.0.0.0:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+    volumes:
+      - redpanda-data:/var/lib/redpanda/data
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    ports:
+      - "6379:6379"
+    volumes:
+      - dragonfly-data:/data
+
+  questdb:
+    image: questdb/questdb:latest
+    ports:
+      - "9000:9000"  # PostgreSQL wire protocol
+      - "9009:9009"  # Web console
+      - "8812:8812"  # InfluxDB line protocol
+    volumes:
+      - questdb-data:/var/lib/questdb
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: paryty
+      POSTGRES_USER: paryty
+      POSTGRES_PASSWORD: paryty
+
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "9333:9333"  # Master server
+      - "19333:19333"  # Master gRPC
+    command: master -ip=seaweedfs-master -port=9333 -volumePreallocate=false
+    volumes:
+      - seaweedfs-master-data:/data
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "8080:8080"  # Volume server
+      - "18080:18080"  # Volume gRPC
+    command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:8080
+    volumes:
+      - seaweedfs-volume-data:/data
+    depends_on:
+      - seaweedfs-master
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "8888:8888"  # Filer server
+      - "18888:18888"  # Filer gRPC
+    command: filer -master=seaweedfs-master:9333 -port=8888
+    volumes:
+      - seaweedfs-filer-data:/data
+    depends_on:
+      - seaweedfs-master
+      - seaweedfs-volume
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "8333:8333"  # S3 API gateway
+    command: s3 -filer=seaweedfs-filer:8888 -port=8333
+    depends_on:
+      - seaweedfs-filer
+
+  # --- Paryty Services ---
+
+  paryty-agent:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.agent
+    ports:
+      - "9090:9090"  # gRPC
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+    environment:
+      PARYTY_CLUSTER_ADDR: paryty-ingestion:8080
+      PARYTY_LOG_LEVEL: info
+    privileged: true
+    pid: host
+    depends_on:
+      - paryty-ingestion
+
+  paryty-ingestion:
+    build:
+      context: ../../cluster
+      dockerfile: ../deploy/docker/Dockerfile.cluster
+      args:
+        SERVICE: ingestion
+    ports:
+      - "8080:8080"  # gRPC ingestion
+      - "8081:8081"  # Health
+    environment:
+      PARYTY_REDPANDA_BROKERS: redpanda:9092
+      PARYTY_DRAGONFLY_ADDR: dragonfly:6379
+      PARYTY_QUESTDB_ADDR: questdb:8812
+    depends_on:
+      - redpanda
+      - dragonfly
+      - questdb
+
+  paryty-query:
+    build:
+      context: ../../cluster
+      dockerfile: ../deploy/docker/Dockerfile.cluster
+      args:
+        SERVICE: query
+    ports:
+      - "8082:8080"  # REST/WS/SSE API
+    environment:
+      PARYTY_REDPANDA_BROKERS: redpanda:9092
+      PARYTY_DRAGONFLY_ADDR: dragonfly:6379
+      PARYTY_QUESTDB_ADDR: questdb:8812
+    depends_on:
+      - redpanda
+      - dragonfly
+      - questdb
+
+  paryty-aggregator:
+    build:
+      context: ../../cluster
+      dockerfile: ../deploy/docker/Dockerfile.cluster
+      args:
+        SERVICE: aggregator
+    environment:
+      REDPANDA_URL: redpanda:9092
+      AGGREGATION_WINDOW: 1m
+    depends_on:
+      - redpanda
+      - paryty-ingestion
+
+  paryty-correlator:
+    build:
+      context: ../../cluster
+      dockerfile: ../deploy/docker/Dockerfile.cluster
+      args:
+        SERVICE: correlator
+    environment:
+      REDPANDA_URL: redpanda:9092
+    depends_on:
+      - redpanda
+      - paryty-ingestion
+
+  paryty-enricher:
+    build:
+      context: ../../cluster
+      dockerfile: ../deploy/docker/Dockerfile.cluster
+      args:
+        SERVICE: enricher
+    environment:
+      REDPANDA_URL: redpanda:9092
+      DRAGONFLY_URL: redis://dragonfly:6379
+      QUESTDB_URL: postgres://paryty:paryty@questdb:8812/paryty
+      SEAWEEDFS_URL: http://seaweedfs-s3:8333
+    depends_on:
+      - redpanda
+      - dragonfly
+      - questdb
+      - seaweedfs-s3
+      - paryty-ingestion
+
+  paryty-frontend:
+    build:
+      context: ../../frontend
+      dockerfile: ../deploy/docker/Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - paryty-query
+
+volumes:
+  redpanda-data:
+  dragonfly-data:
+  questdb-data:
+  postgres-data:
+  seaweedfs-master-data:
+  seaweedfs-volume-data:
+  seaweedfs-filer-data:
