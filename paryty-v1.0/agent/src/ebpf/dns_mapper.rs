@@ -232,8 +232,7 @@ impl DnsMapper {
         // and all access goes through the Mutex.  The callback is `'static`
         // (captures only the raw pointer and a cloned Vec<u16>), which
         // satisfies RingBufferBuilder's bounds.
-        let cache_ref: &'static Mutex<HashMap<String, DnsEntry>> =
-            unsafe { &*cache_ptr };
+        let cache_ref: &'static Mutex<HashMap<String, DnsEntry>> = unsafe { &*cache_ptr };
 
         let mut builder = libbpf_rs::RingBufferBuilder::new();
         builder
@@ -270,9 +269,7 @@ impl DnsMapper {
                         let query_type = qtype_string(qtype);
                         let process_name = get_process_name(pid);
 
-                        let mut c = cache_ref
-                            .lock()
-                            .expect("DnsMapper: cache mutex poisoned");
+                        let mut c = cache_ref.lock().expect("DnsMapper: cache mutex poisoned");
                         let entry = c.entry(domain.clone()).or_insert_with(|| DnsEntry {
                             domain: domain.clone(),
                             ips: Vec::new(),

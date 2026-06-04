@@ -14,6 +14,7 @@
 #define MAX_DOMAIN_LEN      256
 #define MAX_HTTP_PATH_LEN   128
 #define MAX_HTTP_HOST_LEN   128
+#define MAX_DB_PAYLOAD_LEN  256
 
 /* ────────────────────────── Ring buffer ───────────────────── */
 #define RING_BUFFER_SIZE    (256 * 1024)   /* 256 KiB — must be power of 2 */
@@ -26,7 +27,15 @@ enum event_type {
     EVENT_DNS_QUERY    = 4,
     EVENT_HTTP_REQUEST = 5,
     EVENT_HTTPS_SNI    = 6,
+    EVENT_DB_QUERY     = 7,
 };
+
+/* ────────────────────────── Database protocol types ───────── */
+#define DB_PROTO_UNKNOWN   0
+#define DB_PROTO_PG        1
+#define DB_PROTO_MYSQL     2
+#define DB_PROTO_REDIS     3
+#define DB_PROTO_ENCRYPTED 4
 
 /* ────────────────────────── TCP states (mirror kernel) ────── */
 #define TCP_ESTABLISHED   1
@@ -93,6 +102,33 @@ struct http_event {
     __u8  _pad;
     char  host[MAX_HTTP_HOST_LEN];
     char  path[MAX_HTTP_PATH_LEN];
+} __attribute__((packed));
+
+/*
+ * struct db_event — Database protocol detection events.
+ *
+ * Captures the first MAX_DB_PAYLOAD_LEN bytes of a DB response so
+ * userspace can perform full protocol parsing (PostgreSQL, MySQL, Redis).
+ *
+ * Layout (packed, all fields naturally aligned):
+ *   u64 (8) | u32 u32 (8) | u32 u32 (8) | u16 u16 u8 u8 (6) | u32 u32 (8)
+ *   | char[256] (256) | char[16] (16)
+ * Total: 306 bytes, packed.
+ */
+struct db_event {
+    __u64 timestamp_ns;
+    __u32 event_type;       /* EVENT_DB_QUERY */
+    __u32 pid;
+    __u32 src_ip;
+    __u32 dst_ip;
+    __u16 src_port;
+    __u16 dst_port;
+    __u8  protocol;         /* DB_PROTO_UNKNOWN .. DB_PROTO_ENCRYPTED */
+    __u8  _pad;
+    __u32 payload_len;      /* bytes captured in payload[] */
+    __u32 response_bytes;   /* total response size from retval (kretprobe) */
+    char  payload[MAX_DB_PAYLOAD_LEN];
+    char  comm[MAX_COMM_LEN];
 } __attribute__((packed));
 
 #endif /* __PARYTY_BPF_COMMON_H */

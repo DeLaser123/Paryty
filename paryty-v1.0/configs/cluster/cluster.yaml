@@ -1,4 +1,4 @@
-﻿# Paryty Cluster Configuration
+# Paryty Cluster Configuration
 
 cluster:
   name: "paryty-prod"
@@ -63,21 +63,77 @@ cluster:
 
   # Processing layer
   processing:
+    pipeline:
+      consumer_group: "paryty-pipeline"
+      input_topics:
+        - "paryty.default.metrics.raw"
+        - "paryty.default.network.events"
+        - "paryty.default.traces"
+        - "paryty.default.events"
+        - "paryty.acme.metrics.raw"
+        - "paryty.acme.network.events"
+        - "paryty.acme.traces"
+        - "paryty.acme.events"
+      batch_size: 100
+      batch_timeout: "1s"
+      health_check_interval: "10s"
+
     aggregator:
+      # Deployment topology
       replicas: 2
       resources:
         cpu: "4"
         memory: "8Gi"
+      # Runtime config
+      window_sizes:
+        - "1m"
+        - "5m"
+        - "1h"
+        - "1d"
+      grace_period: "30s"
+      snapshot_interval: "30s"
+      top_n_size: 10
+
     correlator:
+      # Deployment topology
       replicas: 2
       resources:
         cpu: "4"
         memory: "8Gi"
+      # Runtime config
+      stale_node_timeout: "5m"
+      graph_snapshot_interval: "60s"
+      event_buffer_size: 10000
+      correlation_window: "30s"
+
     enricher:
+      # Deployment topology
       replicas: 1
       resources:
         cpu: "2"
         memory: "4Gi"
+      # Runtime config
+      standard_label_keys:
+        - "env"
+        - "region"
+        - "team"
+        - "service"
+        - "version"
+      max_labels_per_metric: 20
+      label_prefix: "agent."
+
+    downsampler:
+      rules:
+        - source_window: "1m"
+          target_window: "5m"
+          retention_days: 7
+        - source_window: "5m"
+          target_window: "1h"
+          retention_days: 30
+        - source_window: "1h"
+          target_window: "1d"
+          retention_days: 90
+      run_interval: "1h"
 
   # Storage layer
   storage:
@@ -88,6 +144,17 @@ cluster:
       db: 0
       pool_size: 10
       ttl: "5m"
+      topology:
+        lock_retries: 3
+        lock_backoff_ms: 10
+      metrics:
+        sorted_set_ttl: "5m"
+        purge_interval: "1m"
+      alerts:
+        dedup_enabled: true
+      connections:
+        heartbeat_ttl: "30s"
+        disconnect_threshold: "60s"
       # Deployment topology
       type: "dragonfly"
       replicas: 1
@@ -100,6 +167,47 @@ cluster:
       username: "admin"
       password: "quest"
       max_conns: 20
+      ilp:
+        addr: "questdb:9009"
+        buffer_size: 10000
+        flush_interval: "1s"
+      rest:
+        endpoint: "http://questdb:9000"
+      schema:
+        auto_migrate: true
+      retention:
+        run_interval: "1h"
+        rules:
+          - table: "cpu_metrics"
+            max_age_days: 30
+            archive_to_cold: true
+          - table: "memory_metrics"
+            max_age_days: 30
+            archive_to_cold: true
+          - table: "disk_metrics"
+            max_age_days: 30
+            archive_to_cold: true
+          - table: "network_metrics"
+            max_age_days: 30
+            archive_to_cold: true
+          - table: "process_metrics"
+            max_age_days: 7
+            archive_to_cold: false
+          - table: "container_metrics"
+            max_age_days: 7
+            archive_to_cold: false
+          - table: "aggregated_metrics"
+            max_age_days: 90
+            archive_to_cold: true
+          - table: "spans"
+            max_age_days: 14
+            archive_to_cold: true
+          - table: "db_queries"
+            max_age_days: 14
+            archive_to_cold: true
+          - table: "topology_snapshots"
+            max_age_days: 7
+            archive_to_cold: true
       # Deployment topology
       type: "questdb"
       replicas: 1
@@ -114,6 +222,14 @@ cluster:
       use_ssl: false
       region: "us-east-1"
       bucket: "paryty-cold-storage"
+      snapshots:
+        interval: "5m"
+        compression: true
+        retention_days: 7
+      cache:
+        enabled: true
+        max_entries: 100
+        ttl: "1h"
       # Deployment topology
       type: "seaweedfs"
       retention: "1y"
@@ -162,3 +278,10 @@ cluster:
       enabled: true
       snapshot_interval: "5m"
       retention: "1y"
+
+# Tenant configuration
+tenant:
+  auth:
+    enabled: true
+    api_key_header: "x-api-key"
+  fallback_tenant: "default"

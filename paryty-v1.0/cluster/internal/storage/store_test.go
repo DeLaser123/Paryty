@@ -1,11 +1,16 @@
 package storage
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/paryty/paryty-v1.0/cluster/internal/models"
+	"github.com/paryty/paryty-v1.0/cluster/internal/storage/cold"
+	"github.com/paryty/paryty-v1.0/cluster/internal/storage/warm"
 )
 
 // ---- Circuit Breaker: State Transitions ----
@@ -356,29 +361,15 @@ func TestStore_CircuitBreakersInitializedByNew(t *testing.T) {
 }
 
 // ---- Tenant Propagation: Key Isolation ----
-//
-// These tests verify that different tenants produce different Redis keys,
-// ensuring tenant data isolation at the storage layer. The key format is
-// paryty:<tenant>:<domain>:<id>, tested here via the hot package functions.
 
 func TestTenantPropagation_DifferentTenantsDifferentKeys(t *testing.T) {
-	// The store delegates to hot.Client which uses tenant-scoped keys.
-	// Verify the key generation is tenant-aware by testing the exported
-	// KeyFn helpers in the hot package (already tested in dragonfly_test.go).
-	//
-	// Here we verify at the Store level that two stores with different
-	// tenant parameters would route to different hot-tier keys.
 	tenants := []string{"tenant-alpha", "tenant-beta", "tenant-gamma"}
 
-	// The store passes tenant through to hot.Client methods.
-	// Two calls with different tenants MUST NOT produce the same key.
-	// This is enforced by the key format: paryty:<tenant>:...
 	for i, a := range tenants {
 		for _, b := range tenants[i+1:] {
 			if a == b {
 				t.Errorf("tenants %q and %q should differ", a, b)
 			}
-			// Key prefix is always tenant-specific.
 			prefixA := fmt.Sprintf("paryty:%s:", a)
 			prefixB := fmt.Sprintf("paryty:%s:", b)
 			if prefixA == prefixB {
@@ -389,7 +380,6 @@ func TestTenantPropagation_DifferentTenantsDifferentKeys(t *testing.T) {
 }
 
 func TestTenantPropagation_TenantInKeyPrefix(t *testing.T) {
-	// Verify that the key prefix format includes the tenant for isolation.
 	tenants := []string{"acme-corp", "default", "org-123_test"}
 
 	for _, tenant := range tenants {
@@ -397,7 +387,6 @@ func TestTenantPropagation_TenantInKeyPrefix(t *testing.T) {
 		if len(prefix) == 0 {
 			t.Errorf("empty prefix for tenant %q", tenant)
 		}
-		// Prefix must contain the tenant string.
 		if !containsSubstring(prefix, tenant) {
 			t.Errorf("prefix %q does not contain tenant %q", prefix, tenant)
 		}
@@ -410,7 +399,6 @@ func TestTenantPropagation_SameAgentDifferentTenantsNeverCollide(t *testing.T) {
 
 	seen := make(map[string]string)
 	for _, tenant := range tenants {
-		// Simulate the key that would be generated for metrics.
 		key := fmt.Sprintf("paryty:%s:metrics:%s:latest", tenant, agentID)
 		if prev, exists := seen[key]; exists {
 			t.Errorf("tenant %q and %q produced colliding key %q", prev, tenant, key)
@@ -422,46 +410,30 @@ func TestTenantPropagation_SameAgentDifferentTenantsNeverCollide(t *testing.T) {
 // ---- Async Warm Write: Non-Blocking Behavior ----
 
 func TestStoreMetricBatch_AsyncWarmWriteDoesNotBlock(t *testing.T) {
-	// This test verifies the async warm write pattern compiles and the
-	// goroutine dispatch mechanism is non-blocking. Since we cannot create
-	// a full Store with real backends in unit tests, we verify the pattern
-	// by testing a simulated async dispatch.
-	//
-	// The real StoreMetricBatch launches: go func() { s.warm.InsertMetricBatchILP(...) }()
-	// which is non-blocking by definition. This test documents that contract.
-
 	done := make(chan struct{})
 	start := time.Now()
 
-	// Simulate the async warm write pattern used in StoreMetricBatch.
 	go func() {
 		defer close(done)
-		// Simulate a slow warm store write.
 		time.Sleep(100 * time.Millisecond)
 	}()
 
-	// The dispatch itself should return immediately.
 	elapsed := time.Since(start)
 	if elapsed > 10*time.Millisecond {
 		t.Errorf("goroutine dispatch took %v, should be near-instant", elapsed)
 	}
 
-	// Wait for the goroutine to finish (to avoid leaking).
 	<-done
 }
 
 func TestStoreMetricBatch_CircuitBreakerBlocksWhenOpen(t *testing.T) {
-	// Verify that when the hot breaker is open, StoreMetricBatch would
-	// return an error without reaching the store. We test this at the
-	// circuit breaker level since the Store requires real backends.
 	cb := newCircuitBreaker(1, 10*time.Second)
 
-	cb.RecordFailure() // opens immediately (threshold=1)
+	cb.RecordFailure()
 	if cb.Allow() {
 		t.Fatal("breaker should be open and reject")
 	}
 
-	// The store would return: fmt.Errorf("hot store circuit breaker open")
 	want := "hot store circuit breaker open"
 	got := fmt.Errorf("%s", want)
 	if got.Error() != want {
@@ -472,8 +444,6 @@ func TestStoreMetricBatch_CircuitBreakerBlocksWhenOpen(t *testing.T) {
 // ---- Goroutine Leak Prevention ----
 
 func TestCircuitBreaker_ConcurrentAccessNoGoroutineLeak(t *testing.T) {
-	// Stress test: many goroutines accessing the circuit breaker simultaneously.
-	// With the race detector enabled, this catches data races.
 	cb := newCircuitBreaker(50, 5*time.Millisecond)
 
 	var wg sync.WaitGroup
@@ -505,6 +475,342 @@ func TestCircuitBreaker_ConcurrentAccessNoGoroutineLeak(t *testing.T) {
 	if got := ops.Load(); got != int64(workers*1000) {
 		t.Errorf("total ops = %d, want %d", got, workers*1000)
 	}
+}
+
+// ---- Phase 4: Mock Implementations for Testing ----
+
+// mockTopologyUpdater implements TopologyUpdater for unit tests.
+type mockTopologyUpdater struct {
+	mu       sync.Mutex
+	topology *models.Topology
+	calls    int
+	err      error
+}
+
+func (m *mockTopologyUpdater) UpdateTopology(_ context.Context, _ string, mutate func(*models.Topology) (*models.Topology, error)) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	if m.err != nil {
+		return m.err
+	}
+	result, err := mutate(m.topology)
+	if err != nil {
+		return err
+	}
+	m.topology = result
+	return nil
+}
+
+// mockSnapshotOperator implements SnapshotOperator for unit tests.
+type mockSnapshotOperator struct {
+	snapshot *cold.Snapshot
+	err      error
+}
+
+func (m *mockSnapshotOperator) TakeSnapshot(_ context.Context, _ string) (*cold.Snapshot, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.snapshot, nil
+}
+
+func (m *mockSnapshotOperator) GetSnapshot(_ context.Context, _, _ string) (*cold.Snapshot, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.snapshot, nil
+}
+
+func (m *mockSnapshotOperator) ReconstructState(_ context.Context, _ string, _ time.Time) (*cold.Snapshot, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.snapshot, nil
+}
+
+// mockQueryDownsampler implements QueryDownsampler for unit tests.
+type mockQueryDownsampler struct {
+	metrics []models.Metric
+	records []warm.DbQueryRecord
+	err     error
+}
+
+func (m *mockQueryDownsampler) QueryWithDownsampling(_ context.Context, _, _, _ string, _, _ time.Time) ([]models.Metric, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.metrics, nil
+}
+
+func (m *mockQueryDownsampler) QueryDatabaseQueries(_ context.Context, _, _, _ string, _, _ time.Time, _ int) ([]warm.DbQueryRecord, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.records, nil
+}
+
+// ---- Phase 4: TestStore_UpdateTopologyAtomic ----
+
+func TestStore_UpdateTopologyAtomic(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil topology ops returns error", func(t *testing.T) {
+		t.Parallel()
+		s := &Store{
+			topologyOps: nil,
+			hotBreaker:  newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		err := s.UpdateTopologyAtomic(context.Background(), "tenant-1", func(topo *models.Topology) (*models.Topology, error) {
+			return topo, nil
+		})
+		if err == nil {
+			t.Fatal("expected error for nil topology ops")
+		}
+		if err.Error() != "topology operations not configured" {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("circuit breaker open rejects call", func(t *testing.T) {
+		t.Parallel()
+		s := &Store{
+			topologyOps: &mockTopologyUpdater{},
+			hotBreaker:  newCircuitBreaker(1, 10*time.Second),
+		}
+		s.hotBreaker.RecordFailure() // opens breaker
+
+		err := s.UpdateTopologyAtomic(context.Background(), "tenant-1", func(topo *models.Topology) (*models.Topology, error) {
+			return topo, nil
+		})
+		if err == nil {
+			t.Fatal("expected error for open circuit breaker")
+		}
+	})
+
+	t.Run("successful delegation", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockTopologyUpdater{
+			topology: &models.Topology{Nodes: []models.TopologyNode{}},
+		}
+		s := &Store{
+			topologyOps: mock,
+			hotBreaker:  newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		err := s.UpdateTopologyAtomic(context.Background(), "tenant-1", func(topo *models.Topology) (*models.Topology, error) {
+			topo.Nodes = append(topo.Nodes, models.TopologyNode{ID: "n1", Name: "node-1"})
+			return topo, nil
+		})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if mock.calls != 1 {
+			t.Errorf("expected 1 call, got %d", mock.calls)
+		}
+		if len(mock.topology.Nodes) != 1 {
+			t.Errorf("expected 1 node, got %d", len(mock.topology.Nodes))
+		}
+		if s.hotBreaker.State() != "closed" {
+			t.Errorf("breaker should be closed after success, got %q", s.hotBreaker.State())
+		}
+	})
+
+	t.Run("mutate error records failure", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockTopologyUpdater{
+			topology: &models.Topology{},
+		}
+		s := &Store{
+			topologyOps: mock,
+			hotBreaker:  newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		err := s.UpdateTopologyAtomic(context.Background(), "tenant-1", func(topo *models.Topology) (*models.Topology, error) {
+			return nil, fmt.Errorf("mutation failed")
+		})
+		if err == nil {
+			t.Fatal("expected error from mutate")
+		}
+		if s.hotBreaker.Failures() != 1 {
+			t.Errorf("expected 1 failure, got %d", s.hotBreaker.Failures())
+		}
+	})
+}
+
+// ---- Phase 4: TestStore_TakeSnapshot ----
+
+func TestStore_TakeSnapshot(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil snapshot mgr returns error", func(t *testing.T) {
+		t.Parallel()
+		s := &Store{
+			snapshotMgr: nil,
+			coldBreaker: newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		snap, err := s.TakeSnapshot(context.Background(), "tenant-1")
+		if err == nil {
+			t.Fatal("expected error for nil snapshot manager")
+		}
+		if snap != nil {
+			t.Error("expected nil snapshot on error")
+		}
+		if err.Error() != "snapshot manager not configured" {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("circuit breaker open rejects call", func(t *testing.T) {
+		t.Parallel()
+		s := &Store{
+			snapshotMgr: &mockSnapshotOperator{},
+			coldBreaker: newCircuitBreaker(1, 10*time.Second),
+		}
+		s.coldBreaker.RecordFailure()
+
+		snap, err := s.TakeSnapshot(context.Background(), "tenant-1")
+		if err == nil {
+			t.Fatal("expected error for open circuit breaker")
+		}
+		if snap != nil {
+			t.Error("expected nil snapshot when breaker open")
+		}
+	})
+
+	t.Run("successful delegation", func(t *testing.T) {
+		t.Parallel()
+		expected := &cold.Snapshot{
+			ID:       "snap-123",
+			TenantID: "tenant-1",
+			Timestamp: time.Now(),
+			Topology: &models.Topology{
+				Nodes: []models.TopologyNode{{ID: "n1", Name: "svc-a"}},
+			},
+		}
+		mock := &mockSnapshotOperator{snapshot: expected}
+		s := &Store{
+			snapshotMgr: mock,
+			coldBreaker: newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		snap, err := s.TakeSnapshot(context.Background(), "tenant-1")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if snap.ID != "snap-123" {
+			t.Errorf("expected snapshot ID snap-123, got %s", snap.ID)
+		}
+		if s.coldBreaker.State() != "closed" {
+			t.Errorf("breaker should be closed after success, got %q", s.coldBreaker.State())
+		}
+	})
+
+	t.Run("backend error records failure", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockSnapshotOperator{err: fmt.Errorf("seaweedfs timeout")}
+		s := &Store{
+			snapshotMgr: mock,
+			coldBreaker: newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		_, err := s.TakeSnapshot(context.Background(), "tenant-1")
+		if err == nil {
+			t.Fatal("expected error from backend")
+		}
+		if s.coldBreaker.Failures() != 1 {
+			t.Errorf("expected 1 failure, got %d", s.coldBreaker.Failures())
+		}
+	})
+}
+
+// ---- Phase 4: TestStore_QueryMetricsOptimized ----
+
+func TestStore_QueryMetricsOptimized(t *testing.T) {
+	t.Parallel()
+
+	t.Run("nil query optimizer returns error", func(t *testing.T) {
+		t.Parallel()
+		s := &Store{
+			queryOptimizer: nil,
+			warmBreaker:    newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		metrics, err := s.QueryMetricsOptimized(context.Background(), "tenant-1", "agent-1", "cpu.usage", time.Now().Add(-time.Hour), time.Now())
+		if err == nil {
+			t.Fatal("expected error for nil query optimizer")
+		}
+		if metrics != nil {
+			t.Error("expected nil metrics on error")
+		}
+		if err.Error() != "query optimizer not configured" {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("circuit breaker open rejects call", func(t *testing.T) {
+		t.Parallel()
+		s := &Store{
+			queryOptimizer: &mockQueryDownsampler{},
+			warmBreaker:    newCircuitBreaker(1, 10*time.Second),
+		}
+		s.warmBreaker.RecordFailure()
+
+		metrics, err := s.QueryMetricsOptimized(context.Background(), "tenant-1", "agent-1", "cpu.usage", time.Now().Add(-time.Hour), time.Now())
+		if err == nil {
+			t.Fatal("expected error for open circuit breaker")
+		}
+		if metrics != nil {
+			t.Error("expected nil metrics when breaker open")
+		}
+	})
+
+	t.Run("successful delegation", func(t *testing.T) {
+		t.Parallel()
+		expected := []models.Metric{
+			{AgentID: "agent-1", Name: "cpu.usage", Value: 42.5, Timestamp: time.Now()},
+		}
+		mock := &mockQueryDownsampler{metrics: expected}
+		s := &Store{
+			queryOptimizer: mock,
+			warmBreaker:    newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		start := time.Now().Add(-time.Hour)
+		end := time.Now()
+		metrics, err := s.QueryMetricsOptimized(context.Background(), "tenant-1", "agent-1", "cpu.usage", start, end)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(metrics) != 1 {
+			t.Fatalf("expected 1 metric, got %d", len(metrics))
+		}
+		if metrics[0].Name != "cpu.usage" {
+			t.Errorf("expected metric name cpu.usage, got %s", metrics[0].Name)
+		}
+		if s.warmBreaker.State() != "closed" {
+			t.Errorf("breaker should be closed after success, got %q", s.warmBreaker.State())
+		}
+	})
+
+	t.Run("backend error records failure", func(t *testing.T) {
+		t.Parallel()
+		mock := &mockQueryDownsampler{err: fmt.Errorf("questdb timeout")}
+		s := &Store{
+			queryOptimizer: mock,
+			warmBreaker:    newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		}
+
+		_, err := s.QueryMetricsOptimized(context.Background(), "tenant-1", "agent-1", "cpu.usage", time.Now().Add(-time.Hour), time.Now())
+		if err == nil {
+			t.Fatal("expected error from backend")
+		}
+		if s.warmBreaker.Failures() != 1 {
+			t.Errorf("expected 1 failure, got %d", s.warmBreaker.Failures())
+		}
+	})
 }
 
 // ---- Helpers ----

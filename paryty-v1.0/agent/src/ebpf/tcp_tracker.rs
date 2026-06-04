@@ -248,12 +248,7 @@ fn handle_tcp_event(
     }
 
     // Build connection key.
-    let key = ConnectionKey {
-        src_ip,
-        src_port,
-        dst_ip,
-        dst_port,
-    };
+    let key = ConnectionKey { src_ip, src_port, dst_ip, dst_port };
 
     // Extract null-terminated process name from comm field.
     let process_name = extract_comm(&event.comm);

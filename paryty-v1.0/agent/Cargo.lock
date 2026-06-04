@@ -1455,6 +1455,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "sysinfo",
+ "tempfile",
  "thiserror",
  "tokio",
  "tokio-stream",

@@ -161,48 +161,32 @@ services:
       - dragonfly
       - questdb
 
-  paryty-aggregator:
+  paryty-pipeline:
     build:
       context: ../../cluster
       dockerfile: ../deploy/docker/Dockerfile.cluster
       args:
-        SERVICE: aggregator
+        SERVICE: pipeline
     environment:
-      REDPANDA_URL: redpanda:9092
-      AGGREGATION_WINDOW: 1m
-    depends_on:
-      - redpanda
-      - paryty-ingestion
-
-  paryty-correlator:
-    build:
-      context: ../../cluster
-      dockerfile: ../deploy/docker/Dockerfile.cluster
-      args:
-        SERVICE: correlator
-    environment:
-      REDPANDA_URL: redpanda:9092
-    depends_on:
-      - redpanda
-      - paryty-ingestion
-
-  paryty-enricher:
-    build:
-      context: ../../cluster
-      dockerfile: ../deploy/docker/Dockerfile.cluster
-      args:
-        SERVICE: enricher
-    environment:
-      REDPANDA_URL: redpanda:9092
-      DRAGONFLY_URL: redis://dragonfly:6379
-      QUESTDB_URL: postgres://paryty:paryty@questdb:8812/paryty
-      SEAWEEDFS_URL: http://seaweedfs-s3:8333
+      PARYTY_REDPANDA_BROKERS: redpanda:9092
+      PARYTY_DRAGONFLY_ADDR: dragonfly:6379
+      PARYTY_QUESTDB_ADDR: questdb:8812
+      PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
+      PARYTY_SEAWEEDFS_ACCESS_KEY: ""
+      PARYTY_SEAWEEDFS_SECRET_KEY: ""
+      PARYTY_SEAWEEDFS_BUCKET: paryty
+      PARYTY_SEAWEEDFS_USE_SSL: "false"
     depends_on:
       - redpanda
       - dragonfly
       - questdb
       - seaweedfs-s3
-      - paryty-ingestion
+    healthcheck:
+      test: ["CMD", "/app/service", "--healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
 
   paryty-frontend:
     build:

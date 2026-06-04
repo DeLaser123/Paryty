@@ -9,27 +9,28 @@
 //! Architecture:
 //! ```text
 //! Client
-//! â”œâ”€â”€ GrpcClient          â€” Bidirectional gRPC stream to cluster
-//! â”œâ”€â”€ ReconnectionEngine  â€” Exponential backoff with jitter
-//! â”œâ”€â”€ EdgeBuffer          â€” Write-ahead log for zero data loss
-//! â”œâ”€â”€ Compressor          â€” Zstd (all data)
-//! â”œâ”€â”€ FlowControl         â€” Credit-based backpressure
-//! â””â”€â”€ CancellationToken   â€” Cooperative shutdown signal
+//! ├── GrpcClient          — Bidirectional gRPC stream to cluster
+//! ├── ReconnectionEngine  — Exponential backoff with jitter
+//! ├── EdgeBuffer          — Write-ahead log for zero data loss
+//! ├── Compressor          — Zstd (all data)
+//! ├── FlowControl         — Credit-based backpressure
+//! └── CancellationToken   — Cooperative shutdown signal
 //! ```
 //!
 //! Lifecycle:
-//! 1. `connect()` â†’ TCP/TLS handshake
-//! 2. `register_on_connect()` â†’ AgentRegistration RPC
-//! 3. `start_heartbeat_loop()` â†’ periodic Heartbeat RPC
-//! 4. `start_stream_listener()` â†’ bidirectional ClusterToAgent stream
-//! 5. `send_metrics()` / `send_traces()` / â€¦ â†’ compress â†’ buffer â†’ send
-//! 6. `shutdown()` â†’ cancel â†’ flush buffer â†’ disconnect
+//! 1. `connect()` → TCP/TLS handshake
+//! 2. `register_on_connect()` → AgentRegistration RPC
+//! 3. `start_heartbeat_loop()` → periodic Heartbeat RPC
+//! 4. `start_stream_listener()` → bidirectional ClusterToAgent stream
+//! 5. `send_metrics()` / `send_traces()` / … → compress → buffer → send
+//! 6. `shutdown()` → cancel → flush buffer → disconnect
 
 pub mod compression;
 pub mod edge_buffer;
 pub mod flow_control;
 pub mod grpc_client;
 pub mod reconnect;
+pub mod tenant;
 
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -118,13 +119,17 @@ impl Client {
         })
     }
 
-    // â”€â”€ Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Registration ──────────────────────────────────────────────────
 
     /// Register this agent with the cluster after a successful connection.
     ///
     /// Sends an `AgentRegistration` RPC containing agent ID, hostname,
     /// version, and capabilities. On success, stores the session ID
     /// returned by the cluster for use in subsequent RPCs.
+    ///
+    /// If an API key is configured, it is sent as `x-api-key` gRPC metadata
+    /// so the server can resolve the tenant. After registration, the tenant
+    /// ID (session ID) is cached locally for restart resilience.
     ///
     /// Call this immediately after `connect()` succeeds.
     pub async fn register_on_connect(&self) -> Result<()> {
@@ -175,11 +180,11 @@ impl Client {
         Ok(())
     }
 
-    // â”€â”€ Registration Loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Registration Loop ─────────────────────────────────────────────
 
     /// Start a background task that retries registration until it succeeds.
     ///
-    /// Uses exponential backoff (1s â†’ 2s â†’ 4s â†’ â€¦ â†’ 30s max) with jitter.
+    /// Uses exponential backoff (1s → 2s → 4s → … → 30s max) with jitter.
     /// Exits when registration succeeds or the cancel token fires.
     pub fn start_registration_loop(self: &Arc<Self>) {
         let client = Arc::clone(self);
@@ -215,7 +220,7 @@ impl Client {
                             attempt = attempt,
                             retry_in = ?delay,
                             error = %e,
-                            "Registration failed â€” will retry with backoff"
+                            "Registration failed — will retry with backoff"
                         );
                         tokio::select! {
                             _ = cancel.cancelled() => break,
@@ -227,7 +232,7 @@ impl Client {
         });
     }
 
-    // â”€â”€ Send Metrics (compress â†’ flow control â†’ send_batch â†’ buffer) â”€â”€â”€
+    // ── Send Metrics (compress → flow control → send_batch → buffer) ───
 
     /// Send metrics data to the cluster.
     ///
@@ -249,7 +254,7 @@ impl Client {
         if self.flow_control.is_backpressured() {
             let rate = self.flow_control.sampling_rate().await;
             if fastrand::f64() > rate {
-                // Dropped by sampling â€” still buffer for safety.
+                // Dropped by sampling — still buffer for safety.
                 self.buffer.write(compressed.clone(), DataType::Metrics).await?;
                 debug!(
                     seq = seq,
@@ -465,7 +470,7 @@ impl Client {
                         );
                         return Ok(());
                     }
-                    // Server rejected the batch â€” log error detail and buffer.
+                    // Server rejected the batch — log error detail and buffer.
                     let err_msg =
                         response.error.as_ref().map(|e| e.message.as_str()).unwrap_or("unknown");
                     warn!(
@@ -494,7 +499,7 @@ impl Client {
         Ok(())
     }
 
-    // â”€â”€ Send Traces â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Send Traces ───────────────────────────────────────────────────
 
     /// Send trace data to the cluster.
     pub async fn send_traces(&self, data: &[u8]) -> Result<()> {
@@ -506,7 +511,7 @@ impl Client {
         self.buffer.write(compressed.clone(), DataType::Traces).await?;
 
         if self.grpc.is_connected().await {
-            // Traces don't have a dedicated proto RPC â€” send via legacy channel.
+            // Traces don't have a dedicated proto RPC — send via legacy channel.
             if let Err(e) = self.grpc.send(compressed).await {
                 warn!("Failed to send traces via gRPC (seq: {}): {}", seq, e);
             } else {
@@ -517,7 +522,7 @@ impl Client {
         Ok(())
     }
 
-    // â”€â”€ Send Events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Send Events ───────────────────────────────────────────────────
 
     /// Send event data to the cluster.
     pub async fn send_events(&self, data: &[u8]) -> Result<()> {
@@ -535,7 +540,7 @@ impl Client {
         Ok(())
     }
 
-    // â”€â”€ Send Network Events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Send Network Events ───────────────────────────────────────────
 
     /// Send network events to the cluster via JSON (legacy path).
     ///
@@ -629,7 +634,7 @@ impl Client {
         Ok(())
     }
 
-    // â”€â”€ Flush Buffer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Flush Buffer ──────────────────────────────────────────────────
 
     /// Flush pending entries from the edge buffer to the cluster.
     ///
@@ -670,7 +675,7 @@ impl Client {
                     failed_count += 1;
                     warn!(
                         seq = entry.sequence_number,
-                        "Buffer flush send failed: {} â€” stopping flush", e
+                        "Buffer flush send failed: {} — stopping flush", e
                     );
                     // Mark retry in SQLite.
                     if let Some(row_id) = entry.sqlite_row_id {
@@ -678,7 +683,7 @@ impl Client {
                             warn!(row_id = row_id, "Failed to mark SQLite entry retry: {}", e);
                         }
                     }
-                    // Stop flushing â€” connection is likely down.
+                    // Stop flushing — connection is likely down.
                     break;
                 }
             }
@@ -689,7 +694,7 @@ impl Client {
         Ok(())
     }
 
-    // â”€â”€ Heartbeat Loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Heartbeat Loop ────────────────────────────────────────────────
 
     /// Start the heartbeat loop as a background tokio task.
     ///
@@ -751,16 +756,16 @@ impl Client {
         });
     }
 
-    // â”€â”€ Stream Listener â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Stream Listener ───────────────────────────────────────────────
 
     /// Start the bidirectional stream listener as a background tokio task.
     ///
     /// Opens a `StreamMetrics` bidirectional gRPC stream and spawns a task
     /// to listen for `ClusterToAgent` messages. Dispatches:
-    /// - `FlowControl` â†’ `flow_control.apply_server_signal()`
-    /// - `ConfigPush` â†’ log (future: apply config hot-reload)
-    /// - `AgentCommand` â†’ `handle_agent_command()`
-    /// - `Heartbeat` â†’ log (heartbeat responses on stream)
+    /// - `FlowControl` → `flow_control.apply_server_signal()`
+    /// - `ConfigPush` → log (future: apply config hot-reload)
+    /// - `AgentCommand` → `handle_agent_command()`
+    /// - `Heartbeat` → log (heartbeat responses on stream)
     pub fn start_stream_listener(self: &Arc<Self>) {
         let client = Arc::clone(self);
         let cancel = client.cancel_token.clone();
@@ -807,7 +812,7 @@ impl Client {
             // The Go server's StreamMetrics handler blocks on stream.Recv() waiting
             // for a client message before it sends any response. Without this, the
             // server gets EOF (if sender is dropped) or blocks forever, and the
-            // client's inbound.message() hangs indefinitely â€” deadlocking the runtime.
+            // client's inbound.message() hangs indefinitely — deadlocking the runtime.
             {
                 let sid = client.session_id.read().await.clone();
                 let initial_hb = AgentToCluster {
@@ -829,7 +834,7 @@ impl Client {
                 debug!("Sent initial stream heartbeat to server");
             }
 
-            // Periodic heartbeat timer â€” keeps the stream alive so the server's
+            // Periodic heartbeat timer — keeps the stream alive so the server's
             // Recv() loop continues to receive messages and send FlowControl
             // responses that the client reads from `inbound`.
             let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
@@ -967,7 +972,7 @@ impl Client {
         }
     }
 
-    // â”€â”€ Health Check (uses proto Heartbeat RPC) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Health Check (uses proto Heartbeat RPC) ───────────────────────
 
     /// Perform a health check by sending a heartbeat.
     ///
@@ -999,7 +1004,7 @@ impl Client {
         }
     }
 
-    // â”€â”€ Connection Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Connection Management ─────────────────────────────────────────
 
     /// Connect to the cluster.
     pub async fn connect(&self) -> Result<()> {
@@ -1026,7 +1031,7 @@ impl Client {
         self.registered.load(Ordering::Acquire)
     }
 
-    // â”€â”€ Reconnection Loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Reconnection Loop ─────────────────────────────────────────────
 
     /// Start the background reconnection loop.
     ///
@@ -1046,7 +1051,7 @@ impl Client {
                     }
                     _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
                         if client.grpc.is_connected().await {
-                            // Connected but not yet registered â€” the registration
+                            // Connected but not yet registered — the registration
                             // loop handles retries, so just flush buffer if already
                             // registered, otherwise wait.
                             if client.is_registered() {
@@ -1086,7 +1091,7 @@ impl Client {
         });
     }
 
-    // â”€â”€ Graceful Shutdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Graceful Shutdown ─────────────────────────────────────────────
 
     /// Gracefully shut down the communication layer.
     ///
@@ -1099,7 +1104,7 @@ impl Client {
 
         // 1. Cancel all background tasks.
         self.cancel_token.cancel();
-        debug!("Cancellation token triggered â€” background tasks will stop");
+        debug!("Cancellation token triggered — background tasks will stop");
 
         // Small delay to let tasks observe the cancellation.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -1123,7 +1128,7 @@ impl Client {
         info!("Communication layer shutdown complete");
     }
 
-    // â”€â”€ Accessors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // ── Accessors ─────────────────────────────────────────────────────
 
     /// Get the cancellation token (for external shutdown coordination).
     pub fn cancel_token(&self) -> &CancellationToken {
@@ -1146,7 +1151,7 @@ impl Client {
     }
 }
 
-// â”€â”€ Proto Conversion Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Proto Conversion Helpers ───────────────────────────────────────────
 
 /// Convert an eBPF [`crate::ebpf::NetworkEvent`] to a proto
 /// [`crate::proto::paryty::v1::NetworkEvent`].
@@ -1269,7 +1274,7 @@ fn tcp_state_from_str(state: &str) -> crate::proto::paryty::v1::TcpState {
     }
 }
 
-// â”€â”€ Helper Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Helper Functions ───────────────────────────────────────────────────
 
 /// Get the system hostname.
 ///
@@ -1336,7 +1341,7 @@ fn collect_local_ips() -> Vec<String> {
     ips
 }
 
-// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── Tests ──────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod tests {
@@ -1348,7 +1353,7 @@ mod tests {
     #[test]
     fn test_collect_local_ips() {
         let ips = collect_local_ips();
-        // Not asserting non-empty â€” some CI machines may only have loopback.
+        // Not asserting non-empty — some CI machines may only have loopback.
         // Just verify it doesn't panic.
         for ip in &ips {
             assert!(!ip.starts_with("127."), "loopback should be filtered: {}", ip);
@@ -1386,7 +1391,7 @@ mod tests {
         let config = test_config();
         let client = Client::new(&config).await.expect("Client::new should succeed");
 
-        // Send while disconnected â€” should buffer without error.
+        // Send while disconnected — should buffer without error.
         client.send_metrics("cpu", b"{\"cpu\": 42.0}").await.expect("send_metrics should succeed");
 
         // Edge buffer should have at least one entry.
@@ -1400,7 +1405,7 @@ mod tests {
         let config = test_config();
         let client = Client::new(&config).await.expect("Client::new should succeed");
 
-        // Flush empty buffer â€” should succeed without error.
+        // Flush empty buffer — should succeed without error.
         client.flush_buffer().await.expect("flush_buffer on empty buffer should succeed");
     }
 

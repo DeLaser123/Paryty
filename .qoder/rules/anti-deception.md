@@ -68,6 +68,22 @@ This rule exists because agents lie. Not maliciously — structurally. The model
 | Picking without presenting | Choosing an approach without presenting alternatives | Present options with trade-offs |
 | Hiding mistakes | Realizing an error but not correcting it | Admit and correct immediately |
 
+### Category 6: Maintainability Violations (The Extreme Balance Deception)
+
+| Pattern | Detection Signal | Required Correction |
+|---------|-----------------|-------------------|
+| Over-abstraction | 5 layers of indirection for a simple operation | Use direct function calls until repetition proves need for abstraction |
+| Sacrificing performance for readability | Choosing Box<dyn Trait> over generics in hot paths "for clarity" | Use generics — they're both clear AND fast |
+| Sacrificing safety for simplicity | Using string types instead of enums "because it's simpler" | Use enums — they're both safe AND self-documenting |
+| Sacrificing memory efficiency for "clean" code | Heap-allocating everything "to avoid complexity" | Use stack types, pre-allocation — they're both efficient AND clear |
+| Generic naming | Variables named `data`, `result`, `handler`, `info` | Use domain-specific names: `metricBatch`, `tenantConnections`, `topologySnapshot` |
+| Hidden dependencies | Functions that silently depend on global state | Explicit dependency injection at function boundaries |
+| Inconsistent patterns | Same problem solved differently in different files | Standardize on one pattern per problem category |
+| God functions | 200+ line functions that do everything | Split into focused functions with domain-meaningful names |
+| Implicit coupling | Changing module A breaks module B without any direct dependency | Eliminate implicit coupling; make all dependencies explicit |
+| Comment-driven code quality | Explaining bad code with comments instead of rewriting | Rewrite the code to be self-explanatory through types and naming |
+| Sacrificing any quality dimension | "It's readable now" (but slower, or less safe, or uses more memory) | Find the design where ALL qualities coexist — research industry patterns |
+
 ## Self-Check Protocol
 
 Before declaring ANY task complete, run this self-check:
@@ -105,6 +121,16 @@ ANTI-DECEPTION SELF-CHECK:
    - [ ] Did I agree with something I should have questioned?
    - [ ] Did I present options, or just pick one?
    - [ ] Did I say "I don't know" when I was uncertain?
+
+6. MAINTAINABILITY CHECK (Extreme Balance)
+   - [ ] Did I use domain-named types? (not generic `data`, `result`, `handler`)
+   - [ ] Are dependencies explicit at function boundaries? (no hidden global state)
+   - [ ] Did I sacrifice performance for readability? (if yes, find the design where both coexist)
+   - [ ] Did I sacrifice safety for simplicity? (if yes, use the type system — it's both safe AND simple)
+   - [ ] Did I sacrifice memory efficiency for "clean" code? (if yes, find the efficient AND clean design)
+   - [ ] Is the blast radius contained? (does changing this code affect unrelated modules?)
+   - [ ] Would a new engineer understand this code in minutes? (next-person test)
+   - [ ] Did I use consistent patterns across the codebase? (not different solutions for the same problem)
 ```
 
 If ANY answer reveals a violation, correct it before declaring the task complete.
@@ -138,4 +164,5 @@ The verification skills (`verify-rust`, `verify-go`, `verify-frontend`, `verify-
 - **Enforces**: `truth-over-perfection.md` (detects sycophancy and overconfidence)
 - **Enforces**: `verify-before-assert.md` (detects unverified claims)
 - **Enforces**: `webiq-research.md` (detects stale-data hallucinations)
+- **Enforces**: `maintainability-and-engineering-excellence.md` (detects unmaintainable code patterns and quality-dimension sacrifices)
 - **Complements**: `bug-fix-discipline.md` (detects shortcut patterns in bug fixes)

@@ -644,6 +644,71 @@ ORDER BY agent_id, table_name
     }
     Write-Host ""
 
+    # -- Multi-Tenant Summary --
+    Write-Host "  Multi-Tenant Summary:" -ForegroundColor Cyan
+    Write-Host "  ----------------------------------------------------------------" -ForegroundColor DarkGray
+    
+    # Query per-tenant stats from cpu_metrics (most recent 2 minutes)
+    $tenantStats = Query-QuestDB @"
+SELECT tenant_id, COUNT(DISTINCT agent_id) as agents, COUNT(*) as rows
+FROM cpu_metrics
+WHERE timestamp > dateadd('m', -2, now())
+GROUP BY tenant_id
+ORDER BY tenant_id
+"@
+    
+    if ($tenantStats -and $tenantStats.dataset) {
+        Write-Host ("  {0,-15} {1,10} {2,15}" -f "Tenant", "Agents", "Rows (2m)") -ForegroundColor DarkGray
+        Write-Host "  ------------------------------------------------" -ForegroundColor DarkGray
+        foreach ($row in $tenantStats.dataset) {
+            $tenant = $row[0]
+            $agents = $row[1]
+            $rows = $row[2]
+            $tenantColor = if ($tenant -eq "default") { "Yellow" } else { "Green" }
+            Write-Host ("  {0,-15} {1,10} {2,15}" -f $tenant, $agents, $rows) -ForegroundColor $tenantColor
+        }
+    } else {
+        Write-Host "  No tenant data available" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+    
+    # -- Agent Status (Online/Offline) --
+    Write-Host "  Agent Status (Heartbeat-based):" -ForegroundColor Cyan
+    Write-Host "  ----------------------------------------------------------------" -ForegroundColor DarkGray
+    
+    # Query Dragonfly for agent heartbeats via QuestDB proxy
+    # Use the most recent cpu_metrics timestamp as a proxy for heartbeat
+    $agentStatus = Query-QuestDB @"
+SELECT agent_id, tenant_id, MAX(timestamp) as last_seen,
+       DATEDIFF('s', MAX(timestamp), NOW()) as seconds_ago
+FROM cpu_metrics
+WHERE timestamp > dateadd('m', -5, now())
+GROUP BY agent_id, tenant_id
+ORDER BY tenant_id, agent_id
+"@
+    
+    if ($agentStatus -and $agentStatus.dataset) {
+        Write-Host ("  {0,-20} {1,-12} {2,15} {3,10}" -f "Agent", "Tenant", "Last Seen", "Status") -ForegroundColor DarkGray
+        Write-Host "  ------------------------------------------------" -ForegroundColor DarkGray
+        foreach ($row in $agentStatus.dataset) {
+            $agentId = if ($row[0].Length -ge 18) { $row[0].Substring(0, 16) + ".." } else { $row[0] }
+            $tenant = $row[1]
+            $lastSeen = $row[2]
+            $secondsAgo = [int]$row[3]
+            
+            $status = if ($secondsAgo -lt 30) { "ONLINE" } elseif ($secondsAgo -lt 120) { "STALE" } else { "OFFLINE" }
+            $statusColor = if ($status -eq "ONLINE") { "Green" } elseif ($status -eq "STALE") { "Yellow" } else { "Red" }
+            
+            $lastSeenStr = if ($lastSeen) { ([DateTime]$lastSeen).ToString("HH:mm:ss") } else { "unknown" }
+            
+            Write-Host ("  {0,-20} {1,-12} {2,15} " -f $agentId, $tenant, $lastSeenStr) -NoNewline
+            Write-Host $status -ForegroundColor $statusColor
+        }
+    } else {
+        Write-Host "  No agent data available" -ForegroundColor DarkGray
+    }
+    Write-Host ""
+
     # -- Legend --
     $legendParts = @(
         @('  * ', 'DarkYellow'),

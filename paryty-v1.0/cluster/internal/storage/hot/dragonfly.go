@@ -96,6 +96,13 @@ func (c *Client) Close() error {
 	return c.rdb.Close()
 }
 
+// RDB returns the underlying redis.Client for direct access.
+// Used by Phase 4 components (AlertOps, SnapshotManager) that need
+// the raw redis.Cmdable interface.
+func (c *Client) RDB() *redis.Client {
+	return c.rdb
+}
+
 // Ping checks the Dragonfly connection and logs connection pool statistics.
 func (c *Client) Ping(ctx context.Context) error {
 	if err := c.rdb.Ping(ctx).Err(); err != nil {

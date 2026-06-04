@@ -31,6 +31,12 @@ const (
 	defaultCooldown         = 30 * time.Second
 )
 
+// Default timer intervals for Phase 4 background operations.
+const (
+	defaultSnapshotInterval  = 5 * time.Minute
+	defaultRetentionInterval = 1 * time.Hour
+)
+
 // ---- Circuit Breaker ----
 
 // circuitBreakerState represents the state of a circuit breaker.
@@ -140,6 +146,43 @@ func (cb *circuitBreaker) Failures() int64 {
 	return cb.failures
 }
 
+// ---- Phase 4 Interfaces ----
+//
+// These interfaces abstract the Phase 4 components so the Store can delegate
+// operations while remaining testable with mock implementations.
+
+// TopologyUpdater atomically reads, mutates, and writes topology using
+// WATCH/MULTI/EXEC optimistic locking.
+type TopologyUpdater interface {
+	UpdateTopology(ctx context.Context, tenant string, mutate func(*models.Topology) (*models.Topology, error)) error
+}
+
+// SnapshotOperator manages timeline snapshots for cold storage.
+type SnapshotOperator interface {
+	TakeSnapshot(ctx context.Context, tenant string) (*cold.Snapshot, error)
+	GetSnapshot(ctx context.Context, tenant, id string) (*cold.Snapshot, error)
+	ReconstructState(ctx context.Context, tenant string, target time.Time) (*cold.Snapshot, error)
+}
+
+// EventLogRecorder records topology change events for inter-snapshot replay.
+// Implementations must accept the full entry; the caller is responsible for
+// populating TenantID before calling.
+type EventLogRecorder interface {
+	RecordEvent(ctx context.Context, entry cold.EventLogEntry) error
+}
+
+// QueryDownsampler performs optimized metric queries with automatic time-based
+// downsampling and Dragonfly-backed result caching.
+type QueryDownsampler interface {
+	QueryWithDownsampling(ctx context.Context, tenant, agentID, metricName string, start, end time.Time) ([]models.Metric, error)
+	QueryDatabaseQueries(ctx context.Context, tenant, agentID, protocol string, start, end time.Time, limit int) ([]warm.DbQueryRecord, error)
+}
+
+// RetentionRunner executes data retention policies across warm-tier tables.
+type RetentionRunner interface {
+	RunRetention(ctx context.Context) error
+}
+
 // ---- Storage Orchestrator ----
 
 // Config contains configuration for the storage orchestrator.
@@ -157,6 +200,33 @@ type Store struct {
 	cfg         Config
 	hotBreaker  *circuitBreaker
 	warmBreaker *circuitBreaker
+	coldBreaker *circuitBreaker
+
+	// Phase 4 components — nil if not configured via NewStoreV2.
+	topologyOps    TopologyUpdater
+	snapshotMgr    SnapshotOperator
+	eventLog       EventLogRecorder
+	queryOptimizer QueryDownsampler
+	retentionMgr   RetentionRunner
+}
+
+// StoreOptions holds optional Phase 4 components for the unified store.
+// All fields are nil-safe: methods on nil components return descriptive errors.
+type StoreOptions struct {
+	// TopologyOps provides atomic topology updates with optimistic locking.
+	TopologyOps TopologyUpdater
+
+	// SnapshotMgr manages timeline snapshots for cold storage.
+	SnapshotMgr SnapshotOperator
+
+	// EventLog records topology change events for replay.
+	EventLog EventLogRecorder
+
+	// QueryOptimizer provides cached, downsampled metric queries.
+	QueryOptimizer QueryDownsampler
+
+	// RetentionMgr executes data retention policies.
+	RetentionMgr RetentionRunner
 }
 
 // New creates a new storage orchestrator with circuit breakers for hot and warm tiers.
@@ -180,7 +250,36 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		cfg:         cfg,
 		hotBreaker:  newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
 		warmBreaker: newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		coldBreaker: newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
 	}, nil
+}
+
+// NewStoreV2 creates a new storage orchestrator with Phase 4 components.
+// It wraps New() and attaches the optional components from opts.
+func NewStoreV2(ctx context.Context, cfg Config, opts StoreOptions) (*Store, error) {
+	s, err := New(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	s.topologyOps = opts.TopologyOps
+	s.snapshotMgr = opts.SnapshotMgr
+	s.eventLog = opts.EventLog
+	s.queryOptimizer = opts.QueryOptimizer
+	s.retentionMgr = opts.RetentionMgr
+
+	return s, nil
+}
+
+// SetOptions attaches Phase 4 components to an existing Store.
+// This allows creating the store first (to access underlying clients),
+// initializing Phase 4 components, then wiring them in.
+func (s *Store) SetOptions(opts StoreOptions) {
+	s.topologyOps = opts.TopologyOps
+	s.snapshotMgr = opts.SnapshotMgr
+	s.eventLog = opts.EventLog
+	s.queryOptimizer = opts.QueryOptimizer
+	s.retentionMgr = opts.RetentionMgr
 }
 
 // HotStore returns the hot tier client for health checks and direct access.
@@ -500,6 +599,22 @@ func (s *Store) StoreNetworkEvents(ctx context.Context, tenant string, batch *pb
 
 // ---- Aggregation Operations (Warm Tier) ----
 
+// StoreAggregatedMetric writes an aggregated metric to warm storage (QuestDB).
+// Protected by the warm-tier circuit breaker.
+func (s *Store) StoreAggregatedMetric(ctx context.Context, tenant string, m *models.AggregatedMetric) error {
+	if !s.warmBreaker.Allow() {
+		return fmt.Errorf("warm store circuit breaker open")
+	}
+
+	if err := s.warm.WriteAggregatedMetric(ctx, tenant, m); err != nil {
+		s.warmBreaker.RecordFailure()
+		return err
+	}
+
+	s.warmBreaker.RecordSuccess()
+	return nil
+}
+
 // QueryAggregatedMetrics queries aggregated metrics from warm storage.
 func (s *Store) QueryAggregatedMetrics(ctx context.Context, agentID string, metricName string, window time.Duration, start, end time.Time) ([]models.AggregatedMetric, error) {
 	return s.warm.QueryAggregatedMetrics(ctx, agentID, metricName, window, start, end)
@@ -528,4 +643,289 @@ func (s *Store) QueryNetworkEvents(ctx context.Context, agentID, eventType strin
 
 	s.warmBreaker.RecordSuccess()
 	return events, nil
+}
+
+// ---- Phase 4: Topology Atomic Update (Hot Tier) ----
+
+// UpdateTopologyAtomic atomically reads, mutates, and writes the topology for
+// a tenant using optimistic locking (WATCH/MULTI/EXEC). Protected by the
+// hot-tier circuit breaker.
+//
+// The mutate function receives the current topology and must return the new
+// topology. If mutate returns an error, the update is aborted immediately.
+func (s *Store) UpdateTopologyAtomic(ctx context.Context, tenant string, mutate func(*models.Topology) (*models.Topology, error)) error {
+	if s.topologyOps == nil {
+		return fmt.Errorf("topology operations not configured")
+	}
+
+	if !s.hotBreaker.Allow() {
+		return fmt.Errorf("hot store circuit breaker open")
+	}
+
+	if err := s.topologyOps.UpdateTopology(ctx, tenant, mutate); err != nil {
+		s.hotBreaker.RecordFailure()
+		slog.Error("atomic topology update failed",
+			"error", err,
+			"tenant", tenant,
+		)
+		return err
+	}
+
+	s.hotBreaker.RecordSuccess()
+	return nil
+}
+
+// ---- Phase 4: Snapshot Operations (Cold Tier) ----
+
+// TakeSnapshot creates a full timeline snapshot for a tenant.
+// Protected by the cold-tier circuit breaker.
+func (s *Store) TakeSnapshot(ctx context.Context, tenant string) (*cold.Snapshot, error) {
+	if s.snapshotMgr == nil {
+		return nil, fmt.Errorf("snapshot manager not configured")
+	}
+
+	if !s.coldBreaker.Allow() {
+		return nil, fmt.Errorf("cold store circuit breaker open")
+	}
+
+	snapshot, err := s.snapshotMgr.TakeSnapshot(ctx, tenant)
+	if err != nil {
+		s.coldBreaker.RecordFailure()
+		slog.Error("take snapshot failed",
+			"error", err,
+			"tenant", tenant,
+		)
+		return nil, err
+	}
+
+	s.coldBreaker.RecordSuccess()
+	return snapshot, nil
+}
+
+// GetSnapshot retrieves a snapshot by ID for a tenant.
+// Protected by the cold-tier circuit breaker.
+func (s *Store) GetSnapshot(ctx context.Context, tenant, id string) (*cold.Snapshot, error) {
+	if s.snapshotMgr == nil {
+		return nil, fmt.Errorf("snapshot manager not configured")
+	}
+
+	if !s.coldBreaker.Allow() {
+		return nil, fmt.Errorf("cold store circuit breaker open")
+	}
+
+	snapshot, err := s.snapshotMgr.GetSnapshot(ctx, tenant, id)
+	if err != nil {
+		s.coldBreaker.RecordFailure()
+		return nil, err
+	}
+
+	s.coldBreaker.RecordSuccess()
+	return snapshot, nil
+}
+
+// ReconstructState reconstructs the system state at a given point in time
+// for a tenant. Uses the nearest snapshot plus event log replay.
+// Protected by the cold-tier circuit breaker.
+func (s *Store) ReconstructState(ctx context.Context, tenant string, target time.Time) (*cold.Snapshot, error) {
+	if s.snapshotMgr == nil {
+		return nil, fmt.Errorf("snapshot manager not configured")
+	}
+
+	if !s.coldBreaker.Allow() {
+		return nil, fmt.Errorf("cold store circuit breaker open")
+	}
+
+	snapshot, err := s.snapshotMgr.ReconstructState(ctx, tenant, target)
+	if err != nil {
+		s.coldBreaker.RecordFailure()
+		slog.Error("reconstruct state failed",
+			"error", err,
+			"tenant", tenant,
+			"target", target,
+		)
+		return nil, err
+	}
+
+	s.coldBreaker.RecordSuccess()
+	return snapshot, nil
+}
+
+// ---- Phase 4: Retention Operations (Warm Tier) ----
+
+// RunRetention executes data retention policies across all configured warm-tier
+// tables. Old partitions are dropped and optionally archived to cold storage.
+func (s *Store) RunRetention(ctx context.Context) error {
+	if s.retentionMgr == nil {
+		return fmt.Errorf("retention manager not configured")
+	}
+
+	if err := s.retentionMgr.RunRetention(ctx); err != nil {
+		slog.Error("retention run failed", "error", err)
+		return err
+	}
+
+	return nil
+}
+
+// ---- Phase 4: Optimized Query Operations (Warm Tier) ----
+
+// QueryMetricsOptimized queries metrics with automatic time-based downsampling.
+// The resolution is selected based on the requested time range:
+//   - ≤ 1 hour: raw metric tables (full granularity)
+//   - ≤ 24 hours: aggregated_metrics with 5m window
+//   - > 24 hours: aggregated_metrics with 1h window
+//
+// Protected by the warm-tier circuit breaker.
+func (s *Store) QueryMetricsOptimized(ctx context.Context, tenant, agentID, metricName string, start, end time.Time) ([]models.Metric, error) {
+	if s.queryOptimizer == nil {
+		return nil, fmt.Errorf("query optimizer not configured")
+	}
+
+	if !s.warmBreaker.Allow() {
+		return nil, fmt.Errorf("warm store circuit breaker open")
+	}
+
+	metrics, err := s.queryOptimizer.QueryWithDownsampling(ctx, tenant, agentID, metricName, start, end)
+	if err != nil {
+		s.warmBreaker.RecordFailure()
+		slog.Error("optimized metric query failed",
+			"error", err,
+			"tenant", tenant,
+			"agent_id", agentID,
+			"metric_name", metricName,
+		)
+		return nil, err
+	}
+
+	s.warmBreaker.RecordSuccess()
+	return metrics, nil
+}
+
+// QueryDatabaseQueries queries the db_queries table for database-level
+// observability data captured via eBPF. Protected by the warm-tier circuit breaker.
+func (s *Store) QueryDatabaseQueries(ctx context.Context, tenant, agentID, protocol string, start, end time.Time, limit int) ([]warm.DbQueryRecord, error) {
+	if s.queryOptimizer == nil {
+		return nil, fmt.Errorf("query optimizer not configured")
+	}
+
+	if !s.warmBreaker.Allow() {
+		return nil, fmt.Errorf("warm store circuit breaker open")
+	}
+
+	records, err := s.queryOptimizer.QueryDatabaseQueries(ctx, tenant, agentID, protocol, start, end, limit)
+	if err != nil {
+		s.warmBreaker.RecordFailure()
+		slog.Error("database query failed",
+			"error", err,
+			"tenant", tenant,
+			"agent_id", agentID,
+			"protocol", protocol,
+		)
+		return nil, err
+	}
+
+	s.warmBreaker.RecordSuccess()
+	return records, nil
+}
+
+// ---- Phase 4: Event Log Operations (Cold Tier) ----
+
+// RecordEventLog records a topology change event in the event log.
+// Used for inter-snapshot state reconstruction. Protected by the cold-tier
+// circuit breaker.
+//
+// The tenant parameter is injected into entry.TenantID before delegation.
+func (s *Store) RecordEventLog(ctx context.Context, tenant string, entry cold.EventLogEntry) error {
+	if s.eventLog == nil {
+		return fmt.Errorf("event log not configured")
+	}
+
+	if !s.coldBreaker.Allow() {
+		return fmt.Errorf("cold store circuit breaker open")
+	}
+
+	// Inject tenant into the entry for tenant isolation.
+	entry.TenantID = tenant
+
+	if err := s.eventLog.RecordEvent(ctx, entry); err != nil {
+		s.coldBreaker.RecordFailure()
+		slog.Error("record event log failed",
+			"error", err,
+			"tenant", tenant,
+			"event_type", entry.Type,
+		)
+		return err
+	}
+
+	s.coldBreaker.RecordSuccess()
+	return nil
+}
+
+// ---- Phase 4: Background Timers ----
+
+// StartSnapshotTimer starts a background goroutine that takes snapshots at
+// the given interval. It stops when ctx is cancelled. If interval is zero,
+// defaultSnapshotInterval (5 minutes) is used.
+//
+// The goroutine runs TakeSnapshot for the given tenant on each tick.
+// Errors are logged but do not stop the timer.
+func (s *Store) StartSnapshotTimer(ctx context.Context, interval time.Duration, tenant string) {
+	if interval <= 0 {
+		interval = defaultSnapshotInterval
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		slog.Info("snapshot timer started",
+			"tenant", tenant,
+			"interval", interval,
+		)
+
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("snapshot timer stopped", "tenant", tenant)
+				return
+			case <-ticker.C:
+				if _, err := s.TakeSnapshot(ctx, tenant); err != nil {
+					slog.Warn("scheduled snapshot failed",
+						"error", err,
+						"tenant", tenant,
+					)
+				}
+			}
+		}
+	}()
+}
+
+// StartRetentionTimer starts a background goroutine that runs retention
+// policies at the given interval. It stops when ctx is cancelled. If interval
+// is zero, defaultRetentionInterval (1 hour) is used.
+//
+// Errors are logged but do not stop the timer.
+func (s *Store) StartRetentionTimer(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = defaultRetentionInterval
+	}
+
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+
+		slog.Info("retention timer started", "interval", interval)
+
+		for {
+			select {
+			case <-ctx.Done():
+				slog.Info("retention timer stopped")
+				return
+			case <-ticker.C:
+				if err := s.RunRetention(ctx); err != nil {
+					slog.Warn("scheduled retention run failed", "error", err)
+				}
+			}
+		}
+	}()
 }

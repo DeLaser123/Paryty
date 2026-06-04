@@ -265,8 +265,14 @@ func (s *IngestionService) StoreNetworkEvents(ctx context.Context, tenant string
 		return err
 	}
 
+	// Convert protobuf batch to domain model for Redpanda.
+	// We cannot publish the raw protobuf because encoding/json serializes
+	// google.protobuf.Timestamp as {"Seconds":...,"Nanos":...} (an object)
+	// instead of a string, breaking downstream consumers that expect time.Time.
+	modelEvent := networkEventBatchToModel(batch)
+
 	// Publish to tenant-scoped network events stream.
-	if err := s.stream.Producer().PublishTenant(ctx, stream.TopicNetworkEvents(tenant), tenant, agentID, batch); err != nil {
+	if err := s.stream.Producer().PublishTenant(ctx, stream.TopicNetworkEvents(tenant), tenant, agentID, modelEvent); err != nil {
 		slog.Error("network event stream publish failed, attempting DLQ",
 			"error", err,
 			"tenant", tenant,
@@ -286,6 +292,63 @@ func (s *IngestionService) StoreNetworkEvents(ctx context.Context, tenant string
 	)
 
 	return nil
+}
+
+// networkEventBatchToModel converts a protobuf NetworkEventBatch to the
+// domain model NetworkEvent that the processing pipeline expects.
+func networkEventBatchToModel(batch *pb.NetworkEventBatch) models.NetworkEvent {
+	evt := models.NetworkEvent{
+		AgentID: batch.GetAgentId(),
+	}
+
+	if ts := batch.GetTimestamp(); ts != nil {
+		evt.Timestamp = ts.AsTime()
+	} else {
+		evt.Timestamp = time.Now()
+	}
+
+	for _, e := range batch.GetEvents() {
+		switch ev := e.GetEvent().(type) {
+		case *pb.NetworkEvent_TcpConnection:
+			evt.TCP = append(evt.TCP, models.TCPEvent{
+				SrcIP:     ev.TcpConnection.SourceIp,
+				DstIP:     ev.TcpConnection.DestinationIp,
+				SrcPort:   uint32(ev.TcpConnection.SourcePort),
+				DstPort:   uint32(ev.TcpConnection.DestinationPort),
+				State:     ev.TcpConnection.State.String(),
+				BytesSent: uint64(ev.TcpConnection.BytesSent),
+				BytesRecv: uint64(ev.TcpConnection.BytesReceived),
+			})
+		case *pb.NetworkEvent_DnsQuery:
+			resolved := ""
+			if len(ev.DnsQuery.ResolvedIps) > 0 {
+				resolved = ev.DnsQuery.ResolvedIps[0]
+			}
+			evt.DNS = append(evt.DNS, models.DNSEvent{
+				Query:     ev.DnsQuery.QueryName,
+				Response:  resolved,
+				LatencyMs: uint64(ev.DnsQuery.LatencyMs),
+				RCode:     0, // proto uses string, model uses uint32
+			})
+		case *pb.NetworkEvent_HttpRequest:
+			evt.HTTP = append(evt.HTTP, models.HTTPEvent{
+				Method:    ev.HttpRequest.Method,
+				Path:      ev.HttpRequest.Path,
+				Status:    uint32(ev.HttpRequest.StatusCode),
+				LatencyMs: uint64(ev.HttpRequest.LatencyMs),
+				Host:      ev.HttpRequest.Host,
+			})
+		case *pb.NetworkEvent_DbQuery:
+			evt.DB = append(evt.DB, models.DBEvent{
+				Database:     ev.DbQuery.Database,
+				Query:        ev.DbQuery.Query,
+				LatencyMs:    uint64(ev.DbQuery.LatencyMs),
+				RowsAffected: uint64(ev.DbQuery.RowCount),
+			})
+		}
+	}
+
+	return evt
 }
 
 // GetAgent returns agent info.

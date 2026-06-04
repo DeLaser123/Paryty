@@ -26,6 +26,11 @@ pub struct AgentConfig {
     pub id: String,
     pub cluster_endpoint: String,
     pub api_key: String,
+    /// Optional tenant ID for multi-tenant routing.
+    /// When set, the agent sends `x-tenant-id` gRPC metadata.
+    /// Can also be set via `PARYTY_TENANT_ID` environment variable.
+    #[serde(default)]
+    pub tenant_id: Option<String>,
     pub self_metrics: SelfMetricsConfig,
 }
 
@@ -288,6 +293,10 @@ pub fn load_from_str(yaml: &str) -> Result<Config> {
 
     if let Ok(endpoint) = std::env::var("PARYTY_CLUSTER_ENDPOINT") {
         config.agent.cluster_endpoint = endpoint;
+    }
+
+    if let Ok(tenant_id) = std::env::var("PARYTY_TENANT_ID") {
+        config.agent.tenant_id = Some(tenant_id);
     }
 
     // Generate agent ID if set to "auto"

@@ -359,10 +359,10 @@ This is organized in **8 phases**, each building on the previous. **You control 
 
 ---
 
-### PHASE 4: STORAGE LAYER COMPLETION (Weeks 10-12)
-**Target: +10,000 LOC → Total: ~76K LOC**
+### PHASE 4: STORAGE LAYER COMPLETION & MULTI-TENANCY (Weeks 10-12)
+**Target: +13,500 LOC → Total: ~79.5K LOC**
 
-**Goal:** Production-ready 3-tier storage with data lifecycle
+**Goal:** Production-ready 3-tier storage with data lifecycle, eBPF DB inspection, and multi-tenant control plane
 
 #### Layer 14: Hot Store Productionization (Go) — ~3,000 LOC
 
@@ -430,6 +430,66 @@ This is organized in **8 phases**, each building on the previous. **You control 
     - Implement range queries (get snapshots between timestamps)
     - Support timeline replay data fetching
     - Add download caching for repeated access
+
+#### Layer 17: eBPF Database Protocol Inspection (Rust + C) — ~3,000 LOC
+
+58. **PostgreSQL Protocol Parser** (need ~500 LOC)
+    - Parse PostgreSQL wire protocol (Query, Parse, Bind, Execute)
+    - Extract query text, table names, query type (SELECT/INSERT/UPDATE/DELETE)
+    - Measure query latency from request/response timing
+
+59. **MySQL Protocol Parser** (need ~500 LOC)
+    - Parse MySQL COM_QUERY packets
+    - Extract query text, table names, query type
+    - Handle MySQL protocol quirks (capabilities, status flags)
+
+60. **Redis RESP Protocol Parser** (need ~400 LOC)
+    - Parse RESP2/RESP3 protocol (inline and array formats)
+    - Extract command, key prefixes, query type (READ/WRITE)
+    - Handle Redis clusterMOVED redirections
+
+61. **eBPF DB Probe** (need ~300 LOC)
+    - Write C eBPF program for DB packet capture
+    - Attach to kprobes on TCP send/recv for ports 5432, 3306, 6379
+    - Pass packet data to userspace via ring buffer
+
+62. **TLS Fallback** (need ~200 LOC)
+    - Detect TLS ClientHello (0x16 0x03 header)
+    - Fall back to connection-only detection for encrypted traffic
+    - Log encrypted connection metadata (source, dest, port, duration)
+
+#### Layer 18: Multi-Tenant Control Plane (Go) — ~500 LOC
+
+63. **PostgreSQL Tenant Schema** (need ~100 LOC)
+    - Create `tenants` table (tenant_id UUID, name, status, created_at)
+    - Create `api_keys` table (key_id, tenant_id, key_hash, key_prefix)
+    - Add index on key_prefix for O(1) lookup
+
+64. **Tenant Manager** (need ~200 LOC)
+    - Implement tenant CRUD (CreateTenant, GetTenant, ListTenants)
+    - Generate tenant UUIDs at account creation
+    - Support tenant status lifecycle (active, suspended, deleted)
+
+65. **API Key Manager** (need ~200 LOC)
+    - Generate API keys with `pk_live_` prefix
+    - Hash keys with bcrypt for storage
+    - Validate keys via prefix lookup (O(1)) + bcrypt compare
+    - Support key rotation and revocation
+
+66. **gRPC Auth Interceptor** (need ~100 LOC)
+    - Extract `x-api-key` from gRPC metadata
+    - Validate key and inject tenant_id into context
+    - Return Unauthenticated for invalid/missing keys
+
+67. **Agent Tenant Cache** (need ~100 LOC)
+    - Cache tenant_id to local file after registration
+    - Read cached tenant_id on restart (avoid re-registration)
+    - Re-register if cache is missing or invalid
+
+68. **Pipeline Multi-Tenant Routing** (need ~60 LOC)
+    - Extract tenant_id from topic name (`paryty.{tenant}.*`)
+    - Add TenantID to WindowKey for per-tenant window isolation
+    - Ensure all store calls pass tenant_id explicitly
 
 ---
 
@@ -818,6 +878,9 @@ For each phase, deploy specialized agents:
 - ✅ Hot store serves live metrics in <1ms
 - ✅ Warm store handles 100K inserts/sec, queries in <50ms
 - ✅ Cold store archives snapshots, retrievable for timeline replay
+- ✅ eBPF extracts PostgreSQL/MySQL/Redis queries from plaintext connections
+- ✅ Multi-tenant pipeline isolates data by tenant_id (no cross-tenant leakage)
+- ✅ API key validation rejects invalid keys with Unauthenticated error
 
 **Phase 5 Acceptance:**
 - ✅ Frontend renders 15K nodes at 60fps
@@ -924,8 +987,8 @@ Every decision below has been finalized. **No agent may deviate from these decis
 
 ---
 
-### Phase 4: Storage Layer Completion
-**Spec:** `docs/phase-4-hardened-spec.md` (2,673 lines)
+### Phase 4: Storage Layer Completion & Multi-Tenancy
+**Spec:** `docs/phase-4-hardened-spec.md` (3,152 lines)
 
 | # | Decision | Choice | Rationale |
 |---|----------|--------|-----------|
@@ -934,6 +997,7 @@ Every decision below has been finalized. **No agent may deviate from these decis
 | 3 | Timeline Snapshot Architecture | **Full snapshots + Event log** | Full snapshots every 5min as checkpoints. Redpanda event log for inter-snapshot replay. |
 | 4 | Cold Store Query Cache | **Dragonfly LRU Cache** | Cache recently accessed snapshots (~100 snapshots, ~1GB). Covers 90% of queries. |
 | 5 | eBPF DB Protocol Inspection | **Full query extraction + TLS fallback** | Parse PostgreSQL/MySQL/Redis protocols. Fall back to connection-only for TLS. |
+| 6 | Multi-Tenant Pipeline | **API-Key-Based Tenant Resolution** | Agents carry API keys (not tenant IDs). Tenant ID derived during registration. Topic-per-tenant with partition key `{tenant_id}:{agent_id}`. Scales to millions of tenants. |
 
 ---
 
@@ -1009,7 +1073,7 @@ These principles apply across ALL phases and override any agent suggestion:
 | `docs/phase-1-hardened-spec.md` | 2,312 | ~15,000 | LOCKED |
 | `docs/phase-2-hardened-spec.md` | 1,948 | ~10,000 | LOCKED |
 | `docs/phase-3-hardened-spec.md` | 2,185 | ~8,000 | LOCKED |
-| `docs/phase-4-hardened-spec.md` | 2,673 | ~9,000 | LOCKED |
+| `docs/phase-4-hardened-spec.md` | 3,152 | ~13,500 | LOCKED |
 | `docs/phase-5-hardened-spec.md` | 1,883 | ~10,400 | LOCKED |
 | `docs/phase-6-hardened-spec.md` | 3,165 | ~14,200 | LOCKED |
 | `docs/phase-7-hardened-spec.md` | 1,482 | ~4,200 | LOCKED |

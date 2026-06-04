@@ -22,15 +22,15 @@ import (
 
 // Defaults for configuration fields when YAML omits them.
 const (
-	DefaultPort               = 50051
-	DefaultPoolSize           = 10
-	DefaultMaxConns           = 20
-	DefaultTTL                = "5m"
-	DefaultMaxBatchesPerMin   = 10000
-	DefaultDesiredIntervalMs  = 10000
-	DefaultSamplingRate       = 1.0
-	DefaultMaxConnections     = 10000
-	DefaultRegion             = "us-east-1"
+	DefaultPort              = 50051
+	DefaultPoolSize          = 10
+	DefaultMaxConns          = 20
+	DefaultTTL               = "5m"
+	DefaultMaxBatchesPerMin  = 10000
+	DefaultDesiredIntervalMs = 10000
+	DefaultSamplingRate      = 1.0
+	DefaultMaxConnections    = 10000
+	DefaultRegion            = "us-east-1"
 )
 
 // Config is the top-level configuration mapped to the cluster YAML schema.
@@ -47,6 +47,7 @@ type ClusterConfig struct {
 	Storage     StorageConfig     `yaml:"storage"`
 	RateLimit   RateLimitConfig   `yaml:"rate_limit"`
 	FlowControl FlowControlConfig `yaml:"flow_control"`
+	Processing  ProcessingConfig  `yaml:"processing"`
 }
 
 // IngestionConfig configures the gRPC ingestion service.
@@ -117,6 +118,81 @@ type FlowControlConfig struct {
 	SamplingRate      float64 `yaml:"sampling_rate"`
 }
 
+// PipelineConfig holds the processing pipeline configuration.
+type PipelineConfig struct {
+	ConsumerGroup       string        `yaml:"consumer_group"`
+	InputTopics         []string      `yaml:"input_topics"`
+	BatchSize           int           `yaml:"batch_size"`
+	BatchTimeout        time.Duration `yaml:"batch_timeout"`
+	HealthCheckInterval time.Duration `yaml:"health_check_interval"`
+}
+
+// AggregatorPipelineConfig holds aggregator-specific configuration.
+type AggregatorPipelineConfig struct {
+	WindowSizes      DurationSlice `yaml:"window_sizes"`
+	GracePeriod      time.Duration `yaml:"grace_period"`
+	SnapshotInterval time.Duration `yaml:"snapshot_interval"`
+	TopNSize         int           `yaml:"top_n_size"`
+}
+
+// DurationSlice is a []time.Duration that supports flexible parsing
+// including "d" (days) suffix in YAML.
+type DurationSlice []time.Duration
+
+// UnmarshalYAML implements yaml.Unmarshaler for DurationSlice.
+func (ds *DurationSlice) UnmarshalYAML(value func(interface{}) error) error {
+	var raw []string
+	if err := value(&raw); err != nil {
+		return err
+	}
+	*ds = make(DurationSlice, 0, len(raw))
+	for _, s := range raw {
+		d, err := parseFlexibleDuration(s)
+		if err != nil {
+			return fmt.Errorf("parse window_size %q: %w", s, err)
+		}
+		*ds = append(*ds, d)
+	}
+	return nil
+}
+
+// CorrelatorPipelineConfig holds correlator-specific configuration.
+type CorrelatorPipelineConfig struct {
+	StaleNodeTimeout      time.Duration `yaml:"stale_node_timeout"`
+	GraphSnapshotInterval time.Duration `yaml:"graph_snapshot_interval"`
+	EventBufferSize       int           `yaml:"event_buffer_size"`
+	CorrelationWindow     time.Duration `yaml:"correlation_window"`
+}
+
+// EnricherPipelineConfig holds enricher-specific configuration.
+type EnricherPipelineConfig struct {
+	StandardLabelKeys  []string `yaml:"standard_label_keys"`
+	MaxLabelsPerMetric int      `yaml:"max_labels_per_metric"`
+	LabelPrefix        string   `yaml:"label_prefix"`
+}
+
+// DownsamplingRule defines a retention and downsampling policy.
+type DownsamplingRule struct {
+	SourceWindow  string `yaml:"source_window"`
+	TargetWindow  string `yaml:"target_window"`
+	RetentionDays int    `yaml:"retention_days"`
+}
+
+// DownsamplerConfig holds downsampler configuration.
+type DownsamplerConfig struct {
+	Rules       []DownsamplingRule `yaml:"rules"`
+	RunInterval time.Duration      `yaml:"run_interval"`
+}
+
+// ProcessingConfig holds all processing pipeline configuration.
+type ProcessingConfig struct {
+	Pipeline    PipelineConfig           `yaml:"pipeline"`
+	Aggregator  AggregatorPipelineConfig  `yaml:"aggregator"`
+	Correlator  CorrelatorPipelineConfig  `yaml:"correlator"`
+	Enricher    EnricherPipelineConfig    `yaml:"enricher"`
+	Downsampler DownsamplerConfig         `yaml:"downsampler"`
+}
+
 // Load reads a YAML file at path, applies defaults, and then applies
 // environment variable overrides. It returns a fully populated Config.
 func Load(path string) (*Config, error) {
@@ -134,6 +210,22 @@ func Load(path string) (*Config, error) {
 	applyEnvOverrides(cfg)
 
 	return cfg, nil
+}
+
+// parseFlexibleDuration parses a duration string, adding support for
+// "d" (days) suffix which Go's time.ParseDuration does not handle.
+// Examples: "1d" -> 24h, "7d" -> 168h, "30s" -> 30s.
+func parseFlexibleDuration(s string) (time.Duration, error) {
+	s = strings.TrimSpace(s)
+	if strings.HasSuffix(s, "d") {
+		numStr := strings.TrimSuffix(s, "d")
+		days, err := strconv.ParseFloat(numStr, 64)
+		if err != nil {
+			return 0, fmt.Errorf("parse duration %q: invalid day value", s)
+		}
+		return time.Duration(days * 24 * float64(time.Hour)), nil
+	}
+	return time.ParseDuration(s)
 }
 
 // Validate checks that the configuration has all required fields populated
@@ -251,6 +343,78 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Cluster.FlowControl.SamplingRate == 0 {
 		cfg.Cluster.FlowControl.SamplingRate = DefaultSamplingRate
+	}
+
+	// Pipeline defaults.
+	if cfg.Cluster.Processing.Pipeline.ConsumerGroup == "" {
+		cfg.Cluster.Processing.Pipeline.ConsumerGroup = "paryty-pipeline"
+	}
+	if cfg.Cluster.Processing.Pipeline.BatchSize == 0 {
+		cfg.Cluster.Processing.Pipeline.BatchSize = 100
+	}
+	if cfg.Cluster.Processing.Pipeline.BatchTimeout == 0 {
+		cfg.Cluster.Processing.Pipeline.BatchTimeout = time.Second
+	}
+	if cfg.Cluster.Processing.Pipeline.HealthCheckInterval == 0 {
+		cfg.Cluster.Processing.Pipeline.HealthCheckInterval = 10 * time.Second
+	}
+
+	// Aggregator defaults.
+	if len(cfg.Cluster.Processing.Aggregator.WindowSizes) == 0 {
+		cfg.Cluster.Processing.Aggregator.WindowSizes = []time.Duration{
+			time.Minute,
+			5 * time.Minute,
+			time.Hour,
+			24 * time.Hour,
+		}
+	}
+	if cfg.Cluster.Processing.Aggregator.GracePeriod == 0 {
+		cfg.Cluster.Processing.Aggregator.GracePeriod = 30 * time.Second
+	}
+	if cfg.Cluster.Processing.Aggregator.SnapshotInterval == 0 {
+		cfg.Cluster.Processing.Aggregator.SnapshotInterval = 30 * time.Second
+	}
+	if cfg.Cluster.Processing.Aggregator.TopNSize == 0 {
+		cfg.Cluster.Processing.Aggregator.TopNSize = 10
+	}
+
+	// Correlator defaults.
+	if cfg.Cluster.Processing.Correlator.StaleNodeTimeout == 0 {
+		cfg.Cluster.Processing.Correlator.StaleNodeTimeout = 5 * time.Minute
+	}
+	if cfg.Cluster.Processing.Correlator.GraphSnapshotInterval == 0 {
+		cfg.Cluster.Processing.Correlator.GraphSnapshotInterval = 60 * time.Second
+	}
+	if cfg.Cluster.Processing.Correlator.EventBufferSize == 0 {
+		cfg.Cluster.Processing.Correlator.EventBufferSize = 10000
+	}
+	if cfg.Cluster.Processing.Correlator.CorrelationWindow == 0 {
+		cfg.Cluster.Processing.Correlator.CorrelationWindow = 30 * time.Second
+	}
+
+	// Enricher defaults.
+	if len(cfg.Cluster.Processing.Enricher.StandardLabelKeys) == 0 {
+		cfg.Cluster.Processing.Enricher.StandardLabelKeys = []string{
+			"env", "region", "team", "service", "version",
+		}
+	}
+	if cfg.Cluster.Processing.Enricher.MaxLabelsPerMetric == 0 {
+		cfg.Cluster.Processing.Enricher.MaxLabelsPerMetric = 20
+	}
+	if cfg.Cluster.Processing.Enricher.LabelPrefix == "" {
+		cfg.Cluster.Processing.Enricher.LabelPrefix = "agent."
+	}
+
+	// Downsampler defaults.
+	if cfg.Cluster.Processing.Downsampler.RunInterval == 0 {
+		cfg.Cluster.Processing.Downsampler.RunInterval = time.Hour
+	}
+	if len(cfg.Cluster.Processing.Downsampler.Rules) == 0 {
+		cfg.Cluster.Processing.Downsampler.Rules = []DownsamplingRule{
+			{SourceWindow: "1m", TargetWindow: "5m", RetentionDays: 7},
+			{SourceWindow: "5m", TargetWindow: "1h", RetentionDays: 30},
+			{SourceWindow: "1h", TargetWindow: "1d", RetentionDays: 90},
+		}
 	}
 }
 

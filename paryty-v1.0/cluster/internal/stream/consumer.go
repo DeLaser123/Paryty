@@ -24,6 +24,11 @@ const (
 // Handler is a function that handles consumed messages.
 type Handler func(ctx context.Context, key string, value []byte) error
 
+// RecordHandler is a function that handles consumed records with topic context.
+// Unlike Handler, RecordHandler receives the full kgo.Record including the
+// Topic field, enabling topic-aware routing in the pipeline.
+type RecordHandler func(ctx context.Context, record *kgo.Record) error
+
 // ConsumerOption configures the Consumer.
 type ConsumerOption func(*Consumer)
 
@@ -54,19 +59,20 @@ func WithDrainTimeout(d time.Duration) ConsumerOption {
 // Consumer is the Redpanda consumer with DLQ support, retry with backoff,
 // lag monitoring, and graceful drain.
 type Consumer struct {
-	client       *kgo.Client
-	handler      Handler
-	logger       *zap.Logger
-	cfg          Config
-	group        string
-	wg           sync.WaitGroup
-	cancel       context.CancelFunc
-	draining     atomic.Bool
-	dlqProducer  *Producer
-	dlqTopic     string
-	maxRetries   int
-	drainTimeout time.Duration
-	adminClient  *kadm.Client
+	client        *kgo.Client
+	handler       Handler
+	recordHandler RecordHandler
+	logger        *zap.Logger
+	cfg           Config
+	group         string
+	wg            sync.WaitGroup
+	cancel        context.CancelFunc
+	draining      atomic.Bool
+	dlqProducer   *Producer
+	dlqTopic      string
+	maxRetries    int
+	drainTimeout  time.Duration
+	adminClient   *kadm.Client
 }
 
 // NewConsumer creates a new Redpanda consumer with optional configuration.
@@ -131,6 +137,14 @@ func NewConsumerWithDLQ(cfg Config, group string, topics []string, handler Handl
 	)
 
 	return c, nil
+}
+
+// SetRecordHandler sets a RecordHandler that receives the full kgo.Record
+// including topic information, enabling topic-aware routing in the pipeline.
+// When set, this handler takes precedence over the Handler provided at
+// construction time. Both handlers share the same retry and DLQ semantics.
+func (c *Consumer) SetRecordHandler(rh RecordHandler) {
+	c.recordHandler = rh
 }
 
 // Close gracefully shuts down the consumer.
@@ -277,7 +291,14 @@ func (c *Consumer) processRecord(ctx context.Context, record *kgo.Record) {
 			}
 		}
 
-		err := c.handler(ctx, string(record.Key), record.Value)
+		// Dispatch to record handler (topic-aware) or handler (key+value only).
+		var err error
+		if c.recordHandler != nil {
+			err = c.recordHandler(ctx, record)
+		} else {
+			err = c.handler(ctx, string(record.Key), record.Value)
+		}
+
 		if err == nil {
 			if attempt > 0 {
 				c.logger.Info("Handler succeeded after retry",
@@ -359,15 +380,15 @@ func (c *Consumer) publishToDLQ(ctx context.Context, record *kgo.Record, handler
 	if err := c.dlqProducer.client.ProduceSync(dlqCtx, dlqRecord).FirstErr(); err != nil {
 		c.logger.Error("Failed to publish to DLQ (best-effort, message lost)",
 			zap.String("original_topic", record.Topic),
-			zap.Int32("original_partition", record.Partition),
-			zap.Int64("original_offset", record.Offset),
+			zap.Int32("partition", record.Partition),
+			zap.Int64("offset", record.Offset),
 			zap.Error(err),
 		)
 	} else {
 		c.logger.Info("Message published to DLQ",
 			zap.String("original_topic", record.Topic),
-			zap.Int32("original_partition", record.Partition),
-			zap.Int64("original_offset", record.Offset),
+			zap.Int32("partition", record.Partition),
+			zap.Int64("offset", record.Offset),
 			zap.String("dlq_topic", c.dlqTopic),
 		)
 	}

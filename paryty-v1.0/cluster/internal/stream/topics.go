@@ -9,6 +9,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// DefaultTenant is the tenant identifier used when no tenant context is available.
+const DefaultTenant = "default"
+
 // TopicManager manages Redpanda topics.
 type TopicManager struct {
 	client *kadm.Client
@@ -97,6 +100,11 @@ type topicConfig struct {
 	replication int16
 }
 
+// TopicForTenant builds a fully qualified topic name for the given tenant: paryty.<tenant>.<topic>.
+func TopicForTenant(tenant, topic string) string {
+	return fmt.Sprintf("paryty.%s.%s", tenant, topic)
+}
+
 // Tenant-scoped topic name functions.
 // Each function produces a namespaced topic name: paryty.<tenant>.<topic>.
 
@@ -109,15 +117,34 @@ func TopicTopologyChanges(tenant string) string { return fmt.Sprintf("paryty.%s.
 func TopicAlerts(tenant string) string          { return fmt.Sprintf("paryty.%s.alerts", tenant) }
 func TopicDLQ(tenant string) string             { return fmt.Sprintf("paryty.%s.dead-letter", tenant) }
 
+// Topic name constants for pipeline stage output topics.
+const (
+	// TopicMetricsEnriched is the topic suffix for enriched metrics output.
+	TopicMetricsEnriched = "metrics.enriched"
+	// TopicCorrelations is the topic suffix for correlation events.
+	TopicCorrelations = "correlations"
+	// TopicDependencyGraph is the topic suffix for dependency graph updates.
+	TopicDependencyGraph = "dependency.graph"
+)
+
 // Default-tenant convenience functions. Use these when tenant context is not yet available.
-func DefaultTopicMetricsRaw() string      { return TopicMetricsRaw("default") }
-func DefaultTopicMetricsAgg() string      { return TopicMetricsAgg("default") }
-func DefaultTopicTraces() string          { return TopicTraces("default") }
-func DefaultTopicEvents() string          { return TopicEvents("default") }
-func DefaultTopicNetworkEvents() string   { return TopicNetworkEvents("default") }
-func DefaultTopicTopologyChanges() string { return TopicTopologyChanges("default") }
-func DefaultTopicAlerts() string          { return TopicAlerts("default") }
-func DefaultTopicDLQ() string             { return TopicDLQ("default") }
+func DefaultTopicMetricsRaw() string      { return TopicMetricsRaw(DefaultTenant) }
+func DefaultTopicMetricsAgg() string      { return TopicMetricsAgg(DefaultTenant) }
+func DefaultTopicTraces() string          { return TopicTraces(DefaultTenant) }
+func DefaultTopicEvents() string          { return TopicEvents(DefaultTenant) }
+func DefaultTopicNetworkEvents() string   { return TopicNetworkEvents(DefaultTenant) }
+func DefaultTopicTopologyChanges() string { return TopicTopologyChanges(DefaultTenant) }
+func DefaultTopicAlerts() string          { return TopicAlerts(DefaultTenant) }
+func DefaultTopicDLQ() string             { return TopicDLQ(DefaultTenant) }
+
+// DefaultTopicMetricsEnriched returns the enriched metrics topic for the default tenant.
+func DefaultTopicMetricsEnriched() string { return TopicForTenant(DefaultTenant, TopicMetricsEnriched) }
+
+// DefaultTopicCorrelations returns the correlations topic for the default tenant.
+func DefaultTopicCorrelations() string { return TopicForTenant(DefaultTenant, TopicCorrelations) }
+
+// DefaultTopicDependencyGraph returns the dependency graph topic for the default tenant.
+func DefaultTopicDependencyGraph() string { return TopicForTenant(DefaultTenant, TopicDependencyGraph) }
 
 // requiredTopics returns the topic configurations for a tenant.
 func requiredTopics(tenant string) []topicConfig {
@@ -130,6 +157,9 @@ func requiredTopics(tenant string) []topicConfig {
 		{TopicTopologyChanges(tenant), 3, 1},
 		{TopicAlerts(tenant), 3, 1},
 		{TopicDLQ(tenant), 3, 1},
+		{TopicForTenant(tenant, TopicMetricsEnriched), 12, 1},
+		{TopicForTenant(tenant, TopicCorrelations), 6, 1},
+		{TopicForTenant(tenant, TopicDependencyGraph), 3, 1},
 	}
 }
 

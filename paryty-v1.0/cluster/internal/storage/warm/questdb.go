@@ -8,6 +8,7 @@ package warm
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -345,6 +346,42 @@ var createTableStatements = []string{
 		host STRING,
 		pid INT
 	) TIMESTAMP(timestamp) PARTITION BY DAY WAL`,
+
+	// ---- Phase 4 Tables ----
+
+	`CREATE TABLE IF NOT EXISTS db_queries (
+		timestamp TIMESTAMP,
+		agent_id SYMBOL,
+		tenant_id SYMBOL,
+		protocol SYMBOL,
+		query_type SYMBOL,
+		table_name SYMBOL,
+		database SYMBOL,
+		destination_ip SYMBOL,
+		destination_port INT,
+		pid INT,
+		process_name SYMBOL,
+		latency_ms DOUBLE,
+		row_count LONG,
+		error_message STRING,
+		query_sample STRING
+	) TIMESTAMP(timestamp) PARTITION BY DAY WAL`,
+
+	`CREATE TABLE IF NOT EXISTS topology_snapshots (
+		timestamp TIMESTAMP,
+		snapshot_id SYMBOL,
+		tenant_id SYMBOL,
+		node_count LONG,
+		edge_count LONG,
+		snapshot_data STRING,
+		is_checkpoint BOOLEAN
+	) TIMESTAMP(timestamp) PARTITION BY DAY WAL`,
+
+	`CREATE TABLE IF NOT EXISTS paryty_schema_version (
+		version LONG,
+		applied_at TIMESTAMP,
+		description STRING
+	)`,
 }
 
 // ---- Metric Operations (PG INSERT — fallback path) ----
@@ -606,8 +643,27 @@ func (c *Client) InsertNetworkEvents(batch *pb.NetworkEventBatch, tenant string)
 				return fmt.Errorf("insert http event: %w", err)
 			}
 
+		case *pb.NetworkEvent_DbQuery:
+			dbQuery := e.DbQuery
+			query := `INSERT INTO db_queries
+				(timestamp, agent_id, tenant_id, protocol, query_type, table_name,
+				 database, destination_ip, destination_port, pid, process_name,
+				 latency_ms, row_count, error_message, query_sample)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+			if _, err := tx.Exec(ctx, query,
+				ts, agentID, tenant,
+				dbQuery.GetProtocol(), dbQuery.GetQueryType(), "",
+				dbQuery.GetDatabase(),
+				dbQuery.GetDestinationIp(), dbQuery.GetDestinationPort(),
+				dbQuery.GetPid(), dbQuery.GetProcessName(),
+				dbQuery.GetLatencyMs(), dbQuery.GetRowCount(),
+				dbQuery.GetErrorMessage(), dbQuery.GetQuery(),
+			); err != nil {
+				return fmt.Errorf("insert db query event: %w", err)
+			}
+
 		default:
-			// DbQueryEvent or unrecognized variant — skip.
+			// Unrecognized variant — skip.
 		}
 	}
 
@@ -638,6 +694,29 @@ func (c *Client) QueryMetrics(ctx context.Context, agentID string, metricName st
 		metrics = append(metrics, m)
 	}
 	return metrics, rows.Err()
+}
+
+// WriteAggregatedMetric writes a single aggregated metric to QuestDB.
+func (c *Client) WriteAggregatedMetric(ctx context.Context, tenant string, m *models.AggregatedMetric) error {
+	// Serialize labels to JSON string.
+	labelsJSON := "{}"
+	if len(m.Labels) > 0 {
+		b, err := json.Marshal(m.Labels)
+		if err == nil {
+			labelsJSON = string(b)
+		}
+	}
+
+	query := `INSERT INTO aggregated_metrics (timestamp, agent_id, tenant_id, name, labels, window, agg_type, value)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`
+
+	_, err := c.pool.Exec(ctx, query,
+		m.Timestamp, m.AgentID, tenant, m.Name, labelsJSON,
+		int64(m.Window.Seconds()), string(m.AggType), m.Value)
+	if err != nil {
+		return fmt.Errorf("write aggregated metric: %w", err)
+	}
+	return nil
 }
 
 // QueryAggregatedMetrics queries aggregated metrics.
@@ -1008,4 +1087,44 @@ func nullFloat64Val(nf sql.NullFloat64) float64 {
 		return nf.Float64
 	}
 	return 0
+}
+
+// DbQueryEvent represents a database query event from eBPF inspection.
+type DbQueryEvent struct {
+	AgentID         string    `json:"agent_id"`
+	Protocol        string    `json:"protocol"`
+	QueryType       string    `json:"query_type"`
+	TableName       string    `json:"table_name"`
+	Database        string    `json:"database"`
+	DestinationIP   string    `json:"destination_ip"`
+	DestinationPort int       `json:"destination_port"`
+	PID             int       `json:"pid"`
+	ProcessName     string    `json:"process_name"`
+	LatencyMs       float64   `json:"latency_ms"`
+	RowCount        int64     `json:"row_count"`
+	ErrorMessage    string    `json:"error_message"`
+	QuerySample     string    `json:"query_sample"`
+	Timestamp       time.Time `json:"timestamp"`
+}
+
+// InsertDbQueryEvent inserts a single database query event from eBPF inspection.
+func (c *Client) InsertDbQueryEvent(ctx context.Context, tenant string, event *DbQueryEvent) error {
+	query := `INSERT INTO db_queries
+		(timestamp, agent_id, tenant_id, protocol, query_type, table_name,
+		 database, destination_ip, destination_port, pid, process_name,
+		 latency_ms, row_count, error_message, query_sample)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`
+	_, err := c.pool.Exec(ctx, query,
+		event.Timestamp, event.AgentID, tenant,
+		event.Protocol, event.QueryType, event.TableName,
+		event.Database,
+		event.DestinationIP, event.DestinationPort,
+		event.PID, event.ProcessName,
+		event.LatencyMs, event.RowCount,
+		event.ErrorMessage, event.QuerySample,
+	)
+	if err != nil {
+		return fmt.Errorf("insert db query event: %w", err)
+	}
+	return nil
 }

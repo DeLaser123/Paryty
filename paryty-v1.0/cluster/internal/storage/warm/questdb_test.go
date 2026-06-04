@@ -93,7 +93,7 @@ func TestFormatILPLine_TagsAreSorted(t *testing.T) {
 		"m_tag": "m",
 	}
 
-	// Format twice — output must be identical (deterministic).
+	// Format twice -- output must be identical (deterministic).
 	line1 := formatILPLine("test", tags, map[string]any{"v": 1.0}, ts)
 	line2 := formatILPLine("test", tags, map[string]any{"v": 1.0}, ts)
 
@@ -292,9 +292,10 @@ func TestWriteFieldValue(t *testing.T) {
 // ---- EnsureTables DDL Validation Tests ----
 
 func TestCreateTableStatements_Count(t *testing.T) {
-	// Must have 11 tables: cpu, memory, disk, network, process, container,
-	// aggregated, spans, tcp_events, dns_events, http_events.
-	want := 11
+	// Must have 14 tables: cpu, memory, disk, network, process, container,
+	// aggregated, spans, tcp_events, dns_events, http_events,
+	// db_queries, topology_snapshots, paryty_schema_version.
+	want := 14
 	if got := len(createTableStatements); got != want {
 		t.Errorf("createTableStatements has %d entries, want %d", got, want)
 	}
@@ -309,6 +310,13 @@ func TestCreateTableStatements_ContainRequiredClauses(t *testing.T) {
 	}
 
 	for i, ddl := range createTableStatements {
+		// paryty_schema_version uses PartitionBy NONE - no TIMESTAMP/PARTITION/WAL.
+		if strings.Contains(ddl, "paryty_schema_version") {
+			if !strings.Contains(ddl, "CREATE TABLE IF NOT EXISTS") {
+				t.Errorf("createTableStatements[%d] (schema version) missing CREATE TABLE IF NOT EXISTS", i)
+			}
+			continue
+		}
 		for _, clause := range requiredClauses {
 			if !strings.Contains(ddl, clause) {
 				t.Errorf("createTableStatements[%d] missing %q", i, clause)
@@ -339,7 +347,7 @@ func TestCreateTableStatements_UniqueTableNames(t *testing.T) {
 }
 
 func TestCreateTableStatements_NetworkEventTables(t *testing.T) {
-	// Verify the three new network event tables exist in the DDL list.
+	// Verify the three network event tables exist in the DDL list.
 	tableNames := make(map[string]bool)
 	for _, ddl := range createTableStatements {
 		idx := strings.Index(ddl, "CREATE TABLE IF NOT EXISTS ")
@@ -356,6 +364,27 @@ func TestCreateTableStatements_NetworkEventTables(t *testing.T) {
 	for _, name := range required {
 		if !tableNames[name] {
 			t.Errorf("missing required table: %s", name)
+		}
+	}
+}
+
+func TestCreateTableStatements_Phase4Tables(t *testing.T) {
+	tableNames := make(map[string]bool)
+	for _, ddl := range createTableStatements {
+		idx := strings.Index(ddl, "CREATE TABLE IF NOT EXISTS ")
+		if idx >= 0 {
+			rest := ddl[idx+len("CREATE TABLE IF NOT EXISTS "):]
+			parts := strings.Fields(rest)
+			if len(parts) > 0 {
+				tableNames[parts[0]] = true
+			}
+		}
+	}
+
+	required := []string{"db_queries", "topology_snapshots", "paryty_schema_version"}
+	for _, name := range required {
+		if !tableNames[name] {
+			t.Errorf("missing required Phase 4 table: %s", name)
 		}
 	}
 }

@@ -14,8 +14,9 @@ use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Mutex, RwLock};
+use tonic::metadata::MetadataValue;
 use tonic::transport::{Channel, Endpoint};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::config::Config;
 use crate::proto::paryty::v1::ingestion_service_client::IngestionServiceClient;
@@ -23,6 +24,8 @@ use crate::proto::paryty::v1::{
     AgentRegistration, AgentRegistrationResponse, AgentToCluster, ClusterToAgent, HeartbeatRequest,
     HeartbeatResponse, MetricBatch, NetworkEventBatch, NetworkEventResponse, SendBatchResponse,
 };
+
+use super::tenant::TenantCache;
 
 /// Connection state for the gRPC client.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,16 +80,34 @@ pub struct GrpcClient {
     tx: mpsc::Sender<Vec<u8>>,
     /// Channel for receiving messages from the stream.
     rx: Arc<Mutex<mpsc::Receiver<Vec<u8>>>>,
+    /// Optional API key for authenticating with the cluster.
+    ///
+    /// When set, the API key is attached as `x-api-key` gRPC metadata
+    /// on registration requests. The server uses this to resolve the
+    /// tenant for this agent.
+    api_key: Option<String>,
+    /// Optional tenant ID for multi-tenant routing.
+    ///
+    /// When set, the tenant ID is attached as `x-tenant-id` gRPC metadata
+    /// on all requests. This overrides tenant resolution from API keys.
+    tenant_id: Option<String>,
+    /// Local cache for the tenant ID assigned after registration.
+    tenant_cache: Option<TenantCache>,
 }
 
 impl GrpcClient {
     /// Create a new gRPC client from the full agent configuration.
     ///
-    /// Extracts the cluster endpoint and TLS setting from the config.
+    /// Extracts the cluster endpoint, TLS setting, API key, and tenant ID from the config.
     pub fn new(config: &Config) -> Self {
         let endpoint = config.agent.cluster_endpoint.clone();
         let tls_enabled = config.communication.tls.enabled;
         let (tx, rx) = mpsc::channel(1024);
+
+        let api_key =
+            if config.agent.api_key.is_empty() { None } else { Some(config.agent.api_key.clone()) };
+
+        let tenant_id = config.agent.tenant_id.clone();
 
         Self {
             endpoint,
@@ -99,6 +120,9 @@ impl GrpcClient {
             metrics: Arc::new(ClientMetrics::default()),
             tx,
             rx: Arc::new(Mutex::new(rx)),
+            api_key,
+            tenant_id,
+            tenant_cache: None,
         }
     }
 
@@ -119,7 +143,17 @@ impl GrpcClient {
             metrics: Arc::new(ClientMetrics::default()),
             tx,
             rx: Arc::new(Mutex::new(rx)),
+            api_key: None,
+            tenant_id: None,
+            tenant_cache: None,
         }
+    }
+
+    /// Set the tenant cache for persistence of tenant ID across restarts.
+    ///
+    /// Must be called before `register_agent()` if tenant caching is desired.
+    pub fn set_tenant_cache(&mut self, cache: TenantCache) {
+        self.tenant_cache = Some(cache);
     }
 
     /// Connect to the cluster and create the typed proto client.
@@ -211,6 +245,11 @@ impl GrpcClient {
     /// Sends an `AgentRegistration` message and returns the server's
     /// `AgentRegistrationResponse` containing the session ID and any
     /// server-pushed configuration.
+    ///
+    /// If an API key is configured, it is attached as `x-api-key` gRPC
+    /// metadata so the server can resolve the tenant. After successful
+    /// registration the tenant ID is cached to disk (if a `TenantCache`
+    /// was provided via `set_tenant_cache()`).
     pub async fn register_agent(
         &self,
         registration: AgentRegistration,
@@ -218,15 +257,68 @@ impl GrpcClient {
         let mut guard = self.client.lock().await;
         let client = guard.as_mut().context("Not connected: proto client unavailable")?;
 
+        // Build the tonic Request so we can attach metadata.
+        let mut request = tonic::Request::new(registration);
+
+        // Attach API key as gRPC metadata if configured.
+        if let Some(ref api_key) = self.api_key {
+            match MetadataValue::try_from(api_key.as_str()) {
+                Ok(value) => {
+                    request.metadata_mut().insert("x-api-key", value);
+                    debug!("Attached x-api-key metadata to registration request");
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "Invalid API key format — skipping x-api-key metadata"
+                    );
+                }
+            }
+        }
+
+        // Attach tenant ID as gRPC metadata if configured.
+        if let Some(ref tenant_id) = self.tenant_id {
+            match MetadataValue::try_from(tenant_id.as_str()) {
+                Ok(value) => {
+                    request.metadata_mut().insert("x-tenant-id", value);
+                    debug!(tenant_id = %tenant_id, "Attached x-tenant-id metadata to registration request");
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "Invalid tenant ID format — skipping x-tenant-id metadata"
+                    );
+                }
+            }
+        }
+
         let response = client
-            .register_agent(registration)
+            .register_agent(request)
             .await
             .map_err(|status| anyhow::anyhow!("RegisterAgent RPC failed: {}", status))?;
 
         self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
-        debug!("Agent registered successfully");
 
-        Ok(response.into_inner())
+        let resp = response.into_inner();
+
+        // Cache the tenant ID from the agent_id for offline restart support.
+        // The server-side tenant is resolved from the API key; locally we
+        // persist the agent_id as the tenant identifier so the agent can
+        // report itself on restart without re-authenticating.
+        if let Some(ref cache) = self.tenant_cache {
+            let tenant_id = &resp.session_id;
+            match cache.write(tenant_id).await {
+                Ok(()) => {
+                    debug!(tenant_id = %tenant_id, "Tenant ID cached to disk");
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to cache tenant ID (non-fatal)");
+                }
+            }
+        }
+
+        info!("Agent registered successfully");
+        Ok(resp)
     }
 
     /// Send a single metric batch to the cluster (unary RPC).
@@ -237,8 +329,27 @@ impl GrpcClient {
         let mut guard = self.client.lock().await;
         let client = guard.as_mut().context("Not connected: proto client unavailable")?;
 
+        // Build the tonic Request so we can attach metadata.
+        let mut request = tonic::Request::new(batch);
+
+        // Attach tenant ID as gRPC metadata if configured.
+        if let Some(ref tenant_id) = self.tenant_id {
+            match MetadataValue::try_from(tenant_id.as_str()) {
+                Ok(value) => {
+                    request.metadata_mut().insert("x-tenant-id", value);
+                    debug!(tenant_id = %tenant_id, "Attached x-tenant-id metadata to send_batch request");
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "Invalid tenant ID format — skipping x-tenant-id metadata for send_batch"
+                    );
+                }
+            }
+        }
+
         let response = client
-            .send_batch(batch)
+            .send_batch(request)
             .await
             .map_err(|status| anyhow::anyhow!("SendBatch RPC failed: {}", status))?;
 
@@ -335,8 +446,27 @@ impl GrpcClient {
         // Convert the tokio mpsc receiver into a stream for tonic.
         let outbound = tokio_stream::wrappers::ReceiverStream::new(rx);
 
+        // Build request with tenant metadata if configured.
+        let mut request = tonic::Request::new(outbound);
+
+        // Attach tenant ID as gRPC metadata if configured.
+        if let Some(ref tenant_id) = self.tenant_id {
+            match MetadataValue::try_from(tenant_id.as_str()) {
+                Ok(value) => {
+                    request.metadata_mut().insert("x-tenant-id", value);
+                    debug!(tenant_id = %tenant_id, "Attached x-tenant-id metadata to stream request");
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "Invalid tenant ID format — skipping x-tenant-id metadata for stream"
+                    );
+                }
+            }
+        }
+
         let response = stream_client
-            .stream_metrics(outbound)
+            .stream_metrics(request)
             .await
             .map_err(|status| anyhow::anyhow!("StreamMetrics RPC failed: {}", status))?;
 
@@ -387,6 +517,9 @@ impl Clone for GrpcClient {
             metrics: Arc::clone(&self.metrics),
             tx,
             rx: Arc::new(Mutex::new(rx)),
+            api_key: self.api_key.clone(),
+            tenant_id: self.tenant_id.clone(),
+            tenant_cache: None, // Cache is not cloned — set explicitly on the clone if needed.
         }
     }
 }
@@ -488,5 +621,90 @@ mod tests {
         let result = client.report_network_events(batch).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Not connected"));
+    }
+
+    /// Verify that api_key is None when constructed via with_endpoint.
+    #[test]
+    fn test_api_key_none_by_default_in_with_endpoint() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+        assert!(client.api_key.is_none());
+    }
+
+    /// Verify that the client from Config extracts the api_key.
+    #[test]
+    fn test_api_key_extracted_from_config() {
+        let config = crate::config::Config {
+            agent: crate::config::AgentConfig {
+                id: "test-agent".to_string(),
+                cluster_endpoint: "http://localhost:50051".to_string(),
+                api_key: "secret-api-key".to_string(),
+                self_metrics: crate::config::SelfMetricsConfig { enabled: false, port: 9090 },
+            },
+            layers: crate::config::LayersConfig {
+                metal: crate::config::MetalConfig {
+                    enabled: false,
+                    interval: "10s".to_string(),
+                    cpu_per_core: false,
+                    cpu_per_process: false,
+                    memory_rss: false,
+                    disk_io: false,
+                    network_io: false,
+                    process_tree: false,
+                    container_detection: false,
+                },
+                ebpf: crate::config::EbpfConfig {
+                    enabled: false,
+                    tcp_connections: false,
+                    dns_resolution: false,
+                    http_inspection: false,
+                    db_inspection: false,
+                    exclude_ports: vec![],
+                    exclude_ips: vec![],
+                    ring_buffer_size_kb: 256,
+                    poll_interval_ms: 100,
+                    fallback_to_proc: true,
+                },
+                supervisor: crate::config::SupervisorConfig {
+                    enabled: false,
+                    health_checks: vec![],
+                    log_tailing: vec![],
+                },
+            },
+            communication: crate::config::CommunicationConfig {
+                protocol: "grpc".to_string(),
+                tls: crate::config::TlsConfig { enabled: false },
+                compression: "zstd".to_string(),
+                edge_buffer: crate::config::EdgeBufferConfig {
+                    enabled: true,
+                    max_size_mb: 100,
+                    retention_hours: 24,
+                    sqlite_path: None,
+                },
+                flow_control: crate::config::FlowControlConfig {
+                    backpressure_enabled: true,
+                    adaptive_sampling: true,
+                    priority_queues: vec![],
+                },
+            },
+            logging: crate::config::LoggingConfig {
+                level: "info".to_string(),
+                format: "json".to_string(),
+                output: "stdout".to_string(),
+            },
+        };
+
+        let client = GrpcClient::new(&config);
+        assert_eq!(client.api_key.as_deref(), Some("secret-api-key"));
+    }
+
+    /// Verify that clone does not carry tenant_cache.
+    #[test]
+    fn test_clone_does_not_carry_tenant_cache() {
+        let mut client = GrpcClient::with_endpoint("http://localhost:50051");
+        let dir = tempfile::tempdir().expect("failed to create temp dir");
+        client.set_tenant_cache(TenantCache::new(dir.path()));
+
+        let cloned = client.clone();
+        assert!(cloned.tenant_cache.is_none());
     }
 }

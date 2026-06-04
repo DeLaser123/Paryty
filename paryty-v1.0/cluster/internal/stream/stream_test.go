@@ -259,14 +259,17 @@ func TestInitializeTopics_TenantScopedTopicNames(t *testing.T) {
 	topics := requiredTopics("acme")
 
 	expected := map[string]bool{
-		"paryty.acme.metrics.raw":       false,
+		"paryty.acme.metrics.raw":        false,
 		"paryty.acme.metrics.aggregated": false,
-		"paryty.acme.traces":            false,
-		"paryty.acme.events":            false,
-		"paryty.acme.network.events":    false,
-		"paryty.acme.topology.changes":  false,
-		"paryty.acme.alerts":            false,
-		"paryty.acme.dead-letter":       false,
+		"paryty.acme.traces":             false,
+		"paryty.acme.events":             false,
+		"paryty.acme.network.events":     false,
+		"paryty.acme.topology.changes":   false,
+		"paryty.acme.alerts":             false,
+		"paryty.acme.dead-letter":        false,
+		"paryty.acme.metrics.enriched":   false,
+		"paryty.acme.correlations":       false,
+		"paryty.acme.dependency.graph":   false,
 	}
 
 	for _, tc := range topics {

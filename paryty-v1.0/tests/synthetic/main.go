@@ -170,13 +170,11 @@ type EventData struct {
 	Timestamp   time.Time         `json:"timestamp"`
 }
 
-// Topic constants matching cluster/internal/stream/topics.go
-const (
-	TopicMetricsRaw    = "paryty.metrics.raw"
-	TopicTraces        = "paryty.traces"
-	TopicEvents        = "paryty.events"
-	TopicNetworkEvents = "paryty.network.events"
-)
+// Topic helpers generate tenant-prefixed topic names.
+func topicMetricsRaw(tenant string) string    { return "paryty." + tenant + ".metrics.raw" }
+func topicTraces(tenant string) string        { return "paryty." + tenant + ".traces" }
+func topicEvents(tenant string) string        { return "paryty." + tenant + ".events" }
+func topicNetworkEvents(tenant string) string { return "paryty." + tenant + ".network.events" }
 
 func main() {
 	// CLI flags
@@ -185,6 +183,7 @@ func main() {
 	interval := flag.Duration("interval", 10*time.Second, "Interval between data points")
 	scenarioName := flag.String("scenario", "steady-state", "Scenario to run: steady-state, cpu-spike, network-storm, service-discovery, alert-trigger, all")
 	dryRun := flag.Bool("dry-run", false, "Print sample data without sending to Redpanda")
+	tenant := flag.String("tenant", "default", "Tenant ID for multi-tenant routing (key format: tenant:agent)")
 	flag.Parse()
 
 	logger, _ := zap.NewDevelopment()
@@ -263,7 +262,7 @@ func main() {
 			}
 
 			dataPoints := scenario.Generate(tick, agents)
-			msgCount := publishDataPoints(ctx, client, logger, dataPoints)
+			msgCount := publishDataPoints(ctx, client, logger, *tenant, dataPoints)
 			logger.Info("Tick completed",
 				zap.String("scenario", scenario.Name),
 				zap.Int("tick", tick),
@@ -311,29 +310,32 @@ func generateAgents(count int) []AgentDef {
 }
 
 // publishDataPoints sends all data points to the appropriate Redpanda topics.
-func publishDataPoints(ctx context.Context, client *kgo.Client, logger *zap.Logger, points []AgentDataPoint) int {
+// The message key uses "tenant:agent" format for multi-tenant routing.
+func publishDataPoints(ctx context.Context, client *kgo.Client, logger *zap.Logger, tenant string, points []AgentDataPoint) int {
 	count := 0
 	for _, dp := range points {
-		// Publish metrics to paryty.metrics.raw
-		if err := publishJSON(ctx, client, TopicMetricsRaw, dp.AgentID, dp.Metrics); err != nil {
+		key := tenant + ":" + dp.AgentID
+
+		// Publish metrics to paryty.{tenant}.metrics.raw
+		if err := publishJSON(ctx, client, topicMetricsRaw(tenant), key, dp.Metrics); err != nil {
 			logger.Error("Failed to publish metrics", zap.String("agent_id", dp.AgentID), zap.Error(err))
 		} else {
 			count++
 		}
 
-		// Publish network events to paryty.network.events
+		// Publish network events to paryty.{tenant}.network.events
 		if len(dp.NetworkEvents.TCP) > 0 || len(dp.NetworkEvents.DNS) > 0 || len(dp.NetworkEvents.HTTP) > 0 {
-			if err := publishJSON(ctx, client, TopicNetworkEvents, dp.AgentID, dp.NetworkEvents); err != nil {
+			if err := publishJSON(ctx, client, topicNetworkEvents(tenant), key, dp.NetworkEvents); err != nil {
 				logger.Error("Failed to publish network events", zap.String("agent_id", dp.AgentID), zap.Error(err))
 			} else {
 				count++
 			}
 		}
 
-		// Publish spans to paryty.traces
+		// Publish spans to paryty.{tenant}.traces
 		if len(dp.Spans) > 0 {
 			for _, span := range dp.Spans {
-				if err := publishJSON(ctx, client, TopicTraces, dp.AgentID, span); err != nil {
+				if err := publishJSON(ctx, client, topicTraces(tenant), key, span); err != nil {
 					logger.Error("Failed to publish span", zap.String("agent_id", dp.AgentID), zap.Error(err))
 				} else {
 					count++
@@ -341,9 +343,9 @@ func publishDataPoints(ctx context.Context, client *kgo.Client, logger *zap.Logg
 			}
 		}
 
-		// Publish events to paryty.events
+		// Publish events to paryty.{tenant}.events
 		for _, evt := range dp.Events {
-			if err := publishJSON(ctx, client, TopicEvents, dp.AgentID, evt); err != nil {
+			if err := publishJSON(ctx, client, topicEvents(tenant), key, evt); err != nil {
 				logger.Error("Failed to publish event", zap.String("agent_id", dp.AgentID), zap.Error(err))
 			} else {
 				count++
