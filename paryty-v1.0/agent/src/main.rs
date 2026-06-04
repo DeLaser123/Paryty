@@ -14,6 +14,7 @@ use tracing_subscriber::{fmt, EnvFilter};
 
 mod communication;
 mod config;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod ebpf;
 mod metal;
 mod proto;
@@ -43,9 +44,12 @@ fn parse_config_flag() -> Option<String> {
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<()> {
     // Initialize logging — respects RUST_LOG env var, defaults to info.
-    fmt().with_env_filter(
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
-    ).json().init();
+    fmt()
+        .with_env_filter(
+            EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
+        )
+        .json()
+        .init();
 
     info!("Starting Paryty Agent");
 
@@ -72,22 +76,16 @@ async fn main() -> Result<()> {
     // ── Wire communication lifecycle ─────────────────────────────────
     //
     // 1. Connect (best-effort — reconnection loop handles retries)
-    // 2. Register with cluster
-    // 3. Start background loops (heartbeat, stream listener, reconnect)
+    // 2. Start background loops (heartbeat, stream listener, reconnect, registration)
     //
-    // If the initial connection fails the agent still starts; the
-    // reconnection loop will retry in the background and register
-    // on a successful reconnect.
+    // Registration is handled by a dedicated retry loop that keeps trying
+    // with exponential backoff until the cluster accepts it. This ensures
+    // the agent works on ANY environment (bare metal, VM, WSL2, container)
+    // even if the cluster is temporarily unavailable or slow to start.
 
     match comm.connect().await {
         Ok(()) => {
             info!("Connected to cluster at {}", config.agent.cluster_endpoint);
-            if let Err(e) = comm.register_on_connect().await {
-                warn!(
-                    error = %e,
-                    "Initial registration failed — will retry on reconnect"
-                );
-            }
         }
         Err(e) => {
             warn!(
@@ -102,9 +100,10 @@ async fn main() -> Result<()> {
     // Each loop uses the client's internal CancellationToken and will
     // stop when `client.shutdown()` is called.
     comm.start_reconnection_loop();
+    comm.start_registration_loop();
     comm.start_heartbeat_loop();
     comm.start_stream_listener();
-    info!("Communication background loops started (reconnect, heartbeat, stream)");
+    info!("Communication background loops started (reconnect, registration, heartbeat, stream)");
 
     // ── Spawn collection layers ──────────────────────────────────────
     let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
@@ -131,25 +130,39 @@ async fn main() -> Result<()> {
     }
 
     // Layer 2: eBPF Network Observer (Linux only)
+    //
+    // libbpf-rs types (Object, Link, Program, Map) contain raw pointers
+    // (NonNull<bpf_object>, etc.) that are NOT Send. We cannot use tokio::spawn
+    // because it requires Send + 'static. Instead, we run the entire eBPF path
+    // on a dedicated OS thread via spawn_blocking, with its own current_thread
+    // tokio runtime for the async event loop.
     #[cfg(target_os = "linux")]
     if config.layers.ebpf.enabled {
         let token = cancel_token.child_token();
         let ebpf_config = config.layers.ebpf.clone();
         let comm = comm.clone();
-        let handle = tokio::spawn(async move {
-            tokio::select! {
-                result = ebpf::run(ebpf_config, (*comm).clone()) => {
-                    if let Err(e) = result {
-                        error!("eBPF observer error: {}", e);
+        let handle = tokio::task::spawn_blocking(move || {
+            // Create a single-threaded tokio runtime for the eBPF event loop.
+            let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("Failed to create eBPF thread runtime");
+
+            rt.block_on(async move {
+                tokio::select! {
+                    result = ebpf::run(ebpf_config, (*comm).clone()) => {
+                        if let Err(e) = result {
+                            error!("eBPF observer error: {}", e);
+                        }
+                    }
+                    _ = token.cancelled() => {
+                        info!("eBPF observer shutting down (cancel signal)");
                     }
                 }
-                _ = token.cancelled() => {
-                    info!("eBPF observer shutting down (cancel signal)");
-                }
-            }
+            });
         });
         handles.push(handle);
-        info!("eBPF network observer started");
+        info!("eBPF network observer started (dedicated thread)");
     }
 
     // Layer 3: Supervisor (optional)

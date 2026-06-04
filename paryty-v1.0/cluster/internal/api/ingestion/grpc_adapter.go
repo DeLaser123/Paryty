@@ -40,7 +40,7 @@ const maxFutureSkew = 5 * time.Minute
 type contextKey string
 
 const (
-	ctxKeyTenant       contextKey = "tenant"
+	ctxKeyTenant        contextKey = "tenant"
 	ctxKeyCorrelationID contextKey = "correlation_id"
 )
 
@@ -65,9 +65,9 @@ func CorrelationIDFromContext(ctx context.Context) string {
 // IngestionGRPCAdapter wraps IngestionService to implement the gRPC IngestionServiceServer interface.
 type IngestionGRPCAdapter struct {
 	pb.UnimplementedIngestionServiceServer
-	svc          *IngestionService
-	logger       *zap.Logger
-	rateLimiter  *RateLimiter
+	svc         *IngestionService
+	logger      *zap.Logger
+	rateLimiter *RateLimiter
 }
 
 // NewIngestionGRPCAdapter creates a new gRPC adapter for the ingestion service.
@@ -157,6 +157,20 @@ func hasMetricType(req *pb.MetricBatch) bool {
 		len(req.Disks) > 0 ||
 		len(req.Interfaces) > 0 ||
 		len(req.Processes) > 0
+}
+
+// validateNetworkEventBatch validates a NetworkEventBatch request.
+// Returns a gRPC InvalidArgument error if validation fails.
+func validateNetworkEventBatch(batch *pb.NetworkEventBatch) error {
+	if strings.TrimSpace(batch.AgentId) == "" {
+		return status.Error(codes.InvalidArgument, "agent_id must not be empty")
+	}
+
+	if len(batch.Events) == 0 {
+		return status.Error(codes.InvalidArgument, "events must not be empty")
+	}
+
+	return nil
 }
 
 // RegisterAgent handles agent registration via gRPC.
@@ -392,9 +406,11 @@ func (a *IngestionGRPCAdapter) StreamMetrics(stream grpc.BidiStreamingServer[pb.
 }
 
 // ReportNetworkEvents handles client-streaming network events.
+// Each received batch is validated, stored in QuestDB, and published to Redpanda.
 func (a *IngestionGRPCAdapter) ReportNetworkEvents(stream grpc.ClientStreamingServer[pb.NetworkEventBatch, pb.NetworkEventResponse]) error {
 	ctx := a.enrichContext(stream.Context())
 	correlationID := CorrelationIDFromContext(ctx)
+	tenant := TenantFromContext(ctx)
 
 	var accepted int64
 	var rejected int64
@@ -411,11 +427,45 @@ func (a *IngestionGRPCAdapter) ReportNetworkEvents(stream grpc.ClientStreamingSe
 			return status.Errorf(codes.Internal, "receive error: %v", err)
 		}
 
-		a.logger.Debug("Received network events",
+		// Validate the batch.
+		if valErr := validateNetworkEventBatch(batch); valErr != nil {
+			a.logger.Warn("Invalid network event batch",
+				zap.String("correlation_id", correlationID),
+				zap.Error(valErr),
+			)
+			rejected += int64(len(batch.Events))
+			continue
+		}
+
+		// Rate limit check.
+		if rateErr := a.isRateLimited(batch.AgentId); rateErr != nil {
+			a.logger.Warn("Network event rate limited",
+				zap.String("correlation_id", correlationID),
+				zap.String("agent_id", batch.AgentId),
+			)
+			rejected += int64(len(batch.Events))
+			continue
+		}
+
+		a.logger.Debug("Processing network events",
 			zap.String("correlation_id", correlationID),
+			zap.String("tenant", tenant),
 			zap.String("agent_id", batch.AgentId),
 			zap.Int("event_count", len(batch.Events)),
 		)
+
+		// Store to QuestDB and publish to Redpanda.
+		if err := a.svc.StoreNetworkEvents(ctx, tenant, batch); err != nil {
+			a.logger.Error("Failed to store network events",
+				zap.String("correlation_id", correlationID),
+				zap.String("tenant", tenant),
+				zap.String("agent_id", batch.AgentId),
+				zap.Error(err),
+			)
+			rejected += int64(len(batch.Events))
+			continue
+		}
+
 		accepted += int64(len(batch.Events))
 	}
 }
@@ -439,20 +489,46 @@ func metricBatchFromProto(pbBatch *pb.MetricBatch) *models.MetricBatch {
 			LoadAvg15m:      pbBatch.Cpu.LoadAverage_15M,
 			FrequencyMHz:    pbBatch.Cpu.FrequencyMhz,
 			ContextSwitches: uint64(pbBatch.Cpu.ContextSwitches),
+			PhysicalCores:   pbBatch.Cpu.PhysicalCores,
+			LogicalCores:    pbBatch.Cpu.LogicalCores,
+			ModelName:       pbBatch.Cpu.ModelName,
+			VendorID:        pbBatch.Cpu.VendorId,
 		}}
 	}
 
 	if pbBatch.Memory != nil {
-		batch.Memory = []models.MemoryMetrics{{
+		mem := models.MemoryMetrics{
 			AgentID:        pbBatch.AgentId,
 			Timestamp:      timeFromProto(pbBatch.Timestamp),
 			TotalBytes:     uint64(pbBatch.Memory.TotalBytes),
 			UsedBytes:      uint64(pbBatch.Memory.UsedBytes),
+			FreeBytes:      uint64(pbBatch.Memory.FreeBytes),
 			AvailableBytes: uint64(pbBatch.Memory.AvailableBytes),
 			CachedBytes:    uint64(pbBatch.Memory.CachedBytes),
+			BufferBytes:    uint64(pbBatch.Memory.BufferBytes),
 			SwapTotalBytes: uint64(pbBatch.Memory.SwapTotalBytes),
 			SwapUsedBytes:  uint64(pbBatch.Memory.SwapUsedBytes),
-		}}
+			UsagePercent:   pbBatch.Memory.UsagePercent,
+		}
+		if pbBatch.Memory.Pressure != nil {
+			mem.Pressure = &models.MemoryPressure{
+				Some10:  pbBatch.Memory.Pressure.Some_10,
+				Some60:  pbBatch.Memory.Pressure.Some_60,
+				Some300: pbBatch.Memory.Pressure.Some_300,
+				Full10:  pbBatch.Memory.Pressure.Full_10,
+				Full60:  pbBatch.Memory.Pressure.Full_60,
+				Full300: pbBatch.Memory.Pressure.Full_300,
+			}
+		}
+		for _, tp := range pbBatch.Memory.TopProcesses {
+			mem.TopProcesses = append(mem.TopProcesses, models.ProcessMemoryEntry{
+				PID:      uint32(tp.Pid),
+				Name:     tp.Name,
+				RSSBytes: uint64(tp.RssBytes),
+				VSZBytes: uint64(tp.VszBytes),
+			})
+		}
+		batch.Memory = []models.MemoryMetrics{mem}
 	}
 
 	for _, d := range pbBatch.Disks {
@@ -461,32 +537,90 @@ func metricBatchFromProto(pbBatch *pb.MetricBatch) *models.MetricBatch {
 			Timestamp:        timeFromProto(pbBatch.Timestamp),
 			Device:           d.DeviceName,
 			MountPoint:       d.MountPoint,
+			FilesystemType:   d.FilesystemType,
 			TotalBytes:       uint64(d.TotalBytes),
 			UsedBytes:        uint64(d.UsedBytes),
+			FreeBytes:        uint64(d.FreeBytes),
 			ReadBytesPerSec:  uint64(d.ReadBytesPerSec),
 			WriteBytesPerSec: uint64(d.WriteBytesPerSec),
+			IOPSRead:         uint64(d.ReadOpsPerSec),
+			IOPSWrite:        uint64(d.WriteOpsPerSec),
+			IOLatencyMs:      d.IoLatencyMs,
+			QueueDepth:       d.QueueDepth,
+			IsSSD:            d.IsSsd,
+			UtilizationPct:   d.UtilizationPct,
 		})
 	}
 
 	for _, n := range pbBatch.Interfaces {
-		batch.Network = append(batch.Network, models.NetworkMetrics{
-			AgentID:       pbBatch.AgentId,
-			Timestamp:     timeFromProto(pbBatch.Timestamp),
-			Interface:     n.InterfaceName,
-			RxBytesPerSec: uint64(n.RxBytesPerSec),
-			TxBytesPerSec: uint64(n.TxBytesPerSec),
-		})
+		net := models.NetworkMetrics{
+			AgentID:        pbBatch.AgentId,
+			Timestamp:      timeFromProto(pbBatch.Timestamp),
+			Interface:      n.InterfaceName,
+			RxBytesPerSec:  uint64(n.RxBytesPerSec),
+			TxBytesPerSec:  uint64(n.TxBytesPerSec),
+			RxPackets:      uint64(n.RxPacketsPerSec),
+			TxPackets:      uint64(n.TxPacketsPerSec),
+			RxDropped:      n.RxDropped,
+			TxDropped:      n.TxDropped,
+			Errors:         uint64(n.RxErrors + n.TxErrors),
+			EstimatedRTTMs: n.EstimatedRttMs,
+			TotalRxBytes:   n.TotalRxBytes,
+			TotalTxBytes:   n.TotalTxBytes,
+			TotalRxPackets: n.TotalRxPackets,
+			TotalTxPackets: n.TotalTxPackets,
+			SpeedMbps:      n.SpeedMbps,
+			IsUp:           n.IsUp,
+		}
+		if n.TcpStats != nil {
+			net.TCPStats = &models.TCPStats{
+				Established:     n.TcpStats.Established,
+				TimeWait:        n.TcpStats.TimeWait,
+				CloseWait:       n.TcpStats.CloseWait,
+				Listen:          n.TcpStats.Listen,
+				RetransmitCount: n.TcpStats.RetransmitCount,
+			}
+		}
+		batch.Network = append(batch.Network, net)
 	}
 
 	for _, p := range pbBatch.Processes {
 		batch.Processes = append(batch.Processes, models.ProcessMetrics{
-			AgentID:     pbBatch.AgentId,
-			Timestamp:   timeFromProto(pbBatch.Timestamp),
-			PID:         uint32(p.Pid),
-			Name:        p.Name,
-			CPUUsagePct: p.CpuUsagePercent,
-			MemoryBytes: uint64(p.RssBytes),
-			Threads:     uint32(p.ThreadCount),
+			AgentID:          pbBatch.AgentId,
+			Timestamp:        timeFromProto(pbBatch.Timestamp),
+			PID:              uint32(p.Pid),
+			ParentPID:        uint32(p.ParentPid),
+			Name:             p.Name,
+			CommandLine:      p.CommandLine,
+			CPUUsagePct:      p.CpuUsagePercent,
+			MemoryBytes:      uint64(p.RssBytes),
+			VszBytes:         uint64(p.VszBytes),
+			Status:           p.Status,
+			Threads:          uint32(p.ThreadCount),
+			FdCount:          uint32(p.FdCount),
+			ContainerID:      p.ContainerId,
+			Exe:              p.Exe,
+			DiskReadBytes:    p.DiskReadBytes,
+			DiskWrittenBytes: p.DiskWrittenBytes,
+			UserID:           p.UserId,
+			StartedAt:        timeFromProto(p.StartedAt),
+		})
+	}
+
+	for _, c := range pbBatch.Containers {
+		batch.Containers = append(batch.Containers, models.ContainerMetrics{
+			AgentID:          pbBatch.AgentId,
+			Timestamp:        timeFromProto(pbBatch.Timestamp),
+			ContainerID:      c.ContainerId,
+			Runtime:          c.Runtime,
+			Name:             c.Name,
+			Image:            c.Image,
+			Status:           c.Status,
+			CgroupVersion:    c.CgroupVersion,
+			PIDs:             c.Pids,
+			MemoryLimitBytes: c.MemoryLimitBytes,
+			CPUQuota:         c.CpuQuota,
+			CPUShares:        c.CpuShares,
 		})
 	}
 

@@ -15,19 +15,29 @@ use tracing::instrument;
 use crate::config::MetalConfig;
 
 /// CPU metrics snapshot.
+///
+/// Fields that are not available on the current platform use `Option<>`.
+/// `None` (serialized as `null`) means the metric is genuinely unavailable.
 #[derive(Debug, Serialize, serde::Deserialize, Clone)]
 pub struct CpuMetrics {
     pub timestamp: String,
     pub total_usage_percent: f64,
     pub per_core_percent: Vec<f64>,
-    pub load_average_1m: f64,
-    pub load_average_5m: f64,
-    pub load_average_15m: f64,
+    /// 1-minute load average. Only available on Linux/Unix.
+    pub load_average_1m: Option<f64>,
+    /// 5-minute load average. Only available on Linux/Unix.
+    pub load_average_5m: Option<f64>,
+    /// 15-minute load average. Only available on Linux/Unix.
+    pub load_average_15m: Option<f64>,
     pub frequency_mhz: f64,
-    pub context_switches: u64,
+    /// Context switches since boot. Only available on Linux via /proc/stat.
+    pub context_switches: Option<u64>,
     pub physical_cores: u32,
     pub logical_cores: u32,
     pub model_name: String,
+    /// CPU vendor ID (e.g., "GenuineIntel", "AuthenticAMD").
+    /// Available via sysinfo on all platforms; on Linux also from /proc/cpuinfo.
+    pub vendor_id: Option<String>,
 }
 
 /// CPU topology information (internal helper).
@@ -147,14 +157,15 @@ impl CpuCollector {
             timestamp: Utc::now().to_rfc3339(),
             total_usage_percent: total_usage,
             per_core_percent: per_core,
-            load_average_1m: load_1m,
-            load_average_5m: load_5m,
-            load_average_15m: load_15m,
+            load_average_1m: Some(load_1m),
+            load_average_5m: Some(load_5m),
+            load_average_15m: Some(load_15m),
             frequency_mhz,
-            context_switches,
+            context_switches: Some(context_switches),
             physical_cores: topology.physical_cores,
             logical_cores: topology.logical_cores,
             model_name: topology.model_name,
+            vendor_id: get_vendor_id_from_cpuinfo(),
         })
     }
 
@@ -179,20 +190,23 @@ impl CpuCollector {
             per_core.iter().sum::<f64>() / per_core.len() as f64
         };
 
+        // On Windows, load_average() returns all zeros — report as unavailable.
         let load = System::load_average();
+        let load_is_zero = load.one == 0.0 && load.five == 0.0 && load.fifteen == 0.0;
 
         Ok(CpuMetrics {
             timestamp: Utc::now().to_rfc3339(),
             total_usage_percent: total_usage,
             per_core_percent: per_core,
-            load_average_1m: load.one,
-            load_average_5m: load.five,
-            load_average_15m: load.fifteen,
+            load_average_1m: if load_is_zero { None } else { Some(load.one) },
+            load_average_5m: if load_is_zero { None } else { Some(load.five) },
+            load_average_15m: if load_is_zero { None } else { Some(load.fifteen) },
             frequency_mhz: sys.cpus().first().map(|c| c.frequency() as f64).unwrap_or(0.0),
-            context_switches: 0,
+            context_switches: None, // not available via sysinfo on any platform
             physical_cores: sys.physical_core_count().unwrap_or(0) as u32,
             logical_cores: sys.cpus().len() as u32,
             model_name: sys.cpus().first().map(|c| c.brand().to_string()).unwrap_or_default(),
+            vendor_id: sys.cpus().first().map(|c| c.vendor_id().to_string()),
         })
     }
 
@@ -292,6 +306,35 @@ impl CpuCollector {
             model_name: String::new(),
         }
     }
+}
+
+/// Get CPU vendor ID from `/proc/cpuinfo`.
+///
+/// Looks for the "vendor_id" line (e.g., "vendor_id\t: GenuineIntel").
+/// Returns `None` if the file doesn't exist or the line is missing.
+#[cfg(target_os = "linux")]
+fn get_vendor_id_from_cpuinfo() -> Option<String> {
+    use std::fs;
+
+    let cpuinfo = fs::read_to_string("/proc/cpuinfo").ok()?;
+    for line in cpuinfo.lines() {
+        if line.starts_with("vendor_id") {
+            if let Some(val) = line.split(':').nth(1) {
+                let vendor = val.trim().to_string();
+                if !vendor.is_empty() {
+                    return Some(vendor);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Stub for non-Linux platforms.
+#[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
+fn get_vendor_id_from_cpuinfo() -> Option<String> {
+    None
 }
 
 /// Parse a /proc/stat CPU line into tick values.

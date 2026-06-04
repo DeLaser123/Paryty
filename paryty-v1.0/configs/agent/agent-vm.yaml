@@ -9,7 +9,7 @@
 
 agent:
   id: "auto"
-  cluster_endpoint: "10.255.255.254:50051"
+  cluster_endpoint: "10.255.255.254:50052"
   api_key: ""
   self_metrics:
     enabled: true

@@ -1,4 +1,4 @@
-﻿// Package main implements the Paryty Query Service.
+// Package main implements the Paryty Query Service.
 //
 // The Query Service provides REST, WebSocket, and SSE APIs for accessing
 // observability data stored in the Paryty Cluster.

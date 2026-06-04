@@ -19,7 +19,8 @@ import (
 
 const (
 	// defaultBufLimit is the buffer threshold that triggers an automatic flush.
-	defaultBufLimit = 32 * 1024 // 32 KB
+	// Kept small to avoid overwhelming QuestDB's ILP handler with large TCP writes.
+	defaultBufLimit = 8 * 1024 // 8 KB
 
 	// defaultDialTimeout is the TCP connection timeout for the ILP socket.
 	defaultDialTimeout = 5 * time.Second
@@ -203,10 +204,14 @@ func formatILPLine(table string, tags map[string]string, fields map[string]any, 
 }
 
 // writeSortedTags writes tags in sorted key order for deterministic ILP output.
+// BUGFIX: Empty tag values produce invalid ILP lines (e.g. "container_id=,").
+// Tags with empty values are silently skipped to prevent QuestDB ILP rejection.
 func writeSortedTags(b *strings.Builder, tags map[string]string) {
 	keys := make([]string, 0, len(tags))
 	for k := range tags {
-		keys = append(keys, k)
+		if tags[k] != "" {
+			keys = append(keys, k)
+		}
 	}
 	sort.Strings(keys)
 
@@ -267,6 +272,14 @@ func writeFieldValue(b *strings.Builder, v any) {
 			b.WriteByte('t')
 		} else {
 			b.WriteByte('f')
+		}
+	case time.Time:
+		if val.IsZero() {
+			b.WriteString("null")
+		} else {
+			b.WriteByte('\'')
+			b.WriteString(val.UTC().Format("2006-01-02T15:04:05.000000Z"))
+			b.WriteByte('\'')
 		}
 	default:
 		// Fallback: format as string.

@@ -69,6 +69,11 @@ regex = "1"
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.16"
 libc = "0.2"
+# eBPF: libbpf-rs for loading C eBPF programs (replaces aya)
+libbpf-rs = "0.23"
+libbpf-sys = "1.4"
+# Zero-copy struct parsing from eBPF ring buffers
+plain = "0.2"
 
 [dev-dependencies]
 # Property-based testing
@@ -79,6 +84,8 @@ criterion = { version = "0.5", features = ["html_reports"] }
 [build-dependencies]
 tonic-build = "0.11"
 which = "7"
+# C eBPF program compilation (Linux only, skipped on other platforms)
+cc = "1.0"
 
 [[bin]]
 name = "paryty-agent"

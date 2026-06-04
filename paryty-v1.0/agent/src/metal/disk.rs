@@ -21,12 +21,18 @@ pub struct DiskDevice {
     pub total_bytes: u64,
     pub used_bytes: u64,
     pub free_bytes: u64,
-    pub read_ops_per_sec: f64,
-    pub write_ops_per_sec: f64,
-    pub read_bytes_per_sec: f64,
-    pub write_bytes_per_sec: f64,
-    pub io_latency_ms: f64,
-    pub queue_depth: f64,
+    /// Read operations per second. `None` on non-Linux (sysinfo has no API).
+    pub read_ops_per_sec: Option<f64>,
+    /// Write operations per second. `None` on non-Linux (sysinfo has no API).
+    pub write_ops_per_sec: Option<f64>,
+    /// Read bytes per second. `None` on non-Linux (sysinfo has no API).
+    pub read_bytes_per_sec: Option<f64>,
+    /// Write bytes per second. `None` on non-Linux (sysinfo has no API).
+    pub write_bytes_per_sec: Option<f64>,
+    /// I/O latency in milliseconds. `None` on non-Linux (sysinfo has no API).
+    pub io_latency_ms: Option<f64>,
+    /// Queue depth. `None` on non-Linux (sysinfo has no API).
+    pub queue_depth: Option<f64>,
     /// Whether this device is an SSD (`true`) or HDD (`false`).
     /// Determined by `/sys/block/{device}/queue/rotational`.
     pub is_ssd: bool,
@@ -235,12 +241,12 @@ impl DiskCollector {
                 total_bytes: total,
                 used_bytes: used,
                 free_bytes: free,
-                read_ops_per_sec: read_ops_rate,
-                write_ops_per_sec: write_ops_rate,
-                read_bytes_per_sec: read_bytes_rate,
-                write_bytes_per_sec: write_bytes_rate,
-                io_latency_ms: latency,
-                queue_depth: f64::from(queue_depth),
+                read_ops_per_sec: Some(read_ops_rate),
+                write_ops_per_sec: Some(write_ops_rate),
+                read_bytes_per_sec: Some(read_bytes_rate),
+                write_bytes_per_sec: Some(write_bytes_rate),
+                io_latency_ms: Some(latency),
+                queue_depth: Some(f64::from(queue_depth)),
                 is_ssd,
                 utilization_pct,
             });
@@ -270,11 +276,8 @@ impl DiskCollector {
             let total = disk.total_space();
             let available = disk.available_space();
             let used = total.saturating_sub(available);
-            let utilization_pct = if total > 0 {
-                (used as f64 / total as f64) * 100.0
-            } else {
-                0.0
-            };
+            let utilization_pct =
+                if total > 0 { (used as f64 / total as f64) * 100.0 } else { 0.0 };
 
             result.push(DiskDevice {
                 device_name: disk.name().to_string_lossy().to_string(),
@@ -284,12 +287,12 @@ impl DiskCollector {
                 used_bytes: used,
                 free_bytes: available,
                 // sysinfo doesn't provide per-disk IOPS/throughput on most platforms
-                read_ops_per_sec: 0.0,
-                write_ops_per_sec: 0.0,
-                read_bytes_per_sec: 0.0,
-                write_bytes_per_sec: 0.0,
-                io_latency_ms: 0.0,
-                queue_depth: 0.0,
+                read_ops_per_sec: None,
+                write_ops_per_sec: None,
+                read_bytes_per_sec: None,
+                write_bytes_per_sec: None,
+                io_latency_ms: None,
+                queue_depth: None,
                 is_ssd: matches!(disk.kind(), sysinfo::DiskKind::SSD),
                 utilization_pct,
             });

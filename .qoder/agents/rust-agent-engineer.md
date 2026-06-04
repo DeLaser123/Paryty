@@ -88,6 +88,23 @@ cargo test 2>&1
 cargo fmt --check 2>&1
 ```
 
+## Bug Fix Discipline
+
+**Principle: Fix once, never again.** See `bug-fix-discipline.md` for the full mandatory protocol.
+
+This protocol activates **automatically** whenever a bug, error, test failure, panic, or unexpected behavior is reported in the Rust Agent — no `/fix-bug` slash command required.
+
+When fixing any bug in the Rust Agent domain:
+1. **Reproduce** — write a test that triggers the bug before touching code
+2. **Root Cause** — trace to the underlying design flaw, not the symptom
+3. **Class Elimination** — search entire codebase for the same anti-pattern
+4. **Systemic Fix** — make the bug structurally impossible (types > guards > checks)
+5. **Regression Test** — add a test that fails before and passes after the fix
+6. **Environment Independence** — fix must work on Windows, WSL, Linux, after restart, under load
+7. **Post-Mortem** — document root cause and why the fix is permanent
+
+**Forbidden:** symptom patching, `unwrap()` as a band-aid for unexpected `None`/`Err`, `match _ => {}` to silence compiler warnings, fixing only the observed file, skipping regression tests, platform-specific workarounds (always cfg-gate properly), silencing tracing logs.
+
 ## Red Flags
 
 Stop and report when:

@@ -108,6 +108,14 @@ message CpuMetric {
   double frequency_mhz = 6;
   // Context switches since boot.
   int64 context_switches = 7;
+  // Physical core count.
+  int32 physical_cores = 8;
+  // Logical core count.
+  int32 logical_cores = 9;
+  // CPU model name.
+  string model_name = 10;
+  // CPU vendor ID.
+  string vendor_id = 11;
 }
 
 // MemoryMetric contains memory usage data.
@@ -130,6 +138,38 @@ message MemoryMetric {
   int64 swap_used_bytes = 8;
   // Usage percentage (0-100).
   double usage_percent = 9;
+  // Memory pressure (PSI) data.
+  MemoryPressure pressure = 10;
+  // Top N processes by RSS.
+  repeated MemoryTopProcess top_processes = 11;
+}
+
+// MemoryPressure contains PSI (Pressure Stall Information) data.
+message MemoryPressure {
+  // Some tasks stalled, 10s window.
+  double some_10 = 1;
+  // Some tasks stalled, 60s window.
+  double some_60 = 2;
+  // Some tasks stalled, 300s window.
+  double some_300 = 3;
+  // All tasks stalled, 10s window.
+  double full_10 = 4;
+  // All tasks stalled, 60s window.
+  double full_60 = 5;
+  // All tasks stalled, 300s window.
+  double full_300 = 6;
+}
+
+// MemoryTopProcess identifies one of the top N processes by RSS.
+message MemoryTopProcess {
+  // Process ID.
+  int32 pid = 1;
+  // Process name.
+  string name = 2;
+  // RSS memory in bytes.
+  int64 rss_bytes = 3;
+  // VSZ memory in bytes.
+  int64 vsz_bytes = 4;
 }
 
 // DiskMetric contains disk usage and I/O data for one device.
@@ -158,6 +198,10 @@ message DiskMetric {
   double io_latency_ms = 11;
   // Queue depth.
   double queue_depth = 12;
+  // Whether this device is an SSD.
+  bool is_ssd = 13;
+  // Device utilization percentage (0.0–100.0).
+  double utilization_pct = 14;
 }
 
 // NetworkMetric contains network usage data for one interface.
@@ -184,6 +228,34 @@ message NetworkMetric {
   int64 tcp_retransmits = 10;
   // Estimated RTT in milliseconds.
   double estimated_rtt_ms = 11;
+  // Cumulative bytes received since boot.
+  int64 total_rx_bytes = 12;
+  // Cumulative bytes transmitted since boot.
+  int64 total_tx_bytes = 13;
+  // Cumulative packets received since boot.
+  int64 total_rx_packets = 14;
+  // Cumulative packets transmitted since boot.
+  int64 total_tx_packets = 15;
+  // Link speed in Mbps.
+  int64 speed_mbps = 16;
+  // Whether the interface is up.
+  bool is_up = 17;
+  // Aggregate TCP stats for this host.
+  TcpStats tcp_stats = 18;
+}
+
+// TcpStats contains aggregate TCP socket statistics.
+message TcpStats {
+  // Number of ESTABLISHED connections.
+  int32 established = 1;
+  // Number of connections in TIME_WAIT.
+  int32 time_wait = 2;
+  // Number of connections in CLOSE_WAIT.
+  int32 close_wait = 3;
+  // Number of connections in LISTEN state.
+  int32 listen = 4;
+  // Total retransmitted segments.
+  int64 retransmit_count = 5;
 }
 
 // ProcessMetric contains per-process data.
@@ -212,6 +284,14 @@ message ProcessMetric {
   string container_id = 11;
   // Start time.
   google.protobuf.Timestamp started_at = 12;
+  // Executable path.
+  string exe = 13;
+  // Cumulative disk bytes read.
+  int64 disk_read_bytes = 14;
+  // Cumulative disk bytes written.
+  int64 disk_written_bytes = 15;
+  // Process owner user ID.
+  string user_id = 16;
 }
 
 // ContainerMetric contains container detection data.
@@ -232,6 +312,12 @@ message ContainerMetric {
   Labels labels = 7;
   // Processes in this container.
   repeated int32 pids = 8;
+  // Memory limit in bytes.
+  int64 memory_limit_bytes = 9;
+  // CPU CFS quota as ratio.
+  double cpu_quota = 10;
+  // CPU shares (relative weight).
+  int64 cpu_shares = 11;
 }
 
 // ============================================================================

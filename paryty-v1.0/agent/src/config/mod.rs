@@ -72,6 +72,27 @@ pub struct EbpfConfig {
     pub db_inspection: bool,
     pub exclude_ports: Vec<u16>,
     pub exclude_ips: Vec<String>,
+    /// Ring buffer size in KB for eBPF event delivery (default: 256)
+    #[serde(default = "default_ring_buffer_size_kb")]
+    pub ring_buffer_size_kb: u32,
+    /// Poll interval in milliseconds for ring buffer consumption (default: 100)
+    #[serde(default = "default_poll_interval_ms")]
+    pub poll_interval_ms: u64,
+    /// Whether to fall back to /proc-based collection when eBPF is unavailable (default: true)
+    #[serde(default = "default_fallback_to_proc")]
+    pub fallback_to_proc: bool,
+}
+
+fn default_ring_buffer_size_kb() -> u32 {
+    256
+}
+
+fn default_poll_interval_ms() -> u64 {
+    100
+}
+
+fn default_fallback_to_proc() -> bool {
+    true
 }
 
 /// Supervisor configuration

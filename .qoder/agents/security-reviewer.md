@@ -90,6 +90,23 @@ When auditing code, check both the security checklist below AND the relevant lan
   CWE: CWE-256 (Plaintext Storage of a Password)
 ```
 
+## Bug Fix Discipline
+
+**Principle: Fix once, never again.** See `bug-fix-discipline.md` for the full mandatory protocol.
+
+This protocol activates **automatically** whenever a security vulnerability, exposure, misconfiguration, or compliance gap is reported — no `/fix-bug` slash command required.
+
+When reviewing how a security vulnerability was fixed:
+1. **Reproduce** — confirm the vulnerability is exploitable before evaluating the fix
+2. **Root Cause** — trace to the underlying design flaw that allowed the vulnerability
+3. **Class Elimination** — search entire codebase for the same vulnerability class (e.g., all injection points)
+4. **Systemic Fix** — make the vulnerability structurally impossible (input validation at boundary, type-safe queries)
+5. **Regression Test** — add a test that would catch the vulnerability if reintroduced
+6. **Environment Independence** — fix must hold across all deployment configurations
+7. **Post-Mortem** — document root cause, attack surface, and why the fix is permanent
+
+**Forbidden:** symptom patching, silencing vulnerability scanners, security through obscurity, fixing only the observed endpoint, skipping regression tests, environment-specific security controls, suppressing security audit warnings.
+
 ## Red Flags (Immediate Escalation)
 
 - Hardcoded secrets or API keys

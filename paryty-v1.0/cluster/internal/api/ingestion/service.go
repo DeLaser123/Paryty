@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
+	pb "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
 )
@@ -19,6 +20,7 @@ type StoreBackend interface {
 	GetAllAgentStates(ctx context.Context, tenant string) ([]models.AgentInfo, error)
 	StoreMetricWarmCold(ctx context.Context, tenant string, batch *models.MetricBatch) error
 	SetLatestMetrics(ctx context.Context, tenant, agentID string, batch *models.MetricBatch) error
+	StoreNetworkEvents(ctx context.Context, tenant string, batch *pb.NetworkEventBatch) error
 }
 
 // StreamBackend abstracts the stream layer for testability.
@@ -115,8 +117,8 @@ func validateBatchDomain(batch *models.MetricBatch) error {
 
 // Sentinel errors for batch validation.
 var (
-	ErrNilBatch         = &BatchValidationError{Message: "batch must not be nil"}
-	ErrNoMetricTypes    = &BatchValidationError{Message: "batch must contain at least one metric type"}
+	ErrNilBatch          = &BatchValidationError{Message: "batch must not be nil"}
+	ErrNoMetricTypes     = &BatchValidationError{Message: "batch must contain at least one metric type"}
 	ErrAllTimestampsZero = &BatchValidationError{Message: "batch timestamps must not all be zero"}
 )
 
@@ -248,6 +250,39 @@ func (s *IngestionService) SendBatch(ctx context.Context, tenant, agentID string
 		"agent_id", agentID,
 		"cpu_metrics", len(batch.CPU),
 		"memory_metrics", len(batch.Memory),
+	)
+
+	return nil
+}
+
+// StoreNetworkEvents stores a batch of eBPF network events in the warm tier
+// and publishes them to the tenant-scoped network events topic on Redpanda.
+func (s *IngestionService) StoreNetworkEvents(ctx context.Context, tenant string, batch *pb.NetworkEventBatch) error {
+	agentID := batch.GetAgentId()
+
+	// Store to warm tier (QuestDB).
+	if err := s.store.StoreNetworkEvents(ctx, tenant, batch); err != nil {
+		return err
+	}
+
+	// Publish to tenant-scoped network events stream.
+	if err := s.stream.Producer().PublishTenant(ctx, stream.TopicNetworkEvents(tenant), tenant, agentID, batch); err != nil {
+		slog.Error("network event stream publish failed, attempting DLQ",
+			"error", err,
+			"tenant", tenant,
+			"agent_id", agentID,
+		)
+
+		// DLQ is best-effort.
+		_ = s.stream.Producer().PublishTenant(ctx, stream.TopicDLQ(tenant), tenant, agentID, batch)
+
+		return err
+	}
+
+	slog.Debug("Network events processed",
+		"tenant", tenant,
+		"agent_id", agentID,
+		"event_count", len(batch.GetEvents()),
 	)
 
 	return nil

@@ -1,4 +1,4 @@
-﻿// Package main implements the Paryty Ingestion Service.
+// Package main implements the Paryty Ingestion Service.
 //
 // The Ingestion Service receives data from Paryty Agents via gRPC
 // and publishes it to the Stream Engine (Redpanda).

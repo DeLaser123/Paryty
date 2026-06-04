@@ -9,21 +9,21 @@
 //! Architecture:
 //! ```text
 //! Client
-//! ├── GrpcClient          — Bidirectional gRPC stream to cluster
-//! ├── ReconnectionEngine  — Exponential backoff with jitter
-//! ├── EdgeBuffer          — Write-ahead log for zero data loss
-//! ├── Compressor          — Zstd (all data)
-//! ├── FlowControl         — Credit-based backpressure
-//! └── CancellationToken   — Cooperative shutdown signal
+//! â”œâ”€â”€ GrpcClient          â€” Bidirectional gRPC stream to cluster
+//! â”œâ”€â”€ ReconnectionEngine  â€” Exponential backoff with jitter
+//! â”œâ”€â”€ EdgeBuffer          â€” Write-ahead log for zero data loss
+//! â”œâ”€â”€ Compressor          â€” Zstd (all data)
+//! â”œâ”€â”€ FlowControl         â€” Credit-based backpressure
+//! â””â”€â”€ CancellationToken   â€” Cooperative shutdown signal
 //! ```
 //!
 //! Lifecycle:
-//! 1. `connect()` → TCP/TLS handshake
-//! 2. `register_on_connect()` → AgentRegistration RPC
-//! 3. `start_heartbeat_loop()` → periodic Heartbeat RPC
-//! 4. `start_stream_listener()` → bidirectional ClusterToAgent stream
-//! 5. `send_metrics()` / `send_traces()` / … → compress → buffer → send
-//! 6. `shutdown()` → cancel → flush buffer → disconnect
+//! 1. `connect()` â†’ TCP/TLS handshake
+//! 2. `register_on_connect()` â†’ AgentRegistration RPC
+//! 3. `start_heartbeat_loop()` â†’ periodic Heartbeat RPC
+//! 4. `start_stream_listener()` â†’ bidirectional ClusterToAgent stream
+//! 5. `send_metrics()` / `send_traces()` / â€¦ â†’ compress â†’ buffer â†’ send
+//! 6. `shutdown()` â†’ cancel â†’ flush buffer â†’ disconnect
 
 pub mod compression;
 pub mod edge_buffer;
@@ -49,8 +49,8 @@ use reconnect::{ReconnectPolicy, ReconnectionEngine};
 use crate::proto::cluster_to_agent;
 use crate::proto::paryty::v1::{
     AgentCapabilities, AgentCommandType, AgentRegistration, AgentRegistrationResponse,
-    AgentToCluster, ClusterToAgent, CpuMetric, DiskMetric, HeartbeatRequest, MemoryMetric,
-    MetricBatch, NetworkMetric, ProcessMetric,
+    AgentToCluster, ClusterToAgent, ContainerMetric, CpuMetric, DiskMetric, HeartbeatRequest,
+    MemoryMetric, MetricBatch, NetworkEventBatch, NetworkMetric, ProcessMetric,
 };
 
 use crate::metal::batch::MetalBatch;
@@ -118,7 +118,7 @@ impl Client {
         })
     }
 
-    // ── Registration ────────────────────────────────────────────────────
+    // â”€â”€ Registration â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Register this agent with the cluster after a successful connection.
     ///
@@ -175,7 +175,59 @@ impl Client {
         Ok(())
     }
 
-    // ── Send Metrics (compress → flow control → send_batch → buffer) ───
+    // â”€â”€ Registration Loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+    /// Start a background task that retries registration until it succeeds.
+    ///
+    /// Uses exponential backoff (1s â†’ 2s â†’ 4s â†’ â€¦ â†’ 30s max) with jitter.
+    /// Exits when registration succeeds or the cancel token fires.
+    pub fn start_registration_loop(self: &Arc<Self>) {
+        let client = Arc::clone(self);
+        let cancel = client.cancel_token.clone();
+
+        tokio::spawn(async move {
+            let mut attempt: u32 = 0;
+            loop {
+                // If already registered, nothing to do.
+                if client.is_registered() {
+                    break;
+                }
+
+                // If not connected, wait for the reconnection loop to fix that.
+                if !client.grpc.is_connected().await {
+                    tokio::select! {
+                        _ = cancel.cancelled() => break,
+                        _ = tokio::time::sleep(std::time::Duration::from_secs(2)) => continue,
+                    }
+                }
+
+                match client.register_on_connect().await {
+                    Ok(()) => {
+                        info!("Registration loop: agent registered successfully");
+                        break;
+                    }
+                    Err(e) => {
+                        attempt += 1;
+                        let delay = std::time::Duration::from_secs(1)
+                            .mul_f64(2.0_f64.powi(attempt.min(5) as i32));
+                        let delay = delay.min(std::time::Duration::from_secs(30));
+                        warn!(
+                            attempt = attempt,
+                            retry_in = ?delay,
+                            error = %e,
+                            "Registration failed â€” will retry with backoff"
+                        );
+                        tokio::select! {
+                            _ = cancel.cancelled() => break,
+                            _ = tokio::time::sleep(delay) => {}
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    // â”€â”€ Send Metrics (compress â†’ flow control â†’ send_batch â†’ buffer) â”€â”€â”€
 
     /// Send metrics data to the cluster.
     ///
@@ -197,7 +249,7 @@ impl Client {
         if self.flow_control.is_backpressured() {
             let rate = self.flow_control.sampling_rate().await;
             if fastrand::f64() > rate {
-                // Dropped by sampling — still buffer for safety.
+                // Dropped by sampling â€” still buffer for safety.
                 self.buffer.write(compressed.clone(), DataType::Metrics).await?;
                 debug!(
                     seq = seq,
@@ -214,16 +266,15 @@ impl Client {
         info!(seq = seq, connected = connected, "send_metrics: connection check");
         if connected {
             // Deserialize the MetalBatch JSON and convert to proto MetricBatch.
-            let metal: MetalBatch = serde_json::from_slice(data)
-                .unwrap_or_else(|_| MetalBatch {
-                    timestamp: String::new(),
-                    cpu: None,
-                    memory: None,
-                    disk: None,
-                    network: None,
-                    process: None,
-                    container: None,
-                });
+            let metal: MetalBatch = serde_json::from_slice(data).unwrap_or_else(|_| MetalBatch {
+                timestamp: String::new(),
+                cpu: None,
+                memory: None,
+                disk: None,
+                network: None,
+                process: None,
+                container: None,
+            });
 
             let batch = MetricBatch {
                 agent_id: self.agent_id.clone(),
@@ -233,71 +284,161 @@ impl Client {
                 cpu: metal.cpu.map(|c| CpuMetric {
                     total_usage_percent: c.total_usage_percent,
                     per_core_percent: c.per_core_percent,
-                    load_average_1m: c.load_average_1m,
-                    load_average_5m: c.load_average_5m,
-                    load_average_15m: c.load_average_15m,
+                    load_average_1m: c.load_average_1m.unwrap_or(0.0),
+                    load_average_5m: c.load_average_5m.unwrap_or(0.0),
+                    load_average_15m: c.load_average_15m.unwrap_or(0.0),
                     frequency_mhz: c.frequency_mhz,
-                    context_switches: c.context_switches as i64,
+                    context_switches: c.context_switches.unwrap_or(0) as i64,
+                    physical_cores: c.physical_cores as i32,
+                    logical_cores: c.logical_cores as i32,
+                    model_name: c.model_name,
+                    vendor_id: c.vendor_id.unwrap_or_default(),
                 }),
                 memory: metal.memory.map(|m| MemoryMetric {
                     total_bytes: m.total_bytes as i64,
                     used_bytes: m.used_bytes as i64,
                     free_bytes: m.free_bytes as i64,
                     available_bytes: m.available_bytes as i64,
-                    cached_bytes: m.cached_bytes as i64,
-                    buffer_bytes: m.buffer_bytes as i64,
+                    cached_bytes: m.cached_bytes.unwrap_or(0) as i64,
+                    buffer_bytes: m.buffer_bytes.unwrap_or(0) as i64,
                     swap_total_bytes: m.swap_total_bytes as i64,
                     swap_used_bytes: m.swap_used_bytes as i64,
                     usage_percent: m.usage_percent,
+                    pressure: m.pressure.map(|p| crate::proto::MemoryPressure {
+                        some_10: p.some_avg10,
+                        some_60: p.some_avg60,
+                        some_300: p.some_avg300,
+                        full_10: p.full_avg10,
+                        full_60: p.full_avg60,
+                        full_300: p.full_avg300,
+                    }),
+                    top_processes: m
+                        .top_processes
+                        .into_iter()
+                        .map(|tp| crate::proto::MemoryTopProcess {
+                            pid: tp.pid as i32,
+                            name: tp.name,
+                            rss_bytes: tp.rss_bytes as i64,
+                            vsz_bytes: tp.vsz_bytes as i64,
+                        })
+                        .collect(),
                 }),
-                disks: metal.disk.map(|d| {
-                    d.devices.into_iter().map(|dk| DiskMetric {
-                        device_name: dk.device_name,
-                        mount_point: dk.mount_point,
-                        filesystem_type: dk.filesystem_type,
-                        total_bytes: dk.total_bytes as i64,
-                        used_bytes: dk.used_bytes as i64,
-                        free_bytes: dk.free_bytes as i64,
-                        read_ops_per_sec: dk.read_ops_per_sec,
-                        write_ops_per_sec: dk.write_ops_per_sec,
-                        read_bytes_per_sec: dk.read_bytes_per_sec,
-                        write_bytes_per_sec: dk.write_bytes_per_sec,
-                        io_latency_ms: dk.io_latency_ms,
-                        queue_depth: dk.queue_depth,
-                    }).collect()
-                }).unwrap_or_default(),
-                interfaces: metal.network.map(|n| {
-                    n.interfaces.into_iter().map(|iface| NetworkMetric {
-                        interface_name: iface.interface_name,
-                        rx_bytes_per_sec: iface.rx_bytes_per_sec,
-                        tx_bytes_per_sec: iface.tx_bytes_per_sec,
-                        rx_packets_per_sec: iface.rx_packets_per_sec,
-                        tx_packets_per_sec: iface.tx_packets_per_sec,
-                        rx_errors: iface.rx_errors as i64,
-                        tx_errors: iface.tx_errors as i64,
-                        rx_dropped: iface.rx_dropped as i64,
-                        tx_dropped: iface.tx_dropped as i64,
-                        tcp_retransmits: iface.tcp_retransmits as i64,
-                        estimated_rtt_ms: iface.estimated_rtt_ms,
-                    }).collect()
-                }).unwrap_or_default(),
-                processes: metal.process.map(|p| {
-                    p.processes.into_iter().map(|proc_| ProcessMetric {
-                        pid: proc_.pid as i32,
-                        parent_pid: proc_.parent_pid as i32,
-                        name: proc_.name,
-                        command_line: proc_.command_line,
-                        cpu_usage_percent: proc_.cpu_usage_percent,
-                        rss_bytes: proc_.rss_bytes as i64,
-                        vsz_bytes: proc_.vsz_bytes as i64,
-                        status: proc_.status,
-                        thread_count: proc_.thread_count as i32,
-                        fd_count: proc_.fd_count as i32,
-                        container_id: proc_.container_id,
-                        started_at: None,
-                    }).collect()
-                }).unwrap_or_default(),
-                containers: vec![],
+                disks: metal
+                    .disk
+                    .map(|d| {
+                        d.devices
+                            .into_iter()
+                            .map(|dk| DiskMetric {
+                                device_name: dk.device_name,
+                                mount_point: dk.mount_point,
+                                filesystem_type: dk.filesystem_type,
+                                total_bytes: dk.total_bytes as i64,
+                                used_bytes: dk.used_bytes as i64,
+                                free_bytes: dk.free_bytes as i64,
+                                read_ops_per_sec: dk.read_ops_per_sec.unwrap_or(0.0),
+                                write_ops_per_sec: dk.write_ops_per_sec.unwrap_or(0.0),
+                                read_bytes_per_sec: dk.read_bytes_per_sec.unwrap_or(0.0),
+                                write_bytes_per_sec: dk.write_bytes_per_sec.unwrap_or(0.0),
+                                io_latency_ms: dk.io_latency_ms.unwrap_or(0.0),
+                                queue_depth: dk.queue_depth.unwrap_or(0.0),
+                                is_ssd: dk.is_ssd,
+                                utilization_pct: dk.utilization_pct,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                interfaces: metal
+                    .network
+                    .map(|n| {
+                        n.interfaces
+                            .into_iter()
+                            .map(|iface| NetworkMetric {
+                                interface_name: iface.interface_name,
+                                rx_bytes_per_sec: iface.rx_bytes_per_sec,
+                                tx_bytes_per_sec: iface.tx_bytes_per_sec,
+                                rx_packets_per_sec: iface.rx_packets_per_sec,
+                                tx_packets_per_sec: iface.tx_packets_per_sec,
+                                rx_errors: iface.rx_errors as i64,
+                                tx_errors: iface.tx_errors as i64,
+                                rx_dropped: iface.rx_dropped.unwrap_or(0) as i64,
+                                tx_dropped: iface.tx_dropped.unwrap_or(0) as i64,
+                                tcp_retransmits: iface.tcp_retransmits.unwrap_or(0) as i64,
+                                estimated_rtt_ms: iface.estimated_rtt_ms.unwrap_or(0.0),
+                                total_rx_bytes: iface.total_rx_bytes as i64,
+                                total_tx_bytes: iface.total_tx_bytes as i64,
+                                total_rx_packets: iface.total_rx_packets as i64,
+                                total_tx_packets: iface.total_tx_packets as i64,
+                                speed_mbps: iface.speed_mbps.unwrap_or(0) as i64,
+                                is_up: iface.is_up,
+                                tcp_stats: n.tcp_stats.clone().map(|ts| crate::proto::TcpStats {
+                                    established: ts.active_connections as i32,
+                                    time_wait: ts.time_wait as i32,
+                                    close_wait: 0i32, // not collected by network collector
+                                    listen: ts.listen as i32,
+                                    retransmit_count: ts.retransmits as i64,
+                                }),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                processes: metal
+                    .process
+                    .map(|p| {
+                        p.processes
+                            .into_iter()
+                            .map(|proc_| ProcessMetric {
+                                pid: proc_.pid as i32,
+                                parent_pid: proc_.parent_pid as i32,
+                                name: proc_.name,
+                                command_line: proc_.command_line,
+                                cpu_usage_percent: proc_.cpu_usage_percent,
+                                rss_bytes: proc_.rss_bytes as i64,
+                                vsz_bytes: proc_.vsz_bytes as i64,
+                                status: proc_.status,
+                                thread_count: proc_.thread_count.unwrap_or(0) as i32,
+                                fd_count: proc_.fd_count.unwrap_or(0) as i32,
+                                container_id: proc_.container_id.unwrap_or_default(),
+                                started_at: proc_.started_at.as_deref().and_then(|s| {
+                                    chrono::DateTime::parse_from_rfc3339(s).ok().map(|dt| {
+                                        prost_types::Timestamp {
+                                            seconds: dt.timestamp(),
+                                            nanos: dt.timestamp_subsec_nanos() as i32,
+                                        }
+                                    })
+                                }),
+                                exe: proc_.exe.unwrap_or_default(),
+                                disk_read_bytes: proc_.disk_read_bytes.unwrap_or(0) as i64,
+                                disk_written_bytes: proc_.disk_written_bytes.unwrap_or(0) as i64,
+                                user_id: proc_.user_id.unwrap_or_default(),
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                containers: metal
+                    .container
+                    .map(|c| {
+                        c.containers
+                            .into_iter()
+                            .map(|ctr| ContainerMetric {
+                                container_id: ctr.container_id,
+                                runtime: ctr.runtime,
+                                name: ctr.name,
+                                image: ctr.image,
+                                status: ctr.status,
+                                cgroup_version: ctr.cgroup_version,
+                                labels: None,
+                                pids: ctr.pids.into_iter().map(|p| p as i32).collect(),
+                                memory_limit_bytes: ctr
+                                    .resource_limits
+                                    .memory_limit_bytes
+                                    .unwrap_or(0)
+                                    as i64,
+                                cpu_quota: ctr.resource_limits.cpu_quota.unwrap_or(0.0),
+                                cpu_shares: ctr.resource_limits.cpu_shares.unwrap_or(0) as i64,
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 health_checks: vec![],
                 log_entries: vec![],
                 network_events: vec![],
@@ -324,10 +465,9 @@ impl Client {
                         );
                         return Ok(());
                     }
-                    // Server rejected the batch — log error detail and buffer.
-                    let err_msg = response.error.as_ref()
-                        .map(|e| e.message.as_str())
-                        .unwrap_or("unknown");
+                    // Server rejected the batch â€” log error detail and buffer.
+                    let err_msg =
+                        response.error.as_ref().map(|e| e.message.as_str()).unwrap_or("unknown");
                     warn!(
                         seq = seq,
                         batch_id = %response.batch_id,
@@ -354,7 +494,7 @@ impl Client {
         Ok(())
     }
 
-    // ── Send Traces ─────────────────────────────────────────────────────
+    // â”€â”€ Send Traces â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Send trace data to the cluster.
     pub async fn send_traces(&self, data: &[u8]) -> Result<()> {
@@ -366,7 +506,7 @@ impl Client {
         self.buffer.write(compressed.clone(), DataType::Traces).await?;
 
         if self.grpc.is_connected().await {
-            // Traces don't have a dedicated proto RPC — send via legacy channel.
+            // Traces don't have a dedicated proto RPC â€” send via legacy channel.
             if let Err(e) = self.grpc.send(compressed).await {
                 warn!("Failed to send traces via gRPC (seq: {}): {}", seq, e);
             } else {
@@ -377,7 +517,7 @@ impl Client {
         Ok(())
     }
 
-    // ── Send Events ─────────────────────────────────────────────────────
+    // â”€â”€ Send Events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Send event data to the cluster.
     pub async fn send_events(&self, data: &[u8]) -> Result<()> {
@@ -395,9 +535,12 @@ impl Client {
         Ok(())
     }
 
-    // ── Send Network Events ─────────────────────────────────────────────
+    // â”€â”€ Send Network Events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-    /// Send network events to the cluster.
+    /// Send network events to the cluster via JSON (legacy path).
+    ///
+    /// Preserved for backward compatibility (e.g., proc_fallback).
+    /// Prefer [`send_network_events_proto`] for new code.
     pub async fn send_network_events(&self, data: &[u8]) -> Result<()> {
         let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
         self.buffer.write(data.to_vec(), DataType::NetworkEvents).await?;
@@ -413,7 +556,80 @@ impl Client {
         Ok(())
     }
 
-    // ── Flush Buffer ────────────────────────────────────────────────────
+    /// Send network events to the cluster via the typed `ReportNetworkEvents`
+    /// client-streaming gRPC RPC.
+    ///
+    /// Converts each [`crate::ebpf::NetworkEvent`] to its proto representation,
+    /// wraps them in a [`NetworkEventBatch`], and sends via the dedicated RPC.
+    /// On failure, falls back to buffering the events as JSON in the edge buffer
+    /// for replay on reconnect.
+    pub async fn send_network_events_proto(
+        &self,
+        events: &[crate::ebpf::NetworkEvent],
+    ) -> Result<()> {
+        let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
+        let session_id = self.session_id.read().await.clone();
+
+        // Convert ebpf events to proto events.
+        let proto_events: Vec<crate::proto::paryty::v1::NetworkEvent> =
+            events.iter().map(convert_network_event).collect();
+
+        let batch = NetworkEventBatch {
+            agent_id: self.agent_id.clone(),
+            session_id,
+            sequence_number: seq as i64,
+            timestamp: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
+            events: proto_events,
+        };
+
+        debug!(
+            seq = seq,
+            event_count = events.len(),
+            "Sending network events via ReportNetworkEvents RPC"
+        );
+
+        // Try proto RPC first.
+        if self.grpc.is_connected().await {
+            match self.grpc.report_network_events(batch).await {
+                Ok(response) => {
+                    info!(
+                        seq = seq,
+                        accepted = response.accepted_count,
+                        rejected = response.rejected_count,
+                        "Network events accepted by cluster via ReportNetworkEvents"
+                    );
+                    return Ok(());
+                }
+                Err(e) => {
+                    warn!(
+                        seq = seq,
+                        error = %e,
+                        "ReportNetworkEvents RPC failed, falling back to edge buffer"
+                    );
+                    // Fall through to buffer.
+                }
+            }
+        }
+
+        // Fallback: serialize to JSON and buffer for replay on reconnect.
+        match serde_json::to_vec(events) {
+            Ok(data) => {
+                self.buffer.write(data, DataType::NetworkEvents).await?;
+                debug!(seq = seq, "Network events buffered as JSON for replay");
+            }
+            Err(e) => {
+                error!(
+                    seq = seq,
+                    error = %e,
+                    "Failed to serialize network events for edge buffer"
+                );
+            }
+        }
+
+        Ok(())
+    }
+
+    // â”€â”€ Flush Buffer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Flush pending entries from the edge buffer to the cluster.
     ///
@@ -454,7 +670,7 @@ impl Client {
                     failed_count += 1;
                     warn!(
                         seq = entry.sequence_number,
-                        "Buffer flush send failed: {} — stopping flush", e
+                        "Buffer flush send failed: {} â€” stopping flush", e
                     );
                     // Mark retry in SQLite.
                     if let Some(row_id) = entry.sqlite_row_id {
@@ -462,7 +678,7 @@ impl Client {
                             warn!(row_id = row_id, "Failed to mark SQLite entry retry: {}", e);
                         }
                     }
-                    // Stop flushing — connection is likely down.
+                    // Stop flushing â€” connection is likely down.
                     break;
                 }
             }
@@ -473,7 +689,7 @@ impl Client {
         Ok(())
     }
 
-    // ── Heartbeat Loop ──────────────────────────────────────────────────
+    // â”€â”€ Heartbeat Loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Start the heartbeat loop as a background tokio task.
     ///
@@ -535,16 +751,16 @@ impl Client {
         });
     }
 
-    // ── Stream Listener ─────────────────────────────────────────────────
+    // â”€â”€ Stream Listener â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Start the bidirectional stream listener as a background tokio task.
     ///
     /// Opens a `StreamMetrics` bidirectional gRPC stream and spawns a task
     /// to listen for `ClusterToAgent` messages. Dispatches:
-    /// - `FlowControl` → `flow_control.apply_server_signal()`
-    /// - `ConfigPush` → log (future: apply config hot-reload)
-    /// - `AgentCommand` → `handle_agent_command()`
-    /// - `Heartbeat` → log (heartbeat responses on stream)
+    /// - `FlowControl` â†’ `flow_control.apply_server_signal()`
+    /// - `ConfigPush` â†’ log (future: apply config hot-reload)
+    /// - `AgentCommand` â†’ `handle_agent_command()`
+    /// - `Heartbeat` â†’ log (heartbeat responses on stream)
     pub fn start_stream_listener(self: &Arc<Self>) {
         let client = Arc::clone(self);
         let cancel = client.cancel_token.clone();
@@ -591,7 +807,7 @@ impl Client {
             // The Go server's StreamMetrics handler blocks on stream.Recv() waiting
             // for a client message before it sends any response. Without this, the
             // server gets EOF (if sender is dropped) or blocks forever, and the
-            // client's inbound.message() hangs indefinitely — deadlocking the runtime.
+            // client's inbound.message() hangs indefinitely â€” deadlocking the runtime.
             {
                 let sid = client.session_id.read().await.clone();
                 let initial_hb = AgentToCluster {
@@ -613,11 +829,10 @@ impl Client {
                 debug!("Sent initial stream heartbeat to server");
             }
 
-            // Periodic heartbeat timer — keeps the stream alive so the server's
+            // Periodic heartbeat timer â€” keeps the stream alive so the server's
             // Recv() loop continues to receive messages and send FlowControl
             // responses that the client reads from `inbound`.
-            let mut heartbeat_interval =
-                tokio::time::interval(std::time::Duration::from_secs(30));
+            let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
             heartbeat_interval.tick().await; // consume the immediate first tick
 
             // Listen for incoming messages from the cluster.
@@ -752,7 +967,7 @@ impl Client {
         }
     }
 
-    // ── Health Check (uses proto Heartbeat RPC) ─────────────────────────
+    // â”€â”€ Health Check (uses proto Heartbeat RPC) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Perform a health check by sending a heartbeat.
     ///
@@ -784,7 +999,7 @@ impl Client {
         }
     }
 
-    // ── Connection Management ───────────────────────────────────────────
+    // â”€â”€ Connection Management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Connect to the cluster.
     pub async fn connect(&self) -> Result<()> {
@@ -811,7 +1026,7 @@ impl Client {
         self.registered.load(Ordering::Acquire)
     }
 
-    // ── Reconnection Loop ───────────────────────────────────────────────
+    // â”€â”€ Reconnection Loop â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Start the background reconnection loop.
     ///
@@ -831,6 +1046,15 @@ impl Client {
                     }
                     _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
                         if client.grpc.is_connected().await {
+                            // Connected but not yet registered â€” the registration
+                            // loop handles retries, so just flush buffer if already
+                            // registered, otherwise wait.
+                            if client.is_registered() {
+                                // Best-effort buffer flush while idle.
+                                if let Err(e) = client.flush_buffer().await {
+                                    warn!("Buffer flush during idle failed: {}", e);
+                                }
+                            }
                             continue;
                         }
 
@@ -862,7 +1086,7 @@ impl Client {
         });
     }
 
-    // ── Graceful Shutdown ───────────────────────────────────────────────
+    // â”€â”€ Graceful Shutdown â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Gracefully shut down the communication layer.
     ///
@@ -875,7 +1099,7 @@ impl Client {
 
         // 1. Cancel all background tasks.
         self.cancel_token.cancel();
-        debug!("Cancellation token triggered — background tasks will stop");
+        debug!("Cancellation token triggered â€” background tasks will stop");
 
         // Small delay to let tasks observe the cancellation.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
@@ -899,7 +1123,7 @@ impl Client {
         info!("Communication layer shutdown complete");
     }
 
-    // ── Accessors ───────────────────────────────────────────────────────
+    // â”€â”€ Accessors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     /// Get the cancellation token (for external shutdown coordination).
     pub fn cancel_token(&self) -> &CancellationToken {
@@ -922,7 +1146,130 @@ impl Client {
     }
 }
 
-// ── Helper Functions ────────────────────────────────────────────────────
+// â”€â”€ Proto Conversion Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+/// Convert an eBPF [`crate::ebpf::NetworkEvent`] to a proto
+/// [`crate::proto::paryty::v1::NetworkEvent`].
+///
+/// Maps each variant to the corresponding proto oneof variant.
+/// Fields not available in the eBPF data (e.g., bytes_sent/received for TCP,
+/// query_type for DNS) are set to sensible defaults (0, empty string).
+fn convert_network_event(
+    event: &crate::ebpf::NetworkEvent,
+) -> crate::proto::paryty::v1::NetworkEvent {
+    use crate::proto::paryty::v1 as pb;
+
+    let proto_event = match event {
+        crate::ebpf::NetworkEvent::TcpConnection {
+            source_ip,
+            source_port,
+            destination_ip,
+            destination_port,
+            state,
+            pid,
+            process_name,
+        } => pb::network_event::Event::TcpConnection(pb::TcpConnectionEvent {
+            r#type: pb::TcpEventType::Connect as i32,
+            source_ip: source_ip.clone(),
+            source_port: *source_port as i32,
+            destination_ip: destination_ip.clone(),
+            destination_port: *destination_port as i32,
+            state: tcp_state_from_str(state) as i32,
+            duration_ms: 0,
+            bytes_sent: 0,
+            bytes_received: 0,
+            pid: *pid as i32,
+            process_name: process_name.clone(),
+        }),
+        crate::ebpf::NetworkEvent::DnsQuery { query_name, resolved_ips, latency_ms, pid } => {
+            pb::network_event::Event::DnsQuery(pb::DnsQueryEvent {
+                query_name: query_name.clone(),
+                query_type: String::new(),
+                resolved_ips: resolved_ips.clone(),
+                response_code: String::new(),
+                ttl_seconds: 0,
+                latency_ms: *latency_ms,
+                pid: *pid as i32,
+                process_name: String::new(),
+            })
+        }
+        crate::ebpf::NetworkEvent::HttpRequest {
+            method,
+            path,
+            status_code,
+            latency_ms,
+            source_ip,
+            destination_ip,
+            destination_port,
+            pid,
+        } => pb::network_event::Event::HttpRequest(pb::HttpRequestEvent {
+            method: method.clone(),
+            path: path.clone(),
+            http_version: String::new(),
+            status_code: *status_code as i32,
+            latency_ms: *latency_ms,
+            request_bytes: 0,
+            response_bytes: 0,
+            source_ip: source_ip.clone(),
+            destination_ip: destination_ip.clone(),
+            destination_port: *destination_port as i32,
+            pid: *pid as i32,
+            process_name: String::new(),
+            host: String::new(),
+            user_agent: String::new(),
+        }),
+        crate::ebpf::NetworkEvent::DbQuery {
+            protocol,
+            query,
+            latency_ms,
+            destination_ip,
+            destination_port,
+            pid,
+        } => pb::network_event::Event::DbQuery(pb::DbQueryEvent {
+            protocol: protocol.clone(),
+            query: query.clone(),
+            query_type: String::new(),
+            database: String::new(),
+            latency_ms: *latency_ms,
+            row_count: 0,
+            error_message: String::new(),
+            source_ip: String::new(),
+            destination_ip: destination_ip.clone(),
+            destination_port: *destination_port as i32,
+            pid: *pid as i32,
+            process_name: String::new(),
+        }),
+    };
+
+    crate::proto::paryty::v1::NetworkEvent {
+        timestamp: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
+        event: Some(proto_event),
+    }
+}
+
+/// Map a TCP state string (as produced by the eBPF/proc observers) to the
+/// proto [`crate::proto::paryty::v1::TcpState`] enumeration value.
+///
+/// Returns `TcpState::Unspecified` for unrecognized state strings.
+fn tcp_state_from_str(state: &str) -> crate::proto::paryty::v1::TcpState {
+    use crate::proto::paryty::v1::TcpState;
+    match state {
+        "ESTABLISHED" => TcpState::Established,
+        "SYN_SENT" => TcpState::SynSent,
+        "SYN_RECV" | "SYN_RECEIVED" => TcpState::SynReceived,
+        "FIN_WAIT1" | "FIN_WAIT_1" => TcpState::FinWait1,
+        "FIN_WAIT2" | "FIN_WAIT_2" => TcpState::FinWait2,
+        "TIME_WAIT" => TcpState::TimeWait,
+        "CLOSE_WAIT" => TcpState::CloseWait,
+        "LAST_ACK" => TcpState::LastAck,
+        "CLOSING" => TcpState::Closing,
+        "LISTEN" => TcpState::Listen,
+        "CLOSED" => TcpState::Unspecified, // No direct proto equivalent; use Unspecified.
+        _ => TcpState::Unspecified,
+    }
+}
+
+// â”€â”€ Helper Functions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Get the system hostname.
 ///
@@ -939,22 +1286,57 @@ fn get_hostname() -> String {
 /// Uses a UDP socket connect trick to discover the local IP that would
 /// route to a public address. This is a well-known cross-platform
 /// technique that works without elevated privileges.
+///
+/// On WSL2, falls back to reading the default gateway from `/proc/net/route`
+/// since the UDP trick may not resolve the host-side IP correctly.
 fn collect_local_ips() -> Vec<String> {
-    let socket = match std::net::UdpSocket::bind("0.0.0.0:0") {
-        Ok(s) => s,
-        Err(_) => return vec![],
-    };
-    // Connect to a public DNS address — no packets are sent.
-    if socket.connect("8.8.8.8:80").is_err() {
-        return vec![];
+    let mut ips = Vec::new();
+
+    // Primary: UDP socket trick to find the outward-facing IP.
+    if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
+        if socket.connect("8.8.8.8:80").is_ok() {
+            if let Ok(addr) = socket.local_addr() {
+                let ip = addr.ip().to_string();
+                if !ip.starts_with("127.") {
+                    ips.push(ip);
+                }
+            }
+        }
     }
-    match socket.local_addr() {
-        Ok(addr) => vec![addr.ip().to_string()],
-        Err(_) => vec![],
+
+    // WSL2 fallback: read default gateway from /proc/net/route.
+    // The gateway is the Windows host, which the cluster may be running on.
+    #[cfg(target_os = "linux")]
+    if let Ok(content) = std::fs::read_to_string("/proc/net/route") {
+        let is_wsl2 = std::fs::read_to_string("/proc/version")
+            .map(|v| v.to_lowercase().contains("microsoft"))
+            .unwrap_or(false);
+        if is_wsl2 {
+            for line in content.lines().skip(1) {
+                let fields: Vec<&str> = line.split_whitespace().collect();
+                if fields.len() >= 3 && fields[1] == "00000000" && fields[2] != "00000000" {
+                    // Gateway is stored as little-endian hex.
+                    if let Ok(gw) = u32::from_str_radix(fields[2], 16) {
+                        let gateway_ip = format!(
+                            "{}.{}.{}.{}",
+                            gw & 0xFF,
+                            (gw >> 8) & 0xFF,
+                            (gw >> 16) & 0xFF,
+                            (gw >> 24) & 0xFF
+                        );
+                        if !ips.contains(&gateway_ip) {
+                            ips.push(gateway_ip);
+                        }
+                    }
+                }
+            }
+        }
     }
+
+    ips
 }
 
-// ── Tests ───────────────────────────────────────────────────────────────
+// â”€â”€ Tests â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 #[cfg(test)]
 mod tests {
@@ -966,7 +1348,7 @@ mod tests {
     #[test]
     fn test_collect_local_ips() {
         let ips = collect_local_ips();
-        // Not asserting non-empty — some CI machines may only have loopback.
+        // Not asserting non-empty â€” some CI machines may only have loopback.
         // Just verify it doesn't panic.
         for ip in &ips {
             assert!(!ip.starts_with("127."), "loopback should be filtered: {}", ip);
@@ -1004,7 +1386,7 @@ mod tests {
         let config = test_config();
         let client = Client::new(&config).await.expect("Client::new should succeed");
 
-        // Send while disconnected — should buffer without error.
+        // Send while disconnected â€” should buffer without error.
         client.send_metrics("cpu", b"{\"cpu\": 42.0}").await.expect("send_metrics should succeed");
 
         // Edge buffer should have at least one entry.
@@ -1018,7 +1400,7 @@ mod tests {
         let config = test_config();
         let client = Client::new(&config).await.expect("Client::new should succeed");
 
-        // Flush empty buffer — should succeed without error.
+        // Flush empty buffer â€” should succeed without error.
         client.flush_buffer().await.expect("flush_buffer on empty buffer should succeed");
     }
 
@@ -1030,6 +1412,136 @@ mod tests {
 
         let healthy = client.health_check().await.expect("health_check should succeed");
         assert!(!healthy, "health check should return false when disconnected");
+    }
+
+    /// Verify tcp_state_from_str maps known states correctly.
+    #[test]
+    fn test_tcp_state_from_str() {
+        use crate::proto::paryty::v1::TcpState;
+        assert_eq!(tcp_state_from_str("ESTABLISHED"), TcpState::Established);
+        assert_eq!(tcp_state_from_str("SYN_SENT"), TcpState::SynSent);
+        assert_eq!(tcp_state_from_str("SYN_RECV"), TcpState::SynReceived);
+        assert_eq!(tcp_state_from_str("TIME_WAIT"), TcpState::TimeWait);
+        assert_eq!(tcp_state_from_str("CLOSE_WAIT"), TcpState::CloseWait);
+        assert_eq!(tcp_state_from_str("LISTEN"), TcpState::Listen);
+        assert_eq!(tcp_state_from_str("CLOSED"), TcpState::Unspecified);
+        assert_eq!(tcp_state_from_str("UNKNOWN_STATE"), TcpState::Unspecified);
+    }
+
+    /// Verify convert_network_event produces valid proto messages.
+    #[test]
+    fn test_convert_network_event_tcp() {
+        use crate::ebpf::NetworkEvent;
+
+        let event = NetworkEvent::TcpConnection {
+            source_ip: "10.0.0.1".to_string(),
+            source_port: 443,
+            destination_ip: "10.0.0.2".to_string(),
+            destination_port: 54321,
+            state: "ESTABLISHED".to_string(),
+            pid: 1234,
+            process_name: "nginx".to_string(),
+        };
+
+        let proto = convert_network_event(&event);
+        assert!(proto.timestamp.is_some());
+        assert!(proto.event.is_some());
+
+        if let Some(crate::proto::paryty::v1::network_event::Event::TcpConnection(ref tcp)) =
+            proto.event
+        {
+            assert_eq!(tcp.source_ip, "10.0.0.1");
+            assert_eq!(tcp.source_port, 443);
+            assert_eq!(tcp.destination_ip, "10.0.0.2");
+            assert_eq!(tcp.destination_port, 54321);
+            assert_eq!(tcp.state, crate::proto::paryty::v1::TcpState::Established as i32);
+            assert_eq!(tcp.pid, 1234);
+            assert_eq!(tcp.process_name, "nginx");
+        } else {
+            panic!("Expected TcpConnection variant");
+        }
+    }
+
+    /// Verify convert_network_event handles DnsQuery correctly.
+    #[test]
+    fn test_convert_network_event_dns() {
+        use crate::ebpf::NetworkEvent;
+
+        let event = NetworkEvent::DnsQuery {
+            query_name: "api.example.com".to_string(),
+            resolved_ips: vec!["1.2.3.4".to_string(), "5.6.7.8".to_string()],
+            latency_ms: 12.5,
+            pid: 5678,
+        };
+
+        let proto = convert_network_event(&event);
+        if let Some(crate::proto::paryty::v1::network_event::Event::DnsQuery(ref dns)) = proto.event
+        {
+            assert_eq!(dns.query_name, "api.example.com");
+            assert_eq!(dns.resolved_ips, vec!["1.2.3.4", "5.6.7.8"]);
+            assert!((dns.latency_ms - 12.5).abs() < f64::EPSILON);
+            assert_eq!(dns.pid, 5678);
+        } else {
+            panic!("Expected DnsQuery variant");
+        }
+    }
+
+    /// Verify convert_network_event handles HttpRequest correctly.
+    #[test]
+    fn test_convert_network_event_http() {
+        use crate::ebpf::NetworkEvent;
+
+        let event = NetworkEvent::HttpRequest {
+            method: "GET".to_string(),
+            path: "/api/v1/health".to_string(),
+            status_code: 200,
+            latency_ms: 45.2,
+            source_ip: "10.0.0.1".to_string(),
+            destination_ip: "10.0.0.3".to_string(),
+            destination_port: 443,
+            pid: 9999,
+        };
+
+        let proto = convert_network_event(&event);
+        if let Some(crate::proto::paryty::v1::network_event::Event::HttpRequest(ref http)) =
+            proto.event
+        {
+            assert_eq!(http.method, "GET");
+            assert_eq!(http.path, "/api/v1/health");
+            assert_eq!(http.status_code, 200);
+            assert!((http.latency_ms - 45.2).abs() < f64::EPSILON);
+            assert_eq!(http.source_ip, "10.0.0.1");
+            assert_eq!(http.destination_ip, "10.0.0.3");
+            assert_eq!(http.destination_port, 443);
+        } else {
+            panic!("Expected HttpRequest variant");
+        }
+    }
+
+    /// Verify send_network_events_proto buffers when disconnected.
+    #[tokio::test]
+    async fn test_send_network_events_proto_buffers_when_disconnected() {
+        let config = test_config();
+        let client = Client::new(&config).await.expect("Client::new should succeed");
+
+        let events = vec![crate::ebpf::NetworkEvent::TcpConnection {
+            source_ip: "10.0.0.1".to_string(),
+            source_port: 443,
+            destination_ip: "10.0.0.2".to_string(),
+            destination_port: 8080,
+            state: "ESTABLISHED".to_string(),
+            pid: 1234,
+            process_name: "test".to_string(),
+        }];
+
+        // Should succeed and buffer the events as JSON.
+        client
+            .send_network_events_proto(&events)
+            .await
+            .expect("send_network_events_proto should succeed when disconnected");
+
+        let count = client.buffer().len().await;
+        assert!(count > 0, "edge buffer should contain buffered network events");
     }
 
     /// Build a minimal test config.
@@ -1061,6 +1573,9 @@ mod tests {
                     db_inspection: false,
                     exclude_ports: vec![],
                     exclude_ips: vec![],
+                    ring_buffer_size_kb: 256,
+                    poll_interval_ms: 100,
+                    fallback_to_proc: true,
                 },
                 supervisor: crate::config::SupervisorConfig {
                     enabled: false,

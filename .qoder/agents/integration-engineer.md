@@ -84,6 +84,23 @@ buf generate
 # Go: protoc --go_out --go-grpc_out
 ```
 
+## Bug Fix Discipline
+
+**Principle: Fix once, never again.** See `bug-fix-discipline.md` for the full mandatory protocol.
+
+This protocol activates **automatically** whenever a bug, error, test failure, serialization mismatch, or unexpected behavior is reported across component boundaries — no `/fix-bug` slash command required.
+
+When fixing any cross-component or integration bug:
+1. **Reproduce** — write a test that triggers the bug before touching code
+2. **Root Cause** — trace to the underlying design flaw, not the symptom
+3. **Class Elimination** — search entire codebase for the same anti-pattern
+4. **Systemic Fix** — make the bug structurally impossible (types > guards > checks)
+5. **Regression Test** — add a test that fails before and passes after the fix
+6. **Environment Independence** — fix must work on Windows, WSL, Linux, after restart, under load
+7. **Post-Mortem** — document root cause and why the fix is permanent
+
+**Forbidden:** symptom patching, fixing only one side of a cross-language boundary, proto field number changes to work around compatibility issues, fixing only the observed file, skipping regression tests, version-specific workarounds, silencing serialization errors.
+
 ## Red Flags
 
 Stop and report when:

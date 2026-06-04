@@ -129,6 +129,23 @@ Benchmark: BenchmarkAggregation
   Method: Pre-allocated result slice, eliminated intermediate map
 ```
 
+## Bug Fix Discipline
+
+**Principle: Fix once, never again.** See `bug-fix-discipline.md` for the full mandatory protocol.
+
+This protocol activates **automatically** whenever a performance regression, budget violation, latency spike, or throughput drop is reported — no `/fix-bug` slash command required.
+
+When fixing any performance regression or resource budget violation:
+1. **Reproduce** — capture a profile or benchmark that demonstrates the regression before optimizing
+2. **Root Cause** — identify the underlying allocation, lock contention, or architectural bottleneck
+3. **Class Elimination** — search entire codebase for the same performance anti-pattern
+4. **Systemic Fix** — eliminate the bottleneck structurally, not just tune the constant
+5. **Regression Test** — add a benchmark or profile assertion that fails before and passes after
+6. **Environment Independence** — fix must hold under different loads, datasets, and hardware
+7. **Post-Mortem** — document root cause and why the optimization is permanent
+
+**Forbidden:** premature optimization without profiling, caching without understanding why the value is recomputed, fixing only the observed hot path, skipping benchmark regression tests, hardware-specific tuning, disabling features to improve numbers.
+
 ## Red Flags
 
 Stop and report when:

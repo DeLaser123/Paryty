@@ -7,7 +7,8 @@ cluster:
   # Ingestion layer
   ingestion:
     # Runtime connection config (read by internal/config package)
-    port: 50051
+    # NOTE: Changed from 50051 to 50052 because Multipass occupies 50051
+    port: 50052
     tls: false
     max_connections: 10000
     # Deployment topology

@@ -16,7 +16,7 @@
 //! Every collection records wall-clock duration via `Instant::now()`
 //! for performance monitoring and diagnostics.
 
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
@@ -80,6 +80,9 @@ pub struct BatchCollector {
     disk: DiskCollector,
     network: NetworkCollector,
     process: ProcessCollector,
+    /// Dedicated process collector for WSL2 that retains state across collections.
+    /// Wrapped in Arc<Mutex<>> so it can be shared with a timeout-wrapped thread.
+    wsl2_process: Arc<Mutex<ProcessCollector>>,
     container: ContainerDetector,
 }
 
@@ -104,6 +107,7 @@ impl BatchCollector {
             disk: DiskCollector::new(),
             network: NetworkCollector::new(),
             process: ProcessCollector::new(),
+            wsl2_process: Arc::new(Mutex::new(ProcessCollector::new())),
             container: ContainerDetector::new(),
         }
     }
@@ -125,34 +129,38 @@ impl BatchCollector {
         let network = self.collect_network(config);
 
         // Process collection strategy depends on the environment.
-        // On WSL2, /proc/[pid] reads can hang indefinitely for certain
-        // kernel threads and zombie processes. We detect this at startup
-        // and use a dedicated OS thread with a hard timeout to avoid
-        // blocking the main collection loop.
+        // On WSL2, /proc/[pid] reads are extremely slow due to the Plan 9
+        // filesystem bridge. Individual open() calls on /proc/[pid]/stat can
+        // block for seconds. To prevent the entire agent from hanging, we
+        // spawn the collection in a dedicated thread with a hard 5-second
+        // timeout. The ProcessCollector is wrapped in Arc<Mutex<>> so the
+        // thread can retain state across collections for delta-based CPU%.
         let process = if is_wsl2() {
-            use std::cell::RefCell;
-            use std::sync::mpsc;
-
-            thread_local! {
-                static PROC_COLLECTOR: RefCell<ProcessCollector> =
-                    RefCell::new(ProcessCollector::new());
-            }
-
-            let (tx, rx) = mpsc::channel();
+            let collector_ref = Arc::clone(&self.wsl2_process);
             let config_clone = config.clone();
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
             std::thread::spawn(move || {
-                PROC_COLLECTOR.with(|c| {
-                    let result = c.borrow().collect(&config_clone);
-                    let _ = tx.send(result);
-                });
+                // Use try_lock to avoid blocking if a previous timed-out
+                // thread still holds the mutex.
+                let collector = match collector_ref.try_lock() {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        let _ = tx.send(Err(anyhow::anyhow!(
+                            "Previous process collection still running, skipping"
+                        )));
+                        return;
+                    }
+                };
+                let result = collector.collect(&config_clone);
+                let _ = tx.send(result);
             });
-            match rx.recv_timeout(std::time::Duration::from_secs(5)) {
+            match rx.recv_timeout(Duration::from_secs(5)) {
                 Ok(Ok(pm)) => Some(pm),
                 Ok(Err(e)) => {
                     tracing::warn!("Process collection failed: {}", e);
                     None
                 }
-                Err(_) => {
+                Err(_timeout) => {
                     tracing::warn!("Process collection timed out (5s), skipping");
                     None
                 }
@@ -161,7 +169,36 @@ impl BatchCollector {
             self.collect_process(config)
         };
 
-        let container = self.collect_container(config);
+        // On WSL2, container detection uses fs::read_to_string for cgroup files
+        // which may hang on the Plan 9 bridge. Wrap in a timeout thread.
+        let container = if is_wsl2() {
+            let config_clone = config.clone();
+            let (tx, rx) = std::sync::mpsc::sync_channel(1);
+            std::thread::spawn(move || {
+                let detector = ContainerDetector::new();
+                let result = if config_clone.container_detection {
+                    match detector.collect(&config_clone) {
+                        Ok(m) => Some(m),
+                        Err(e) => {
+                            tracing::warn!(collector = "container", error = %e, "Collection failed");
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
+                let _ = tx.send(result);
+            });
+            match rx.recv_timeout(Duration::from_secs(5)) {
+                Ok(result) => result,
+                Err(_) => {
+                    tracing::warn!("Container detection timed out (5s), skipping");
+                    None
+                }
+            }
+        } else {
+            self.collect_container(config)
+        };
 
         MetalBatch { timestamp, cpu, memory, disk, network, process, container }
     }
@@ -488,6 +525,44 @@ mod tests {
         // Disk, network, process, container may or may not succeed depending
         // on platform — but the point is the batch is still returned.
         // We just verify the call doesn't panic or return an error.
+    }
+
+    /// Regression test: memory collector must return non-zero values.
+    ///
+    /// Catches the bug where `System::new()` (empty) was used instead
+    /// of `System::new_all()` (populated) on cross-platform path,
+    /// causing all memory fields to be zero on Windows/macOS.
+    #[test]
+    fn test_memory_collector_returns_nonzero_values() {
+        let collector = BatchCollector::new();
+        let config = all_enabled_config();
+
+        let batch = collector.collect_all(&config);
+
+        // Memory must be collected (not None).
+        let mem = batch.memory.expect("memory must be Some when memory_rss is enabled");
+
+        // Total physical memory must be non-zero on any real system.
+        assert!(
+            mem.total_bytes > 0,
+            "total_bytes must be > 0, got {}. \
+             Likely cause: System::new() instead of System::new_all()",
+            mem.total_bytes
+        );
+
+        // Used memory must be non-zero (OS always uses some memory).
+        assert!(
+            mem.used_bytes > 0,
+            "used_bytes must be > 0 on a running system, got {}",
+            mem.used_bytes
+        );
+
+        // Usage percent must be in valid range.
+        assert!(
+            mem.usage_percent > 0.0 && mem.usage_percent <= 100.0,
+            "usage_percent must be 0-100, got {}",
+            mem.usage_percent
+        );
     }
 
     /// Test that disabled collectors are skipped (fields set to None)

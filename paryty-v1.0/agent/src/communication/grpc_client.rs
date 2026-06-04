@@ -7,8 +7,8 @@
 //!
 //! The client wraps the proto-generated `IngestionServiceClient` and manages
 //! its lifecycle through a connection state machine. All proto RPCs
-//! (RegisterAgent, SendBatch, Heartbeat, StreamMetrics) are exposed as typed
-//! methods that delegate to the underlying tonic client.
+//! (RegisterAgent, SendBatch, Heartbeat, StreamMetrics, ReportNetworkEvents)
+//! are exposed as typed methods that delegate to the underlying tonic client.
 
 use anyhow::{Context, Result};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -21,7 +21,7 @@ use crate::config::Config;
 use crate::proto::paryty::v1::ingestion_service_client::IngestionServiceClient;
 use crate::proto::paryty::v1::{
     AgentRegistration, AgentRegistrationResponse, AgentToCluster, ClusterToAgent, HeartbeatRequest,
-    HeartbeatResponse, MetricBatch, SendBatchResponse,
+    HeartbeatResponse, MetricBatch, NetworkEventBatch, NetworkEventResponse, SendBatchResponse,
 };
 
 /// Connection state for the gRPC client.
@@ -268,6 +268,44 @@ impl GrpcClient {
         Ok(response.into_inner())
     }
 
+    /// Report network events to the cluster (client-streaming RPC).
+    ///
+    /// Sends a single `NetworkEventBatch` through a client-streaming channel
+    /// and returns the `NetworkEventResponse` with accepted/rejected counts.
+    ///
+    /// Uses a `tokio::sync::mpsc` channel wrapped in a `ReceiverStream` to
+    /// satisfy tonic's `IntoStreamingRequest` trait. The channel is closed
+    /// after the single batch is sent, signaling end-of-stream to the server.
+    pub async fn report_network_events(
+        &self,
+        batch: NetworkEventBatch,
+    ) -> Result<NetworkEventResponse> {
+        let mut guard = self.client.lock().await;
+        let client = guard.as_mut().context("Not connected: proto client unavailable")?;
+
+        // Create a channel for the client-streaming request.
+        let (tx, rx) = tokio::sync::mpsc::channel::<NetworkEventBatch>(1);
+
+        // Send the batch into the channel, then drop the sender to close the stream.
+        tx.send(batch)
+            .await
+            .map_err(|_| anyhow::anyhow!("ReportNetworkEvents: channel send failed"))?;
+        drop(tx);
+
+        // Convert the receiver into a stream that tonic can consume.
+        let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
+
+        let response = client
+            .report_network_events(stream)
+            .await
+            .map_err(|status| anyhow::anyhow!("ReportNetworkEvents RPC failed: {}", status))?;
+
+        self.metrics.messages_sent.fetch_add(1, Ordering::Relaxed);
+        debug!("Network events reported successfully via ReportNetworkEvents");
+
+        Ok(response.into_inner())
+    }
+
     /// Open a bidirectional streaming RPC for real-time metric exchange.
     ///
     /// Returns a sender for `AgentToCluster` messages and a receiver for
@@ -430,6 +468,24 @@ mod tests {
         };
 
         let result = client.register_agent(registration).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Not connected"));
+    }
+
+    /// Verify report_network_events returns an error when not connected.
+    #[tokio::test]
+    async fn test_report_network_events_fails_when_disconnected() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+
+        let batch = NetworkEventBatch {
+            agent_id: "test-agent".to_string(),
+            session_id: "test-session".to_string(),
+            sequence_number: 1,
+            timestamp: None,
+            events: vec![],
+        };
+
+        let result = client.report_network_events(batch).await;
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Not connected"));
     }

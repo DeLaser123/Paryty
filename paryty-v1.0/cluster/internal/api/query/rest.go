@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -58,6 +59,9 @@ func (s *QueryService) RegisterRoutes(r *gin.RouterGroup) {
 		// Events
 		api.GET("/events", s.QueryEvents)
 		api.POST("/events/query", s.QueryEventsPost)
+
+		// Network Events
+		api.GET("/network-events", s.QueryNetworkEvents)
 
 		// Alerts
 		api.GET("/alerts", s.GetAlerts)
@@ -364,4 +368,79 @@ func (s *QueryService) GetAgentHealth(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, health)
+}
+
+// QueryNetworkEvents handles GET /api/v1/network-events.
+//
+// Query parameters:
+//   - agent_id (optional) — filter by agent
+//   - type (optional) — "tcp", "dns", or "http"
+//   - start (optional) — RFC3339 timestamp, default 1 hour ago
+//   - end (optional) — RFC3339 timestamp, default now
+//   - limit (optional) — default 100, max 1000
+//
+// Response: JSON array of network events with a "type" discriminator field.
+func (s *QueryService) QueryNetworkEvents(c *gin.Context) {
+	agentID := c.Query("agent_id")
+	eventType := c.Query("type")
+
+	// Validate event type.
+	if eventType != "" && eventType != "tcp" && eventType != "dns" && eventType != "http" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid type (valid: tcp, dns, http)"})
+		return
+	}
+
+	// Parse start time, default to 1 hour ago.
+	startStr := c.DefaultQuery("start", time.Now().Add(-1*time.Hour).Format(time.RFC3339))
+	start, err := time.Parse(time.RFC3339, startStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid start time"})
+		return
+	}
+
+	// Parse end time, default to now.
+	endStr := c.DefaultQuery("end", time.Now().Format(time.RFC3339))
+	end, err := time.Parse(time.RFC3339, endStr)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid end time"})
+		return
+	}
+
+	// Parse limit, default 100, max 1000.
+	limit := 100
+	if limitStr := c.Query("limit"); limitStr != "" {
+		parsed, err := strconv.Atoi(limitStr)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "invalid limit"})
+			return
+		}
+		limit = parsed
+	}
+	if limit < 1 {
+		limit = 1
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	events, err := s.store.QueryNetworkEvents(ctx, agentID, eventType, start, end, limit)
+	if err != nil {
+		s.logger.Error("query network events failed",
+			zap.Error(err),
+			zap.String("agent_id", agentID),
+			zap.String("type", eventType),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Return empty array instead of null when no events match.
+	if events == nil {
+		events = []map[string]interface{}{}
+	}
+
+	c.JSON(http.StatusOK, events)
 }

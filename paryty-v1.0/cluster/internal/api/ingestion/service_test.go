@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
+	pb "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
 )
 
@@ -14,12 +15,14 @@ import (
 
 // mockStore implements StoreBackend for unit tests.
 type mockStore struct {
-	mu             sync.Mutex
-	agents         map[string]*models.AgentInfo // key: "tenant:agentID"
-	storedBatches  []*models.MetricBatch
-	storeBatchErr  error
-	setStateErr    error
-	latestMetrics  map[string]*models.MetricBatch // key: "tenant:agentID"
+	mu                 sync.Mutex
+	agents             map[string]*models.AgentInfo // key: "tenant:agentID"
+	storedBatches      []*models.MetricBatch
+	storeBatchErr      error
+	storeNetworkErr    error
+	setStateErr        error
+	latestMetrics      map[string]*models.MetricBatch // key: "tenant:agentID"
+	storedNetworkBatch *pb.NetworkEventBatch
 }
 
 func newMockStore() *mockStore {
@@ -78,15 +81,25 @@ func (m *mockStore) SetLatestMetrics(_ context.Context, tenant, agentID string, 
 	return nil
 }
 
+func (m *mockStore) StoreNetworkEvents(_ context.Context, _ string, batch *pb.NetworkEventBatch) error {
+	if m.storeNetworkErr != nil {
+		return m.storeNetworkErr
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.storedNetworkBatch = batch
+	return nil
+}
+
 // ---- Mock producer (mimics stream.Producer) ----
 
 // mockProducer tracks PublishTenant calls and can simulate failures.
 type mockProducer struct {
-	mu             sync.Mutex
-	publishCalls   []publishCall
-	publishErr     error
-	dlqCalls       []publishCall
-	dlqErr         error
+	mu           sync.Mutex
+	publishCalls []publishCall
+	publishErr   error
+	dlqCalls     []publishCall
+	dlqErr       error
 }
 
 type publishCall struct {
@@ -151,7 +164,7 @@ func newTestServiceWithStream() (*IngestionService, *mockStore, *mockProducer) {
 	store := newMockStore()
 	producer := &mockProducer{}
 	svc := &IngestionService{
-		store: store,
+		store:  store,
 		stream: &testStreamAdapter{producer: producer},
 	}
 	return svc, store, producer
@@ -429,13 +442,13 @@ func TestAgentStatePersistence_OnRegister(t *testing.T) {
 	ctx := context.Background()
 
 	req := &models.AgentRegistration{
-		AgentID:     "agent-persist",
-		Hostname:    "host-1",
-		IPAddress:   "10.0.0.1",
-		OS:          "linux",
-		Arch:        "amd64",
+		AgentID:      "agent-persist",
+		Hostname:     "host-1",
+		IPAddress:    "10.0.0.1",
+		OS:           "linux",
+		Arch:         "amd64",
 		AgentVersion: "1.0.0",
-		Labels:      map[string]string{"env": "prod"},
+		Labels:       map[string]string{"env": "prod"},
 	}
 
 	agent, err := svc.RegisterAgent(ctx, "test-tenant", req)
@@ -629,5 +642,40 @@ func TestListAgents_FilteredByTenant(t *testing.T) {
 
 	if len(tenant2Agents) != 1 {
 		t.Errorf("expected 1 agent for tenant-2, got %d", len(tenant2Agents))
+	}
+}
+
+// ---- Network event validation tests ----
+
+func TestValidateNetworkEventBatch_EmptyAgentID(t *testing.T) {
+	batch := &pb.NetworkEventBatch{
+		AgentId: "",
+		Events:  []*pb.NetworkEvent{{}},
+	}
+	err := validateNetworkEventBatch(batch)
+	if err == nil {
+		t.Fatal("expected error for empty agent_id")
+	}
+}
+
+func TestValidateNetworkEventBatch_EmptyEvents(t *testing.T) {
+	batch := &pb.NetworkEventBatch{
+		AgentId: "agent-1",
+		Events:  nil,
+	}
+	err := validateNetworkEventBatch(batch)
+	if err == nil {
+		t.Fatal("expected error for empty events")
+	}
+}
+
+func TestValidateNetworkEventBatch_Valid(t *testing.T) {
+	batch := &pb.NetworkEventBatch{
+		AgentId: "agent-1",
+		Events:  []*pb.NetworkEvent{{}},
+	}
+	err := validateNetworkEventBatch(batch)
+	if err != nil {
+		t.Errorf("expected no error for valid batch, got %v", err)
 	}
 }

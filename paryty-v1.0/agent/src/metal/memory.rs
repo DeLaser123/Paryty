@@ -63,8 +63,10 @@ pub struct MemoryMetrics {
     pub used_bytes: u64,
     pub free_bytes: u64,
     pub available_bytes: u64,
-    pub cached_bytes: u64,
-    pub buffer_bytes: u64,
+    /// Page cache memory in bytes. `None` on non-Linux (sysinfo 0.30 has no API).
+    pub cached_bytes: Option<u64>,
+    /// Buffer memory in bytes. `None` on non-Linux (sysinfo 0.30 has no API).
+    pub buffer_bytes: Option<u64>,
     pub swap_total_bytes: u64,
     pub swap_used_bytes: u64,
     pub usage_percent: f64,
@@ -116,8 +118,8 @@ impl MemoryCollector {
             used_bytes: used,
             free_bytes: free,
             available_bytes: available,
-            cached_bytes: cached,
-            buffer_bytes: buffers,
+            cached_bytes: Some(cached),
+            buffer_bytes: Some(buffers),
             swap_total_bytes: swap_total,
             swap_used_bytes: swap_total.saturating_sub(swap_free),
             usage_percent: if total > 0 {
@@ -138,13 +140,15 @@ impl MemoryCollector {
     fn collect_cross_platform(&self) -> Result<MemoryMetrics> {
         use sysinfo::System;
 
-        let sys = System::new();
+        let sys = System::new_all();
         let total = sys.total_memory();
         let used = sys.used_memory();
         let free = total.saturating_sub(used);
         let available = sys.available_memory();
         let swap_total = sys.total_swap();
         let swap_used = sys.used_swap();
+        // buffer_bytes and cached_bytes are Linux-only (/proc/meminfo fields).
+        // sysinfo 0.30 does not expose cached_memory on Windows/macOS.
 
         Ok(MemoryMetrics {
             timestamp: Utc::now().to_rfc3339(),
@@ -152,8 +156,8 @@ impl MemoryCollector {
             used_bytes: used,
             free_bytes: free,
             available_bytes: available,
-            cached_bytes: 0,
-            buffer_bytes: 0,
+            cached_bytes: None, // genuinely unavailable — sysinfo 0.30 has no API on Windows/macOS
+            buffer_bytes: None, // genuinely unavailable — sysinfo 0.30 has no API on Windows/macOS
             swap_total_bytes: swap_total,
             swap_used_bytes: swap_used,
             usage_percent: if total > 0 {
@@ -161,8 +165,8 @@ impl MemoryCollector {
             } else {
                 0.0
             },
-            pressure: None,
-            top_processes: Vec::new(),
+            pressure: None,            // PSI is Linux-only (/proc/pressure/memory)
+            top_processes: Vec::new(), // per-process memory collected by ProcessCollector
         })
     }
 }
@@ -313,33 +317,52 @@ fn read_memory_pressure() -> Option<MemoryPressure> {
 /// Scan `/proc/[pid]/status` for the top N processes by RSS.
 ///
 /// Bounded to `MAX_PID_SCAN` directory entries to avoid excessive iteration
-/// on systems with many threads/processes.
+/// on systems with many threads/processes. On WSL2, uses shell-based PID
+/// enumeration to avoid the Plan 9 filesystem bridge hang.
 #[cfg(target_os = "linux")]
 fn read_top_processes(n: usize) -> Vec<ProcessMemory> {
     use std::fs;
 
-    let proc_dir = match fs::read_dir("/proc") {
-        Ok(dir) => dir,
-        Err(_) => return Vec::new(),
+    // WSL2 detection: /proc/version contains "microsoft" on WSL2.
+    // fs::read_dir("/proc") hangs on the Plan 9 bridge.
+    let wsl2 = fs::read_to_string("/proc/version")
+        .map(|v| v.to_lowercase().contains("microsoft"))
+        .unwrap_or(false);
+
+    let pids: Vec<u32> = if wsl2 {
+        let output = std::process::Command::new("/bin/sh")
+            .args(["-c", "ls -d /proc/[0-9]* 2>/dev/null"])
+            .output()
+            .unwrap_or(std::process::Output {
+                status: std::process::ExitStatus::default(),
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            });
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout
+            .lines()
+            .filter_map(|line| line.split('/').next_back().and_then(|s| s.parse::<u32>().ok()))
+            .collect()
+    } else {
+        match fs::read_dir("/proc") {
+            Ok(dir) => dir
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().to_string_lossy().parse::<u32>().ok())
+                .collect(),
+            Err(_) => return Vec::new(),
+        }
     };
+
+    let pid_iter = pids.into_iter();
 
     let mut processes: Vec<ProcessMemory> = Vec::with_capacity(n.min(256));
     let mut scanned: usize = 0;
 
-    for entry in proc_dir.flatten() {
+    for pid in pid_iter {
         if scanned >= MAX_PID_SCAN {
             break;
         }
         scanned += 1;
-
-        let file_name = entry.file_name();
-        let name_str = file_name.to_string_lossy();
-
-        // Only numeric directory names represent PIDs
-        let pid: u32 = match name_str.parse() {
-            Ok(p) => p,
-            Err(_) => continue,
-        };
 
         let status_path = format!("/proc/{}/status", pid);
         let status_content = match fs::read_to_string(&status_path) {

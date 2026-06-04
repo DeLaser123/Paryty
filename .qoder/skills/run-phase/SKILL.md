@@ -50,6 +50,8 @@ For each task:
 3. Present result to user for acceptance
 4. Move to next task
 
+**Bug Fix Auto-Activation:** If any task surfaces a bug, error, test failure, or unexpected behavior — whether found by verification gates, the user, or the agent itself — the responsible agent **must** follow `bug-fix-discipline.md` immediately before proceeding to the next task. No `/fix-bug` invocation required; the discipline activates automatically. The phase does not advance until the bug is fixed, the regression test is in place, and verification gates pass.
+
 ### Step 6: Phase Completion
 1. Run full verification suite
 2. Run /code-review on all changes

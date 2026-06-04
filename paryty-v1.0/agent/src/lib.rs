@@ -4,6 +4,7 @@
 
 pub mod communication;
 pub mod config;
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub mod ebpf;
 pub mod metal;
 pub mod proto;

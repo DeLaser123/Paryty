@@ -558,6 +558,18 @@ pub struct CpuMetric {
     /// Context switches since boot.
     #[prost(int64, tag = "7")]
     pub context_switches: i64,
+    /// Physical core count.
+    #[prost(int32, tag = "8")]
+    pub physical_cores: i32,
+    /// Logical core count.
+    #[prost(int32, tag = "9")]
+    pub logical_cores: i32,
+    /// CPU model name.
+    #[prost(string, tag = "10")]
+    pub model_name: ::prost::alloc::string::String,
+    /// CPU vendor ID.
+    #[prost(string, tag = "11")]
+    pub vendor_id: ::prost::alloc::string::String,
 }
 /// MemoryMetric contains memory usage data.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -590,6 +602,52 @@ pub struct MemoryMetric {
     /// Usage percentage (0-100).
     #[prost(double, tag = "9")]
     pub usage_percent: f64,
+    /// Memory pressure (PSI) data.
+    #[prost(message, optional, tag = "10")]
+    pub pressure: ::core::option::Option<MemoryPressure>,
+    /// Top N processes by RSS.
+    #[prost(message, repeated, tag = "11")]
+    pub top_processes: ::prost::alloc::vec::Vec<MemoryTopProcess>,
+}
+/// MemoryPressure contains PSI (Pressure Stall Information) data.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MemoryPressure {
+    /// Some tasks stalled, 10s window.
+    #[prost(double, tag = "1")]
+    pub some_10: f64,
+    /// Some tasks stalled, 60s window.
+    #[prost(double, tag = "2")]
+    pub some_60: f64,
+    /// Some tasks stalled, 300s window.
+    #[prost(double, tag = "3")]
+    pub some_300: f64,
+    /// All tasks stalled, 10s window.
+    #[prost(double, tag = "4")]
+    pub full_10: f64,
+    /// All tasks stalled, 60s window.
+    #[prost(double, tag = "5")]
+    pub full_60: f64,
+    /// All tasks stalled, 300s window.
+    #[prost(double, tag = "6")]
+    pub full_300: f64,
+}
+/// MemoryTopProcess identifies one of the top N processes by RSS.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct MemoryTopProcess {
+    /// Process ID.
+    #[prost(int32, tag = "1")]
+    pub pid: i32,
+    /// Process name.
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    /// RSS memory in bytes.
+    #[prost(int64, tag = "3")]
+    pub rss_bytes: i64,
+    /// VSZ memory in bytes.
+    #[prost(int64, tag = "4")]
+    pub vsz_bytes: i64,
 }
 /// DiskMetric contains disk usage and I/O data for one device.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -631,6 +689,12 @@ pub struct DiskMetric {
     /// Queue depth.
     #[prost(double, tag = "12")]
     pub queue_depth: f64,
+    /// Whether this device is an SSD.
+    #[prost(bool, tag = "13")]
+    pub is_ssd: bool,
+    /// Device utilization percentage (0.0–100.0).
+    #[prost(double, tag = "14")]
+    pub utilization_pct: f64,
 }
 /// NetworkMetric contains network usage data for one interface.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -669,6 +733,47 @@ pub struct NetworkMetric {
     /// Estimated RTT in milliseconds.
     #[prost(double, tag = "11")]
     pub estimated_rtt_ms: f64,
+    /// Cumulative bytes received since boot.
+    #[prost(int64, tag = "12")]
+    pub total_rx_bytes: i64,
+    /// Cumulative bytes transmitted since boot.
+    #[prost(int64, tag = "13")]
+    pub total_tx_bytes: i64,
+    /// Cumulative packets received since boot.
+    #[prost(int64, tag = "14")]
+    pub total_rx_packets: i64,
+    /// Cumulative packets transmitted since boot.
+    #[prost(int64, tag = "15")]
+    pub total_tx_packets: i64,
+    /// Link speed in Mbps.
+    #[prost(int64, tag = "16")]
+    pub speed_mbps: i64,
+    /// Whether the interface is up.
+    #[prost(bool, tag = "17")]
+    pub is_up: bool,
+    /// Aggregate TCP stats for this host.
+    #[prost(message, optional, tag = "18")]
+    pub tcp_stats: ::core::option::Option<TcpStats>,
+}
+/// TcpStats contains aggregate TCP socket statistics.
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TcpStats {
+    /// Number of ESTABLISHED connections.
+    #[prost(int32, tag = "1")]
+    pub established: i32,
+    /// Number of connections in TIME_WAIT.
+    #[prost(int32, tag = "2")]
+    pub time_wait: i32,
+    /// Number of connections in CLOSE_WAIT.
+    #[prost(int32, tag = "3")]
+    pub close_wait: i32,
+    /// Number of connections in LISTEN state.
+    #[prost(int32, tag = "4")]
+    pub listen: i32,
+    /// Total retransmitted segments.
+    #[prost(int64, tag = "5")]
+    pub retransmit_count: i64,
 }
 /// ProcessMetric contains per-process data.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -710,6 +815,18 @@ pub struct ProcessMetric {
     /// Start time.
     #[prost(message, optional, tag = "12")]
     pub started_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Executable path.
+    #[prost(string, tag = "13")]
+    pub exe: ::prost::alloc::string::String,
+    /// Cumulative disk bytes read.
+    #[prost(int64, tag = "14")]
+    pub disk_read_bytes: i64,
+    /// Cumulative disk bytes written.
+    #[prost(int64, tag = "15")]
+    pub disk_written_bytes: i64,
+    /// Process owner user ID.
+    #[prost(string, tag = "16")]
+    pub user_id: ::prost::alloc::string::String,
 }
 /// ContainerMetric contains container detection data.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -739,6 +856,15 @@ pub struct ContainerMetric {
     /// Processes in this container.
     #[prost(int32, repeated, tag = "8")]
     pub pids: ::prost::alloc::vec::Vec<i32>,
+    /// Memory limit in bytes.
+    #[prost(int64, tag = "9")]
+    pub memory_limit_bytes: i64,
+    /// CPU CFS quota as ratio.
+    #[prost(double, tag = "10")]
+    pub cpu_quota: f64,
+    /// CPU shares (relative weight).
+    #[prost(int64, tag = "11")]
+    pub cpu_shares: i64,
 }
 /// HealthCheckResult is the result of a single health check.
 #[allow(clippy::derive_partial_eq_without_eq)]

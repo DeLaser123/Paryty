@@ -68,18 +68,37 @@ impl ContainerDetector {
         use std::collections::HashMap;
         use std::fs;
 
+        // WSL2 detection: /proc/version contains "microsoft" on WSL2.
+        // On WSL2, fs::read_dir("/proc") hangs on the Plan 9 bridge.
+        // Use shell-based PID enumeration as the safe path.
+        let wsl2 = fs::read_to_string("/proc/version")
+            .map(|v| v.to_lowercase().contains("microsoft"))
+            .unwrap_or(false);
+
+        let pids: Vec<u32> = if wsl2 {
+            let output = std::process::Command::new("/bin/sh")
+                .args(["-c", "ls -d /proc/[0-9]* 2>/dev/null"])
+                .output()
+                .unwrap_or(std::process::Output {
+                    status: std::process::ExitStatus::default(),
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                });
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            stdout
+                .lines()
+                .filter_map(|line| line.split('/').next_back().and_then(|s| s.parse::<u32>().ok()))
+                .collect()
+        } else {
+            fs::read_dir("/proc")?
+                .filter_map(|e| e.ok())
+                .filter_map(|e| e.file_name().to_string_lossy().parse::<u32>().ok())
+                .collect()
+        };
+
         let mut containers: HashMap<String, ContainerInfo> = HashMap::new();
 
-        // Scan /proc/[pid]/cgroup for container IDs
-        let proc_dir = fs::read_dir("/proc")?;
-        for entry in proc_dir {
-            let entry = entry?;
-            let name = entry.file_name().to_string_lossy().to_string();
-            let pid: u32 = match name.parse() {
-                Ok(p) => p,
-                Err(_) => continue,
-            };
-
+        for pid in pids {
             if let Ok(cgroup) = fs::read_to_string(format!("/proc/{}/cgroup", pid)) {
                 if let Some((container_id, runtime, cgroup_version, cgroup_path)) =
                     parse_cgroup(&cgroup)

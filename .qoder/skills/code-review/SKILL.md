@@ -72,8 +72,19 @@ Cross-reference with .qoder/rules/observability-golden-signals.md:
 - Health check endpoints present (/healthz, /readyz)
 - Trace context propagated (trace_id in spans)
 
+### 9. Bug Fix Quality (Fix Once, Never Again)
+Cross-reference with `.qoder/rules/bug-fix-discipline.md`:
+- Root cause identified and addressed (not just the symptom)
+- Regression test added that would catch the bug if reintroduced
+- Same anti-pattern searched for and fixed across the entire codebase (class elimination)
+- Fix is systemic (structurally unrepresentable > guarded at construction > asserted at boundary > checked at usage)
+- Post-mortem note present in code comment or commit message
+- Fix is environment-independent (not a Windows-only or WSL-only workaround)
+- No forbidden shortcuts applied (symptom patching, `if nil` without asking why, silencing errors)
+- If this is a bug fix PR and any of the above are missing: flag as **Critical**
+
 ## Finding Severity
-- Critical: Must fix before merge (data loss, security vulnerability, spec violation)
+- Critical: Must fix before merge (data loss, security vulnerability, spec violation, bug fix discipline violation)
 - High: Should fix before merge (performance regression, missing tests)
 - Medium: Should fix in follow-up (code quality, documentation)
 - Low: Nice to have (style, minor optimizations)

@@ -467,8 +467,16 @@ type CpuMetric struct {
 	FrequencyMhz float64 `protobuf:"fixed64,6,opt,name=frequency_mhz,json=frequencyMhz,proto3" json:"frequency_mhz,omitempty"`
 	// Context switches since boot.
 	ContextSwitches int64 `protobuf:"varint,7,opt,name=context_switches,json=contextSwitches,proto3" json:"context_switches,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// Physical core count.
+	PhysicalCores int32 `protobuf:"varint,8,opt,name=physical_cores,json=physicalCores,proto3" json:"physical_cores,omitempty"`
+	// Logical core count.
+	LogicalCores int32 `protobuf:"varint,9,opt,name=logical_cores,json=logicalCores,proto3" json:"logical_cores,omitempty"`
+	// CPU model name.
+	ModelName string `protobuf:"bytes,10,opt,name=model_name,json=modelName,proto3" json:"model_name,omitempty"`
+	// CPU vendor ID.
+	VendorId      string `protobuf:"bytes,11,opt,name=vendor_id,json=vendorId,proto3" json:"vendor_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CpuMetric) Reset() {
@@ -550,6 +558,34 @@ func (x *CpuMetric) GetContextSwitches() int64 {
 	return 0
 }
 
+func (x *CpuMetric) GetPhysicalCores() int32 {
+	if x != nil {
+		return x.PhysicalCores
+	}
+	return 0
+}
+
+func (x *CpuMetric) GetLogicalCores() int32 {
+	if x != nil {
+		return x.LogicalCores
+	}
+	return 0
+}
+
+func (x *CpuMetric) GetModelName() string {
+	if x != nil {
+		return x.ModelName
+	}
+	return ""
+}
+
+func (x *CpuMetric) GetVendorId() string {
+	if x != nil {
+		return x.VendorId
+	}
+	return ""
+}
+
 // MemoryMetric contains memory usage data.
 type MemoryMetric struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -570,7 +606,11 @@ type MemoryMetric struct {
 	// Used swap in bytes.
 	SwapUsedBytes int64 `protobuf:"varint,8,opt,name=swap_used_bytes,json=swapUsedBytes,proto3" json:"swap_used_bytes,omitempty"`
 	// Usage percentage (0-100).
-	UsagePercent  float64 `protobuf:"fixed64,9,opt,name=usage_percent,json=usagePercent,proto3" json:"usage_percent,omitempty"`
+	UsagePercent float64 `protobuf:"fixed64,9,opt,name=usage_percent,json=usagePercent,proto3" json:"usage_percent,omitempty"`
+	// Memory pressure (PSI) data.
+	Pressure *MemoryPressure `protobuf:"bytes,10,opt,name=pressure,proto3" json:"pressure,omitempty"`
+	// Top N processes by RSS.
+	TopProcesses  []*MemoryTopProcess `protobuf:"bytes,11,rep,name=top_processes,json=topProcesses,proto3" json:"top_processes,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -668,6 +708,184 @@ func (x *MemoryMetric) GetUsagePercent() float64 {
 	return 0
 }
 
+func (x *MemoryMetric) GetPressure() *MemoryPressure {
+	if x != nil {
+		return x.Pressure
+	}
+	return nil
+}
+
+func (x *MemoryMetric) GetTopProcesses() []*MemoryTopProcess {
+	if x != nil {
+		return x.TopProcesses
+	}
+	return nil
+}
+
+// MemoryPressure contains PSI (Pressure Stall Information) data.
+type MemoryPressure struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Some tasks stalled, 10s window.
+	Some_10 float64 `protobuf:"fixed64,1,opt,name=some_10,json=some10,proto3" json:"some_10,omitempty"`
+	// Some tasks stalled, 60s window.
+	Some_60 float64 `protobuf:"fixed64,2,opt,name=some_60,json=some60,proto3" json:"some_60,omitempty"`
+	// Some tasks stalled, 300s window.
+	Some_300 float64 `protobuf:"fixed64,3,opt,name=some_300,json=some300,proto3" json:"some_300,omitempty"`
+	// All tasks stalled, 10s window.
+	Full_10 float64 `protobuf:"fixed64,4,opt,name=full_10,json=full10,proto3" json:"full_10,omitempty"`
+	// All tasks stalled, 60s window.
+	Full_60 float64 `protobuf:"fixed64,5,opt,name=full_60,json=full60,proto3" json:"full_60,omitempty"`
+	// All tasks stalled, 300s window.
+	Full_300      float64 `protobuf:"fixed64,6,opt,name=full_300,json=full300,proto3" json:"full_300,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryPressure) Reset() {
+	*x = MemoryPressure{}
+	mi := &file_paryty_v1_agent_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryPressure) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryPressure) ProtoMessage() {}
+
+func (x *MemoryPressure) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_agent_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryPressure.ProtoReflect.Descriptor instead.
+func (*MemoryPressure) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *MemoryPressure) GetSome_10() float64 {
+	if x != nil {
+		return x.Some_10
+	}
+	return 0
+}
+
+func (x *MemoryPressure) GetSome_60() float64 {
+	if x != nil {
+		return x.Some_60
+	}
+	return 0
+}
+
+func (x *MemoryPressure) GetSome_300() float64 {
+	if x != nil {
+		return x.Some_300
+	}
+	return 0
+}
+
+func (x *MemoryPressure) GetFull_10() float64 {
+	if x != nil {
+		return x.Full_10
+	}
+	return 0
+}
+
+func (x *MemoryPressure) GetFull_60() float64 {
+	if x != nil {
+		return x.Full_60
+	}
+	return 0
+}
+
+func (x *MemoryPressure) GetFull_300() float64 {
+	if x != nil {
+		return x.Full_300
+	}
+	return 0
+}
+
+// MemoryTopProcess identifies one of the top N processes by RSS.
+type MemoryTopProcess struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Process ID.
+	Pid int32 `protobuf:"varint,1,opt,name=pid,proto3" json:"pid,omitempty"`
+	// Process name.
+	Name string `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	// RSS memory in bytes.
+	RssBytes int64 `protobuf:"varint,3,opt,name=rss_bytes,json=rssBytes,proto3" json:"rss_bytes,omitempty"`
+	// VSZ memory in bytes.
+	VszBytes      int64 `protobuf:"varint,4,opt,name=vsz_bytes,json=vszBytes,proto3" json:"vsz_bytes,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryTopProcess) Reset() {
+	*x = MemoryTopProcess{}
+	mi := &file_paryty_v1_agent_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryTopProcess) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryTopProcess) ProtoMessage() {}
+
+func (x *MemoryTopProcess) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_agent_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryTopProcess.ProtoReflect.Descriptor instead.
+func (*MemoryTopProcess) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *MemoryTopProcess) GetPid() int32 {
+	if x != nil {
+		return x.Pid
+	}
+	return 0
+}
+
+func (x *MemoryTopProcess) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *MemoryTopProcess) GetRssBytes() int64 {
+	if x != nil {
+		return x.RssBytes
+	}
+	return 0
+}
+
+func (x *MemoryTopProcess) GetVszBytes() int64 {
+	if x != nil {
+		return x.VszBytes
+	}
+	return 0
+}
+
 // DiskMetric contains disk usage and I/O data for one device.
 type DiskMetric struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -694,14 +912,18 @@ type DiskMetric struct {
 	// Average I/O latency in milliseconds.
 	IoLatencyMs float64 `protobuf:"fixed64,11,opt,name=io_latency_ms,json=ioLatencyMs,proto3" json:"io_latency_ms,omitempty"`
 	// Queue depth.
-	QueueDepth    float64 `protobuf:"fixed64,12,opt,name=queue_depth,json=queueDepth,proto3" json:"queue_depth,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	QueueDepth float64 `protobuf:"fixed64,12,opt,name=queue_depth,json=queueDepth,proto3" json:"queue_depth,omitempty"`
+	// Whether this device is an SSD.
+	IsSsd bool `protobuf:"varint,13,opt,name=is_ssd,json=isSsd,proto3" json:"is_ssd,omitempty"`
+	// Device utilization percentage (0.0–100.0).
+	UtilizationPct float64 `protobuf:"fixed64,14,opt,name=utilization_pct,json=utilizationPct,proto3" json:"utilization_pct,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *DiskMetric) Reset() {
 	*x = DiskMetric{}
-	mi := &file_paryty_v1_agent_proto_msgTypes[6]
+	mi := &file_paryty_v1_agent_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -713,7 +935,7 @@ func (x *DiskMetric) String() string {
 func (*DiskMetric) ProtoMessage() {}
 
 func (x *DiskMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_paryty_v1_agent_proto_msgTypes[6]
+	mi := &file_paryty_v1_agent_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -726,7 +948,7 @@ func (x *DiskMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DiskMetric.ProtoReflect.Descriptor instead.
 func (*DiskMetric) Descriptor() ([]byte, []int) {
-	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{6}
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *DiskMetric) GetDeviceName() string {
@@ -813,6 +1035,20 @@ func (x *DiskMetric) GetQueueDepth() float64 {
 	return 0
 }
 
+func (x *DiskMetric) GetIsSsd() bool {
+	if x != nil {
+		return x.IsSsd
+	}
+	return false
+}
+
+func (x *DiskMetric) GetUtilizationPct() float64 {
+	if x != nil {
+		return x.UtilizationPct
+	}
+	return 0
+}
+
 // NetworkMetric contains network usage data for one interface.
 type NetworkMetric struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -838,13 +1074,27 @@ type NetworkMetric struct {
 	TcpRetransmits int64 `protobuf:"varint,10,opt,name=tcp_retransmits,json=tcpRetransmits,proto3" json:"tcp_retransmits,omitempty"`
 	// Estimated RTT in milliseconds.
 	EstimatedRttMs float64 `protobuf:"fixed64,11,opt,name=estimated_rtt_ms,json=estimatedRttMs,proto3" json:"estimated_rtt_ms,omitempty"`
-	unknownFields  protoimpl.UnknownFields
-	sizeCache      protoimpl.SizeCache
+	// Cumulative bytes received since boot.
+	TotalRxBytes int64 `protobuf:"varint,12,opt,name=total_rx_bytes,json=totalRxBytes,proto3" json:"total_rx_bytes,omitempty"`
+	// Cumulative bytes transmitted since boot.
+	TotalTxBytes int64 `protobuf:"varint,13,opt,name=total_tx_bytes,json=totalTxBytes,proto3" json:"total_tx_bytes,omitempty"`
+	// Cumulative packets received since boot.
+	TotalRxPackets int64 `protobuf:"varint,14,opt,name=total_rx_packets,json=totalRxPackets,proto3" json:"total_rx_packets,omitempty"`
+	// Cumulative packets transmitted since boot.
+	TotalTxPackets int64 `protobuf:"varint,15,opt,name=total_tx_packets,json=totalTxPackets,proto3" json:"total_tx_packets,omitempty"`
+	// Link speed in Mbps.
+	SpeedMbps int64 `protobuf:"varint,16,opt,name=speed_mbps,json=speedMbps,proto3" json:"speed_mbps,omitempty"`
+	// Whether the interface is up.
+	IsUp bool `protobuf:"varint,17,opt,name=is_up,json=isUp,proto3" json:"is_up,omitempty"`
+	// Aggregate TCP stats for this host.
+	TcpStats      *TcpStats `protobuf:"bytes,18,opt,name=tcp_stats,json=tcpStats,proto3" json:"tcp_stats,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *NetworkMetric) Reset() {
 	*x = NetworkMetric{}
-	mi := &file_paryty_v1_agent_proto_msgTypes[7]
+	mi := &file_paryty_v1_agent_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -856,7 +1106,7 @@ func (x *NetworkMetric) String() string {
 func (*NetworkMetric) ProtoMessage() {}
 
 func (x *NetworkMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_paryty_v1_agent_proto_msgTypes[7]
+	mi := &file_paryty_v1_agent_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -869,7 +1119,7 @@ func (x *NetworkMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use NetworkMetric.ProtoReflect.Descriptor instead.
 func (*NetworkMetric) Descriptor() ([]byte, []int) {
-	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{7}
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *NetworkMetric) GetInterfaceName() string {
@@ -949,6 +1199,137 @@ func (x *NetworkMetric) GetEstimatedRttMs() float64 {
 	return 0
 }
 
+func (x *NetworkMetric) GetTotalRxBytes() int64 {
+	if x != nil {
+		return x.TotalRxBytes
+	}
+	return 0
+}
+
+func (x *NetworkMetric) GetTotalTxBytes() int64 {
+	if x != nil {
+		return x.TotalTxBytes
+	}
+	return 0
+}
+
+func (x *NetworkMetric) GetTotalRxPackets() int64 {
+	if x != nil {
+		return x.TotalRxPackets
+	}
+	return 0
+}
+
+func (x *NetworkMetric) GetTotalTxPackets() int64 {
+	if x != nil {
+		return x.TotalTxPackets
+	}
+	return 0
+}
+
+func (x *NetworkMetric) GetSpeedMbps() int64 {
+	if x != nil {
+		return x.SpeedMbps
+	}
+	return 0
+}
+
+func (x *NetworkMetric) GetIsUp() bool {
+	if x != nil {
+		return x.IsUp
+	}
+	return false
+}
+
+func (x *NetworkMetric) GetTcpStats() *TcpStats {
+	if x != nil {
+		return x.TcpStats
+	}
+	return nil
+}
+
+// TcpStats contains aggregate TCP socket statistics.
+type TcpStats struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Number of ESTABLISHED connections.
+	Established int32 `protobuf:"varint,1,opt,name=established,proto3" json:"established,omitempty"`
+	// Number of connections in TIME_WAIT.
+	TimeWait int32 `protobuf:"varint,2,opt,name=time_wait,json=timeWait,proto3" json:"time_wait,omitempty"`
+	// Number of connections in CLOSE_WAIT.
+	CloseWait int32 `protobuf:"varint,3,opt,name=close_wait,json=closeWait,proto3" json:"close_wait,omitempty"`
+	// Number of connections in LISTEN state.
+	Listen int32 `protobuf:"varint,4,opt,name=listen,proto3" json:"listen,omitempty"`
+	// Total retransmitted segments.
+	RetransmitCount int64 `protobuf:"varint,5,opt,name=retransmit_count,json=retransmitCount,proto3" json:"retransmit_count,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *TcpStats) Reset() {
+	*x = TcpStats{}
+	mi := &file_paryty_v1_agent_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TcpStats) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TcpStats) ProtoMessage() {}
+
+func (x *TcpStats) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_agent_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TcpStats.ProtoReflect.Descriptor instead.
+func (*TcpStats) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TcpStats) GetEstablished() int32 {
+	if x != nil {
+		return x.Established
+	}
+	return 0
+}
+
+func (x *TcpStats) GetTimeWait() int32 {
+	if x != nil {
+		return x.TimeWait
+	}
+	return 0
+}
+
+func (x *TcpStats) GetCloseWait() int32 {
+	if x != nil {
+		return x.CloseWait
+	}
+	return 0
+}
+
+func (x *TcpStats) GetListen() int32 {
+	if x != nil {
+		return x.Listen
+	}
+	return 0
+}
+
+func (x *TcpStats) GetRetransmitCount() int64 {
+	if x != nil {
+		return x.RetransmitCount
+	}
+	return 0
+}
+
 // ProcessMetric contains per-process data.
 type ProcessMetric struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -975,14 +1356,22 @@ type ProcessMetric struct {
 	// Container ID (empty if not in container).
 	ContainerId string `protobuf:"bytes,11,opt,name=container_id,json=containerId,proto3" json:"container_id,omitempty"`
 	// Start time.
-	StartedAt     *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	StartedAt *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=started_at,json=startedAt,proto3" json:"started_at,omitempty"`
+	// Executable path.
+	Exe string `protobuf:"bytes,13,opt,name=exe,proto3" json:"exe,omitempty"`
+	// Cumulative disk bytes read.
+	DiskReadBytes int64 `protobuf:"varint,14,opt,name=disk_read_bytes,json=diskReadBytes,proto3" json:"disk_read_bytes,omitempty"`
+	// Cumulative disk bytes written.
+	DiskWrittenBytes int64 `protobuf:"varint,15,opt,name=disk_written_bytes,json=diskWrittenBytes,proto3" json:"disk_written_bytes,omitempty"`
+	// Process owner user ID.
+	UserId        string `protobuf:"bytes,16,opt,name=user_id,json=userId,proto3" json:"user_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ProcessMetric) Reset() {
 	*x = ProcessMetric{}
-	mi := &file_paryty_v1_agent_proto_msgTypes[8]
+	mi := &file_paryty_v1_agent_proto_msgTypes[11]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -994,7 +1383,7 @@ func (x *ProcessMetric) String() string {
 func (*ProcessMetric) ProtoMessage() {}
 
 func (x *ProcessMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_paryty_v1_agent_proto_msgTypes[8]
+	mi := &file_paryty_v1_agent_proto_msgTypes[11]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1007,7 +1396,7 @@ func (x *ProcessMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProcessMetric.ProtoReflect.Descriptor instead.
 func (*ProcessMetric) Descriptor() ([]byte, []int) {
-	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{8}
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{11}
 }
 
 func (x *ProcessMetric) GetPid() int32 {
@@ -1094,6 +1483,34 @@ func (x *ProcessMetric) GetStartedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *ProcessMetric) GetExe() string {
+	if x != nil {
+		return x.Exe
+	}
+	return ""
+}
+
+func (x *ProcessMetric) GetDiskReadBytes() int64 {
+	if x != nil {
+		return x.DiskReadBytes
+	}
+	return 0
+}
+
+func (x *ProcessMetric) GetDiskWrittenBytes() int64 {
+	if x != nil {
+		return x.DiskWrittenBytes
+	}
+	return 0
+}
+
+func (x *ProcessMetric) GetUserId() string {
+	if x != nil {
+		return x.UserId
+	}
+	return ""
+}
+
 // ContainerMetric contains container detection data.
 type ContainerMetric struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1112,14 +1529,20 @@ type ContainerMetric struct {
 	// Container labels.
 	Labels *Labels `protobuf:"bytes,7,opt,name=labels,proto3" json:"labels,omitempty"`
 	// Processes in this container.
-	Pids          []int32 `protobuf:"varint,8,rep,packed,name=pids,proto3" json:"pids,omitempty"`
+	Pids []int32 `protobuf:"varint,8,rep,packed,name=pids,proto3" json:"pids,omitempty"`
+	// Memory limit in bytes.
+	MemoryLimitBytes int64 `protobuf:"varint,9,opt,name=memory_limit_bytes,json=memoryLimitBytes,proto3" json:"memory_limit_bytes,omitempty"`
+	// CPU CFS quota as ratio.
+	CpuQuota float64 `protobuf:"fixed64,10,opt,name=cpu_quota,json=cpuQuota,proto3" json:"cpu_quota,omitempty"`
+	// CPU shares (relative weight).
+	CpuShares     int64 `protobuf:"varint,11,opt,name=cpu_shares,json=cpuShares,proto3" json:"cpu_shares,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *ContainerMetric) Reset() {
 	*x = ContainerMetric{}
-	mi := &file_paryty_v1_agent_proto_msgTypes[9]
+	mi := &file_paryty_v1_agent_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1131,7 +1554,7 @@ func (x *ContainerMetric) String() string {
 func (*ContainerMetric) ProtoMessage() {}
 
 func (x *ContainerMetric) ProtoReflect() protoreflect.Message {
-	mi := &file_paryty_v1_agent_proto_msgTypes[9]
+	mi := &file_paryty_v1_agent_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1144,7 +1567,7 @@ func (x *ContainerMetric) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ContainerMetric.ProtoReflect.Descriptor instead.
 func (*ContainerMetric) Descriptor() ([]byte, []int) {
-	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{9}
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *ContainerMetric) GetContainerId() string {
@@ -1203,6 +1626,27 @@ func (x *ContainerMetric) GetPids() []int32 {
 	return nil
 }
 
+func (x *ContainerMetric) GetMemoryLimitBytes() int64 {
+	if x != nil {
+		return x.MemoryLimitBytes
+	}
+	return 0
+}
+
+func (x *ContainerMetric) GetCpuQuota() float64 {
+	if x != nil {
+		return x.CpuQuota
+	}
+	return 0
+}
+
+func (x *ContainerMetric) GetCpuShares() int64 {
+	if x != nil {
+		return x.CpuShares
+	}
+	return 0
+}
+
 // HealthCheckResult is the result of a single health check.
 type HealthCheckResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -1226,7 +1670,7 @@ type HealthCheckResult struct {
 
 func (x *HealthCheckResult) Reset() {
 	*x = HealthCheckResult{}
-	mi := &file_paryty_v1_agent_proto_msgTypes[10]
+	mi := &file_paryty_v1_agent_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1238,7 +1682,7 @@ func (x *HealthCheckResult) String() string {
 func (*HealthCheckResult) ProtoMessage() {}
 
 func (x *HealthCheckResult) ProtoReflect() protoreflect.Message {
-	mi := &file_paryty_v1_agent_proto_msgTypes[10]
+	mi := &file_paryty_v1_agent_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1251,7 +1695,7 @@ func (x *HealthCheckResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckResult.ProtoReflect.Descriptor instead.
 func (*HealthCheckResult) Descriptor() ([]byte, []int) {
-	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{10}
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{13}
 }
 
 func (x *HealthCheckResult) GetName() string {
@@ -1322,7 +1766,7 @@ type LogEntry struct {
 
 func (x *LogEntry) Reset() {
 	*x = LogEntry{}
-	mi := &file_paryty_v1_agent_proto_msgTypes[11]
+	mi := &file_paryty_v1_agent_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1334,7 +1778,7 @@ func (x *LogEntry) String() string {
 func (*LogEntry) ProtoMessage() {}
 
 func (x *LogEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_paryty_v1_agent_proto_msgTypes[11]
+	mi := &file_paryty_v1_agent_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1347,7 +1791,7 @@ func (x *LogEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
 func (*LogEntry) Descriptor() ([]byte, []int) {
-	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{11}
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *LogEntry) GetSource() string {
@@ -1414,7 +1858,7 @@ type AgentSelfMetrics struct {
 
 func (x *AgentSelfMetrics) Reset() {
 	*x = AgentSelfMetrics{}
-	mi := &file_paryty_v1_agent_proto_msgTypes[12]
+	mi := &file_paryty_v1_agent_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1426,7 +1870,7 @@ func (x *AgentSelfMetrics) String() string {
 func (*AgentSelfMetrics) ProtoMessage() {}
 
 func (x *AgentSelfMetrics) ProtoReflect() protoreflect.Message {
-	mi := &file_paryty_v1_agent_proto_msgTypes[12]
+	mi := &file_paryty_v1_agent_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1439,7 +1883,7 @@ func (x *AgentSelfMetrics) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AgentSelfMetrics.ProtoReflect.Descriptor instead.
 func (*AgentSelfMetrics) Descriptor() ([]byte, []int) {
-	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{12}
+	return file_paryty_v1_agent_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *AgentSelfMetrics) GetCpuUsagePercent() float64 {
@@ -1562,7 +2006,7 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	"\vlog_entries\x18\x15 \x03(\v2\x13.paryty.v1.LogEntryR\n" +
 	"logEntries\x12>\n" +
 	"\x0enetwork_events\x18\x1e \x03(\v2\x17.paryty.v1.NetworkEventR\rnetworkEvents\x12>\n" +
-	"\fself_metrics\x18( \x01(\v2\x1b.paryty.v1.AgentSelfMetricsR\vselfMetrics\"\xaf\x02\n" +
+	"\fself_metrics\x18( \x01(\v2\x1b.paryty.v1.AgentSelfMetricsR\vselfMetrics\"\xb7\x03\n" +
 	"\tCpuMetric\x12.\n" +
 	"\x13total_usage_percent\x18\x01 \x01(\x01R\x11totalUsagePercent\x12(\n" +
 	"\x10per_core_percent\x18\x02 \x03(\x01R\x0eperCorePercent\x12&\n" +
@@ -1570,7 +2014,13 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	"\x0fload_average_5m\x18\x04 \x01(\x01R\rloadAverage5m\x12(\n" +
 	"\x10load_average_15m\x18\x05 \x01(\x01R\x0eloadAverage15m\x12#\n" +
 	"\rfrequency_mhz\x18\x06 \x01(\x01R\ffrequencyMhz\x12)\n" +
-	"\x10context_switches\x18\a \x01(\x03R\x0fcontextSwitches\"\xd3\x02\n" +
+	"\x10context_switches\x18\a \x01(\x03R\x0fcontextSwitches\x12%\n" +
+	"\x0ephysical_cores\x18\b \x01(\x05R\rphysicalCores\x12#\n" +
+	"\rlogical_cores\x18\t \x01(\x05R\flogicalCores\x12\x1d\n" +
+	"\n" +
+	"model_name\x18\n" +
+	" \x01(\tR\tmodelName\x12\x1b\n" +
+	"\tvendor_id\x18\v \x01(\tR\bvendorId\"\xcc\x03\n" +
 	"\fMemoryMetric\x12\x1f\n" +
 	"\vtotal_bytes\x18\x01 \x01(\x03R\n" +
 	"totalBytes\x12\x1d\n" +
@@ -1583,7 +2033,22 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	"\fbuffer_bytes\x18\x06 \x01(\x03R\vbufferBytes\x12(\n" +
 	"\x10swap_total_bytes\x18\a \x01(\x03R\x0eswapTotalBytes\x12&\n" +
 	"\x0fswap_used_bytes\x18\b \x01(\x03R\rswapUsedBytes\x12#\n" +
-	"\rusage_percent\x18\t \x01(\x01R\fusagePercent\"\xcb\x03\n" +
+	"\rusage_percent\x18\t \x01(\x01R\fusagePercent\x125\n" +
+	"\bpressure\x18\n" +
+	" \x01(\v2\x19.paryty.v1.MemoryPressureR\bpressure\x12@\n" +
+	"\rtop_processes\x18\v \x03(\v2\x1b.paryty.v1.MemoryTopProcessR\ftopProcesses\"\xaa\x01\n" +
+	"\x0eMemoryPressure\x12\x17\n" +
+	"\asome_10\x18\x01 \x01(\x01R\x06some10\x12\x17\n" +
+	"\asome_60\x18\x02 \x01(\x01R\x06some60\x12\x19\n" +
+	"\bsome_300\x18\x03 \x01(\x01R\asome300\x12\x17\n" +
+	"\afull_10\x18\x04 \x01(\x01R\x06full10\x12\x17\n" +
+	"\afull_60\x18\x05 \x01(\x01R\x06full60\x12\x19\n" +
+	"\bfull_300\x18\x06 \x01(\x01R\afull300\"r\n" +
+	"\x10MemoryTopProcess\x12\x10\n" +
+	"\x03pid\x18\x01 \x01(\x05R\x03pid\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x1b\n" +
+	"\trss_bytes\x18\x03 \x01(\x03R\brssBytes\x12\x1b\n" +
+	"\tvsz_bytes\x18\x04 \x01(\x03R\bvszBytes\"\x8b\x04\n" +
 	"\n" +
 	"DiskMetric\x12\x1f\n" +
 	"\vdevice_name\x18\x01 \x01(\tR\n" +
@@ -1604,7 +2069,9 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	" \x01(\x01R\x10writeBytesPerSec\x12\"\n" +
 	"\rio_latency_ms\x18\v \x01(\x01R\vioLatencyMs\x12\x1f\n" +
 	"\vqueue_depth\x18\f \x01(\x01R\n" +
-	"queueDepth\"\xad\x03\n" +
+	"queueDepth\x12\x15\n" +
+	"\x06is_ssd\x18\r \x01(\bR\x05isSsd\x12'\n" +
+	"\x0futilization_pct\x18\x0e \x01(\x01R\x0eutilizationPct\"\xb3\x05\n" +
 	"\rNetworkMetric\x12%\n" +
 	"\x0einterface_name\x18\x01 \x01(\tR\rinterfaceName\x12'\n" +
 	"\x10rx_bytes_per_sec\x18\x02 \x01(\x01R\rrxBytesPerSec\x12'\n" +
@@ -1619,7 +2086,22 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	"tx_dropped\x18\t \x01(\x03R\ttxDropped\x12'\n" +
 	"\x0ftcp_retransmits\x18\n" +
 	" \x01(\x03R\x0etcpRetransmits\x12(\n" +
-	"\x10estimated_rtt_ms\x18\v \x01(\x01R\x0eestimatedRttMs\"\x91\x03\n" +
+	"\x10estimated_rtt_ms\x18\v \x01(\x01R\x0eestimatedRttMs\x12$\n" +
+	"\x0etotal_rx_bytes\x18\f \x01(\x03R\ftotalRxBytes\x12$\n" +
+	"\x0etotal_tx_bytes\x18\r \x01(\x03R\ftotalTxBytes\x12(\n" +
+	"\x10total_rx_packets\x18\x0e \x01(\x03R\x0etotalRxPackets\x12(\n" +
+	"\x10total_tx_packets\x18\x0f \x01(\x03R\x0etotalTxPackets\x12\x1d\n" +
+	"\n" +
+	"speed_mbps\x18\x10 \x01(\x03R\tspeedMbps\x12\x13\n" +
+	"\x05is_up\x18\x11 \x01(\bR\x04isUp\x120\n" +
+	"\ttcp_stats\x18\x12 \x01(\v2\x13.paryty.v1.TcpStatsR\btcpStats\"\xab\x01\n" +
+	"\bTcpStats\x12 \n" +
+	"\vestablished\x18\x01 \x01(\x05R\vestablished\x12\x1b\n" +
+	"\ttime_wait\x18\x02 \x01(\x05R\btimeWait\x12\x1d\n" +
+	"\n" +
+	"close_wait\x18\x03 \x01(\x05R\tcloseWait\x12\x16\n" +
+	"\x06listen\x18\x04 \x01(\x05R\x06listen\x12)\n" +
+	"\x10retransmit_count\x18\x05 \x01(\x03R\x0fretransmitCount\"\x92\x04\n" +
 	"\rProcessMetric\x12\x10\n" +
 	"\x03pid\x18\x01 \x01(\x05R\x03pid\x12\x1d\n" +
 	"\n" +
@@ -1635,7 +2117,11 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	" \x01(\x05R\afdCount\x12!\n" +
 	"\fcontainer_id\x18\v \x01(\tR\vcontainerId\x129\n" +
 	"\n" +
-	"started_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\"\xf6\x01\n" +
+	"started_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12\x10\n" +
+	"\x03exe\x18\r \x01(\tR\x03exe\x12&\n" +
+	"\x0fdisk_read_bytes\x18\x0e \x01(\x03R\rdiskReadBytes\x12,\n" +
+	"\x12disk_written_bytes\x18\x0f \x01(\x03R\x10diskWrittenBytes\x12\x17\n" +
+	"\auser_id\x18\x10 \x01(\tR\x06userId\"\xe0\x02\n" +
 	"\x0fContainerMetric\x12!\n" +
 	"\fcontainer_id\x18\x01 \x01(\tR\vcontainerId\x12\x18\n" +
 	"\aruntime\x18\x02 \x01(\tR\aruntime\x12\x12\n" +
@@ -1644,7 +2130,12 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	"\x06status\x18\x05 \x01(\tR\x06status\x12%\n" +
 	"\x0ecgroup_version\x18\x06 \x01(\tR\rcgroupVersion\x12)\n" +
 	"\x06labels\x18\a \x01(\v2\x11.paryty.v1.LabelsR\x06labels\x12\x12\n" +
-	"\x04pids\x18\b \x03(\x05R\x04pids\"\x99\x02\n" +
+	"\x04pids\x18\b \x03(\x05R\x04pids\x12,\n" +
+	"\x12memory_limit_bytes\x18\t \x01(\x03R\x10memoryLimitBytes\x12\x1b\n" +
+	"\tcpu_quota\x18\n" +
+	" \x01(\x01R\bcpuQuota\x12\x1d\n" +
+	"\n" +
+	"cpu_shares\x18\v \x01(\x03R\tcpuShares\"\x99\x02\n" +
 	"\x11HealthCheckResult\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x16\n" +
 	"\x06target\x18\x02 \x01(\tR\x06target\x12\x1d\n" +
@@ -1687,7 +2178,7 @@ func file_paryty_v1_agent_proto_rawDescGZIP() []byte {
 	return file_paryty_v1_agent_proto_rawDescData
 }
 
-var file_paryty_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
+var file_paryty_v1_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
 var file_paryty_v1_agent_proto_goTypes = []any{
 	(*AgentRegistration)(nil),         // 0: paryty.v1.AgentRegistration
 	(*AgentRegistrationResponse)(nil), // 1: paryty.v1.AgentRegistrationResponse
@@ -1695,47 +2186,53 @@ var file_paryty_v1_agent_proto_goTypes = []any{
 	(*MetricBatch)(nil),               // 3: paryty.v1.MetricBatch
 	(*CpuMetric)(nil),                 // 4: paryty.v1.CpuMetric
 	(*MemoryMetric)(nil),              // 5: paryty.v1.MemoryMetric
-	(*DiskMetric)(nil),                // 6: paryty.v1.DiskMetric
-	(*NetworkMetric)(nil),             // 7: paryty.v1.NetworkMetric
-	(*ProcessMetric)(nil),             // 8: paryty.v1.ProcessMetric
-	(*ContainerMetric)(nil),           // 9: paryty.v1.ContainerMetric
-	(*HealthCheckResult)(nil),         // 10: paryty.v1.HealthCheckResult
-	(*LogEntry)(nil),                  // 11: paryty.v1.LogEntry
-	(*AgentSelfMetrics)(nil),          // 12: paryty.v1.AgentSelfMetrics
-	(*AgentCapabilities)(nil),         // 13: paryty.v1.AgentCapabilities
-	(*Labels)(nil),                    // 14: paryty.v1.Labels
-	(*timestamppb.Timestamp)(nil),     // 15: google.protobuf.Timestamp
-	(*NetworkEvent)(nil),              // 16: paryty.v1.NetworkEvent
-	(HealthStatus)(0),                 // 17: paryty.v1.HealthStatus
+	(*MemoryPressure)(nil),            // 6: paryty.v1.MemoryPressure
+	(*MemoryTopProcess)(nil),          // 7: paryty.v1.MemoryTopProcess
+	(*DiskMetric)(nil),                // 8: paryty.v1.DiskMetric
+	(*NetworkMetric)(nil),             // 9: paryty.v1.NetworkMetric
+	(*TcpStats)(nil),                  // 10: paryty.v1.TcpStats
+	(*ProcessMetric)(nil),             // 11: paryty.v1.ProcessMetric
+	(*ContainerMetric)(nil),           // 12: paryty.v1.ContainerMetric
+	(*HealthCheckResult)(nil),         // 13: paryty.v1.HealthCheckResult
+	(*LogEntry)(nil),                  // 14: paryty.v1.LogEntry
+	(*AgentSelfMetrics)(nil),          // 15: paryty.v1.AgentSelfMetrics
+	(*AgentCapabilities)(nil),         // 16: paryty.v1.AgentCapabilities
+	(*Labels)(nil),                    // 17: paryty.v1.Labels
+	(*timestamppb.Timestamp)(nil),     // 18: google.protobuf.Timestamp
+	(*NetworkEvent)(nil),              // 19: paryty.v1.NetworkEvent
+	(HealthStatus)(0),                 // 20: paryty.v1.HealthStatus
 }
 var file_paryty_v1_agent_proto_depIdxs = []int32{
-	13, // 0: paryty.v1.AgentRegistration.capabilities:type_name -> paryty.v1.AgentCapabilities
-	14, // 1: paryty.v1.AgentRegistration.labels:type_name -> paryty.v1.Labels
-	15, // 2: paryty.v1.AgentRegistration.started_at:type_name -> google.protobuf.Timestamp
+	16, // 0: paryty.v1.AgentRegistration.capabilities:type_name -> paryty.v1.AgentCapabilities
+	17, // 1: paryty.v1.AgentRegistration.labels:type_name -> paryty.v1.Labels
+	18, // 2: paryty.v1.AgentRegistration.started_at:type_name -> google.protobuf.Timestamp
 	2,  // 3: paryty.v1.AgentRegistrationResponse.config:type_name -> paryty.v1.AgentConfig
-	15, // 4: paryty.v1.AgentRegistrationResponse.server_time:type_name -> google.protobuf.Timestamp
-	15, // 5: paryty.v1.MetricBatch.timestamp:type_name -> google.protobuf.Timestamp
+	18, // 4: paryty.v1.AgentRegistrationResponse.server_time:type_name -> google.protobuf.Timestamp
+	18, // 5: paryty.v1.MetricBatch.timestamp:type_name -> google.protobuf.Timestamp
 	4,  // 6: paryty.v1.MetricBatch.cpu:type_name -> paryty.v1.CpuMetric
 	5,  // 7: paryty.v1.MetricBatch.memory:type_name -> paryty.v1.MemoryMetric
-	6,  // 8: paryty.v1.MetricBatch.disks:type_name -> paryty.v1.DiskMetric
-	7,  // 9: paryty.v1.MetricBatch.interfaces:type_name -> paryty.v1.NetworkMetric
-	8,  // 10: paryty.v1.MetricBatch.processes:type_name -> paryty.v1.ProcessMetric
-	9,  // 11: paryty.v1.MetricBatch.containers:type_name -> paryty.v1.ContainerMetric
-	10, // 12: paryty.v1.MetricBatch.health_checks:type_name -> paryty.v1.HealthCheckResult
-	11, // 13: paryty.v1.MetricBatch.log_entries:type_name -> paryty.v1.LogEntry
-	16, // 14: paryty.v1.MetricBatch.network_events:type_name -> paryty.v1.NetworkEvent
-	12, // 15: paryty.v1.MetricBatch.self_metrics:type_name -> paryty.v1.AgentSelfMetrics
-	15, // 16: paryty.v1.ProcessMetric.started_at:type_name -> google.protobuf.Timestamp
-	14, // 17: paryty.v1.ContainerMetric.labels:type_name -> paryty.v1.Labels
-	17, // 18: paryty.v1.HealthCheckResult.status:type_name -> paryty.v1.HealthStatus
-	15, // 19: paryty.v1.HealthCheckResult.checked_at:type_name -> google.protobuf.Timestamp
-	15, // 20: paryty.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
-	14, // 21: paryty.v1.LogEntry.fields:type_name -> paryty.v1.Labels
-	22, // [22:22] is the sub-list for method output_type
-	22, // [22:22] is the sub-list for method input_type
-	22, // [22:22] is the sub-list for extension type_name
-	22, // [22:22] is the sub-list for extension extendee
-	0,  // [0:22] is the sub-list for field type_name
+	8,  // 8: paryty.v1.MetricBatch.disks:type_name -> paryty.v1.DiskMetric
+	9,  // 9: paryty.v1.MetricBatch.interfaces:type_name -> paryty.v1.NetworkMetric
+	11, // 10: paryty.v1.MetricBatch.processes:type_name -> paryty.v1.ProcessMetric
+	12, // 11: paryty.v1.MetricBatch.containers:type_name -> paryty.v1.ContainerMetric
+	13, // 12: paryty.v1.MetricBatch.health_checks:type_name -> paryty.v1.HealthCheckResult
+	14, // 13: paryty.v1.MetricBatch.log_entries:type_name -> paryty.v1.LogEntry
+	19, // 14: paryty.v1.MetricBatch.network_events:type_name -> paryty.v1.NetworkEvent
+	15, // 15: paryty.v1.MetricBatch.self_metrics:type_name -> paryty.v1.AgentSelfMetrics
+	6,  // 16: paryty.v1.MemoryMetric.pressure:type_name -> paryty.v1.MemoryPressure
+	7,  // 17: paryty.v1.MemoryMetric.top_processes:type_name -> paryty.v1.MemoryTopProcess
+	10, // 18: paryty.v1.NetworkMetric.tcp_stats:type_name -> paryty.v1.TcpStats
+	18, // 19: paryty.v1.ProcessMetric.started_at:type_name -> google.protobuf.Timestamp
+	17, // 20: paryty.v1.ContainerMetric.labels:type_name -> paryty.v1.Labels
+	20, // 21: paryty.v1.HealthCheckResult.status:type_name -> paryty.v1.HealthStatus
+	18, // 22: paryty.v1.HealthCheckResult.checked_at:type_name -> google.protobuf.Timestamp
+	18, // 23: paryty.v1.LogEntry.timestamp:type_name -> google.protobuf.Timestamp
+	17, // 24: paryty.v1.LogEntry.fields:type_name -> paryty.v1.Labels
+	25, // [25:25] is the sub-list for method output_type
+	25, // [25:25] is the sub-list for method input_type
+	25, // [25:25] is the sub-list for extension type_name
+	25, // [25:25] is the sub-list for extension extendee
+	0,  // [0:25] is the sub-list for field type_name
 }
 
 func init() { file_paryty_v1_agent_proto_init() }
@@ -1751,7 +2248,7 @@ func file_paryty_v1_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_paryty_v1_agent_proto_rawDesc), len(file_paryty_v1_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   13,
+			NumMessages:   16,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

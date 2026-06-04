@@ -46,13 +46,25 @@ pub struct NetworkInterface {
     pub tx_packets_per_sec: f64,
     pub rx_errors: u64,
     pub tx_errors: u64,
-    pub rx_dropped: u64,
-    pub tx_dropped: u64,
-    pub tcp_retransmits: u64,
-    pub estimated_rtt_ms: f64,
-    /// Link speed in Mbps from `/sys/class/net/{name}/speed`. Zero if
-    /// unavailable (e.g., virtual interfaces or non-Linux).
-    pub speed_mbps: u64,
+    /// Dropped received packets. `None` when sysinfo doesn't report this.
+    pub rx_dropped: Option<u64>,
+    /// Dropped transmitted packets. `None` when sysinfo doesn't report this.
+    pub tx_dropped: Option<u64>,
+    /// Cumulative bytes received since boot / interface creation.
+    pub total_rx_bytes: u64,
+    /// Cumulative bytes transmitted since boot / interface creation.
+    pub total_tx_bytes: u64,
+    /// Cumulative packets received since boot / interface creation.
+    pub total_rx_packets: u64,
+    /// Cumulative packets transmitted since boot / interface creation.
+    pub total_tx_packets: u64,
+    /// TCP retransmits for this interface. `None` on non-Linux or when unavailable.
+    pub tcp_retransmits: Option<u64>,
+    /// Estimated RTT in milliseconds. `None` when unavailable.
+    pub estimated_rtt_ms: Option<f64>,
+    /// Link speed in Mbps from `/sys/class/net/{name}/speed`.
+    /// `None` if unavailable (e.g., virtual interfaces or non-Linux).
+    pub speed_mbps: Option<u64>,
     /// Whether the interface is administratively up.
     pub is_up: bool,
 }
@@ -67,9 +79,14 @@ pub struct NetworkMetrics {
 }
 
 /// Network collector.
-#[allow(dead_code)] // prev_stats used in Linux-only collect_linux()
+///
+/// On Linux, uses `/proc/net/dev` with delta-based rate calculation.
+/// On other platforms, uses a persistent `sysinfo::Networks` instance
+/// so that `received()` / `transmitted()` return deltas since last refresh.
 pub struct NetworkCollector {
     prev_stats: std::sync::Mutex<HashMap<String, NetStatSnapshot>>,
+    #[allow(dead_code)] // used only on non-Linux via collect_cross_platform()
+    cross_platform_networks: std::sync::Mutex<Option<sysinfo::Networks>>,
 }
 
 #[derive(Debug, Clone)]
@@ -84,7 +101,10 @@ struct NetStatSnapshot {
 
 impl NetworkCollector {
     pub fn new() -> Self {
-        Self { prev_stats: std::sync::Mutex::new(HashMap::new()) }
+        Self {
+            prev_stats: std::sync::Mutex::new(HashMap::new()),
+            cross_platform_networks: std::sync::Mutex::new(None),
+        }
     }
 
     #[instrument(skip(self, _config), fields(collector = "network"))]
@@ -168,11 +188,15 @@ impl NetworkCollector {
                 tx_packets_per_sec: tx_pkt_rate,
                 rx_errors,
                 tx_errors,
-                rx_dropped,
-                tx_dropped,
-                tcp_retransmits: 0,
-                estimated_rtt_ms: 0.0,
-                speed_mbps,
+                rx_dropped: Some(rx_dropped),
+                tx_dropped: Some(tx_dropped),
+                total_rx_bytes: rx_bytes,
+                total_tx_bytes: tx_bytes,
+                total_rx_packets: rx_packets,
+                total_tx_packets: tx_packets,
+                tcp_retransmits: None, // per-interface retransmits not available from /proc/net/dev
+                estimated_rtt_ms: None, // RTT estimation not available from /proc
+                speed_mbps: Some(speed_mbps),
                 is_up,
             });
         }
@@ -189,24 +213,47 @@ impl NetworkCollector {
     fn collect_cross_platform(&self) -> Result<Vec<NetworkInterface>> {
         use sysinfo::Networks;
 
-        let networks = Networks::new_with_refreshed_list();
+        let mut guard =
+            self.cross_platform_networks.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+
+        let networks = match guard.as_mut() {
+            Some(nw) => {
+                // Subsequent call: refresh in-place. `received()` and
+                // `transmitted()` now return deltas since last refresh.
+                nw.refresh();
+                nw
+            }
+            None => {
+                // First call: create the persistent instance.
+                // `new_with_refreshed_list()` does an initial baseline read,
+                // so the first data sample establishes the starting counters.
+                let nw = Networks::new_with_refreshed_list();
+                *guard = Some(nw);
+                guard.as_mut().unwrap()
+            }
+        };
+
         let mut interfaces = Vec::new();
 
-        for (name, data) in &networks {
+        for (name, data) in networks.iter() {
             interfaces.push(NetworkInterface {
                 interface_name: name.clone(),
                 rx_bytes_per_sec: data.received() as f64,
                 tx_bytes_per_sec: data.transmitted() as f64,
-                rx_packets_per_sec: 0.0,
-                tx_packets_per_sec: 0.0,
+                rx_packets_per_sec: data.packets_received() as f64,
+                tx_packets_per_sec: data.packets_transmitted() as f64,
                 rx_errors: data.errors_on_received(),
                 tx_errors: data.errors_on_transmitted(),
-                rx_dropped: 0,
-                tx_dropped: 0,
-                tcp_retransmits: 0,
-                estimated_rtt_ms: 0.0,
-                speed_mbps: 0,
-                is_up: false,
+                rx_dropped: None, // sysinfo doesn't expose dropped packets
+                tx_dropped: None, // sysinfo doesn't expose dropped packets
+                total_rx_bytes: data.total_received(),
+                total_tx_bytes: data.total_transmitted(),
+                total_rx_packets: data.total_packets_received(),
+                total_tx_packets: data.total_packets_transmitted(),
+                tcp_retransmits: None,  // not available via sysinfo
+                estimated_rtt_ms: None, // not available via sysinfo
+                speed_mbps: None,       // not available via sysinfo on Windows/macOS
+                is_up: false,           // sysinfo doesn't expose carrier state
             });
         }
 
@@ -478,15 +525,21 @@ Tcp: 1 200
             tx_packets_per_sec: 0.0,
             rx_errors: 0,
             tx_errors: 0,
-            rx_dropped: 0,
-            tx_dropped: 0,
-            tcp_retransmits: 0,
-            estimated_rtt_ms: 0.0,
-            speed_mbps: 1000,
+            rx_dropped: Some(0),
+            tx_dropped: Some(0),
+            total_rx_bytes: 0,
+            total_tx_bytes: 0,
+            total_rx_packets: 0,
+            total_tx_packets: 0,
+            tcp_retransmits: None,
+            estimated_rtt_ms: None,
+            speed_mbps: Some(1000),
             is_up: true,
         };
-        assert_eq!(iface.speed_mbps, 1000);
+        assert_eq!(iface.speed_mbps, Some(1000));
         assert!(iface.is_up);
+        assert_eq!(iface.rx_dropped, Some(0));
+        assert!(iface.tcp_retransmits.is_none());
     }
 
     #[test]

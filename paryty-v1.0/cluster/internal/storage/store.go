@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
+	pb "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage/cold"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage/hot"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage/warm"
@@ -261,22 +262,21 @@ func (s *Store) StoreMetricBatch(ctx context.Context, tenant string, batch *mode
 //
 // Both tiers are protected by circuit breakers.
 func (s *Store) StoreMetricWarmCold(ctx context.Context, tenant string, batch *models.MetricBatch) error {
-	// Warm store — non-blocking async write, circuit-breaker protected.
+	// Warm store — synchronous write with dedicated context to prevent
+	// ILP connection issues from concurrent goroutines and context cancellation.
 	if s.warmBreaker.Allow() {
-		go func() {
-			if err := s.warm.InsertMetricBatchILP(batch, tenant); err != nil {
-				s.warmBreaker.RecordFailure()
-				slog.Error("warm store async write failed",
-					"error", err,
-					"tenant", tenant,
-					"agent_id", batch.AgentID,
-				)
-			} else {
-				s.warmBreaker.RecordSuccess()
-			}
-		}()
+		if err := s.warm.InsertMetricBatchILP(batch, tenant); err != nil {
+			s.warmBreaker.RecordFailure()
+			slog.Error("warm store write failed",
+				"error", err,
+				"tenant", tenant,
+				"agent_id", batch.AgentID,
+			)
+		} else {
+			s.warmBreaker.RecordSuccess()
+		}
 	} else {
-		slog.Warn("warm store circuit breaker open, skipping async write",
+		slog.Warn("warm store circuit breaker open, skipping write",
 			"tenant", tenant,
 			"agent_id", batch.AgentID,
 		)
@@ -296,13 +296,99 @@ func (s *Store) StoreMetricWarmCold(ctx context.Context, tenant string, batch *m
 }
 
 // GetLatestMetrics retrieves the latest metrics from hot storage.
+// Falls back to warm storage (QuestDB) if hot tier is unavailable or empty.
 func (s *Store) GetLatestMetrics(ctx context.Context, tenant, agentID string) (*models.MetricBatch, error) {
-	return s.hot.GetLatestMetrics(ctx, tenant, agentID)
+	batch, err := s.hot.GetLatestMetrics(ctx, tenant, agentID)
+	if err == nil && batch != nil {
+		return batch, nil
+	}
+	if err != nil {
+		slog.Warn("hot tier get latest metrics failed, falling back to warm", "error", err, "agent_id", agentID)
+	}
+	// Fallback: query QuestDB for recent metrics and assemble a batch.
+	return s.getLatestMetricsFromWarm(ctx, tenant, agentID)
 }
 
 // SetLatestMetrics writes the latest metrics to hot storage.
 func (s *Store) SetLatestMetrics(ctx context.Context, tenant, agentID string, batch *models.MetricBatch) error {
 	return s.hot.SetLatestMetrics(ctx, tenant, agentID, batch)
+}
+
+// getLatestMetricsFromWarm queries QuestDB for the most recent metrics for an agent.
+// This is the fallback path when the hot tier is unavailable.
+func (s *Store) getLatestMetricsFromWarm(ctx context.Context, tenant, agentID string) (*models.MetricBatch, error) {
+	batch := &models.MetricBatch{
+		AgentID: agentID,
+	}
+
+	// Query the latest CPU metric.
+	cpuQuery := `SELECT timestamp, total_usage_pct, per_core_pct, load_avg_1, load_avg_5, load_avg_15,
+		frequency_mhz, context_switches, physical_cores, logical_cores, model_name, vendor_id
+		FROM cpu_metrics WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT 1`
+	var cpu models.CPUMetrics
+	var perCorePctStr string
+	err := s.warm.Pool().QueryRow(ctx, cpuQuery, agentID).Scan(
+		&cpu.Timestamp, &cpu.TotalUsagePct, &perCorePctStr,
+		&cpu.LoadAvg1m, &cpu.LoadAvg5m, &cpu.LoadAvg15m,
+		&cpu.FrequencyMHz, &cpu.ContextSwitches,
+		&cpu.PhysicalCores, &cpu.LogicalCores, &cpu.ModelName, &cpu.VendorID,
+	)
+	if err == nil {
+		cpu.AgentID = agentID
+		batch.CPU = []models.CPUMetrics{cpu}
+		batch.Timestamp = cpu.Timestamp
+	} else {
+		slog.Warn("warm fallback: no cpu metrics", "error", err, "agent_id", agentID)
+	}
+
+	// Query the latest memory metric.
+	memQuery := `SELECT timestamp, total_bytes, used_bytes, available_bytes, cached_bytes,
+		swap_total_bytes, swap_used_bytes,
+		pressure_some_avg10, pressure_some_avg60, pressure_some_avg300,
+		pressure_full_avg10, pressure_full_avg60, pressure_full_avg300
+		FROM memory_metrics WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT 1`
+	var mem models.MemoryMetrics
+	var pSome10, pSome60, pSome300, pFull10, pFull60, pFull300 float64
+	err = s.warm.Pool().QueryRow(ctx, memQuery, agentID).Scan(
+		&mem.Timestamp, &mem.TotalBytes, &mem.UsedBytes, &mem.AvailableBytes, &mem.CachedBytes,
+		&mem.SwapTotalBytes, &mem.SwapUsedBytes,
+		&pSome10, &pSome60, &pSome300, &pFull10, &pFull60, &pFull300,
+	)
+	if err == nil {
+		mem.AgentID = agentID
+		mem.Pressure = &models.MemoryPressure{
+			Some10: pSome10, Some60: pSome60, Some300: pSome300,
+			Full10: pFull10, Full60: pFull60, Full300: pFull300,
+		}
+		batch.Memory = []models.MemoryMetrics{mem}
+	} else {
+		slog.Warn("warm fallback: no memory metrics", "error", err, "agent_id", agentID)
+	}
+
+	return batch, nil
+}
+
+// getAllAgentsFromWarm queries QuestDB for distinct agent IDs and returns AgentInfo stubs.
+func (s *Store) getAllAgentsFromWarm(ctx context.Context) ([]models.AgentInfo, error) {
+	query := `SELECT DISTINCT agent_id FROM cpu_metrics ORDER BY agent_id`
+	rows, err := s.warm.Pool().Query(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("query agents from warm: %w", err)
+	}
+	defer rows.Close()
+
+	var agents []models.AgentInfo
+	for rows.Next() {
+		var agentID string
+		if err := rows.Scan(&agentID); err != nil {
+			continue
+		}
+		agents = append(agents, models.AgentInfo{
+			ID:     agentID,
+			Status: models.AgentStatusOnline,
+		})
+	}
+	return agents, rows.Err()
 }
 
 // QueryMetrics queries metrics from warm storage within a time range.
@@ -335,8 +421,17 @@ func (s *Store) GetAgentState(ctx context.Context, tenant, agentID string) (*mod
 }
 
 // GetAllAgentStates retrieves all agent states from hot storage.
+// Falls back to warm storage (QuestDB) if hot tier is unavailable or empty.
 func (s *Store) GetAllAgentStates(ctx context.Context, tenant string) ([]models.AgentInfo, error) {
-	return s.hot.GetAllAgentStates(ctx, tenant)
+	agents, err := s.hot.GetAllAgentStates(ctx, tenant)
+	if err == nil && len(agents) > 0 {
+		return agents, nil
+	}
+	if err != nil {
+		slog.Warn("hot tier get all agents failed, falling back to warm", "error", err)
+	}
+	// Fallback: query QuestDB for distinct agent IDs.
+	return s.getAllAgentsFromWarm(ctx)
 }
 
 // ---- Health Operations (Hot Tier) ----
@@ -375,9 +470,62 @@ func (s *Store) StoreEvents(ctx context.Context, events []models.Event) error {
 	return s.cold.StoreEvents(ctx, events)
 }
 
+// ---- Network Event Operations (Multi-Tier) ----
+
+// StoreNetworkEvents stores a batch of eBPF network events in the warm tier.
+// Events are written to QuestDB tables (tcp_events, dns_events, http_events)
+// via PG INSERT with circuit breaker protection.
+func (s *Store) StoreNetworkEvents(ctx context.Context, tenant string, batch *pb.NetworkEventBatch) error {
+	if !s.warmBreaker.Allow() {
+		slog.Warn("warm store circuit breaker open, skipping network event write",
+			"tenant", tenant,
+			"agent_id", batch.GetAgentId(),
+		)
+		return nil
+	}
+
+	if err := s.warm.InsertNetworkEvents(batch, tenant); err != nil {
+		s.warmBreaker.RecordFailure()
+		slog.Error("warm store network event write failed",
+			"error", err,
+			"tenant", tenant,
+			"agent_id", batch.GetAgentId(),
+		)
+		return err
+	}
+
+	s.warmBreaker.RecordSuccess()
+	return nil
+}
+
 // ---- Aggregation Operations (Warm Tier) ----
 
 // QueryAggregatedMetrics queries aggregated metrics from warm storage.
 func (s *Store) QueryAggregatedMetrics(ctx context.Context, agentID string, metricName string, window time.Duration, start, end time.Time) ([]models.AggregatedMetric, error) {
 	return s.warm.QueryAggregatedMetrics(ctx, agentID, metricName, window, start, end)
+}
+
+// ---- Network Event Query Operations (Warm Tier) ----
+
+// QueryNetworkEvents queries network events from warm storage (QuestDB).
+// Delegates to the warm client with circuit breaker protection.
+// If eventType is empty, all event types (tcp, dns, http) are queried and merged.
+func (s *Store) QueryNetworkEvents(ctx context.Context, agentID, eventType string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
+	if !s.warmBreaker.Allow() {
+		return nil, fmt.Errorf("warm store circuit breaker open")
+	}
+
+	events, err := s.warm.QueryNetworkEvents(ctx, agentID, eventType, start, end, limit)
+	if err != nil {
+		s.warmBreaker.RecordFailure()
+		slog.Error("warm store network event query failed",
+			"error", err,
+			"agent_id", agentID,
+			"event_type", eventType,
+		)
+		return nil, err
+	}
+
+	s.warmBreaker.RecordSuccess()
+	return events, nil
 }

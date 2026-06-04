@@ -1,0 +1,64 @@
+# Paryty Agent Configuration — WSL2 eBPF E2E Test
+
+agent:
+  id: "wsl2-ebpf-01"
+  cluster_endpoint: "192.168.16.1:50052"
+  api_key: ""
+  self_metrics:
+    enabled: true
+    port: 9101
+
+layers:
+  metal:
+    enabled: true
+    interval: "10s"
+    cpu_per_core: true
+    cpu_per_process: true
+    memory_rss: true
+    disk_io: true
+    network_io: true
+    process_tree: true
+    container_detection: true
+
+  ebpf:
+    enabled: true
+    tcp_connections: true
+    dns_resolution: true
+    http_inspection: true
+    db_inspection: false
+    exclude_ports: [22]
+    exclude_ips: ["127.0.0.1", "::1"]
+    ring_buffer_size_kb: 256
+    poll_interval_ms: 100
+    fallback_to_proc: true
+
+  supervisor:
+    enabled: false
+    health_checks: []
+    log_tailing: []
+
+communication:
+  protocol: grpc
+  tls:
+    enabled: false
+  compression: zstd
+  edge_buffer:
+    enabled: true
+    max_size_mb: 100
+    retention_hours: 24
+    sqlite_path: "paryty-ebpf-buffer.db"
+  flow_control:
+    backpressure_enabled: true
+    adaptive_sampling: true
+    priority_queues:
+      - name: "critical"
+        topics: ["alerts", "errors"]
+        priority: 1
+      - name: "normal"
+        topics: ["metrics", "traces"]
+        priority: 2
+
+logging:
+  level: info
+  format: json
+  output: stdout
