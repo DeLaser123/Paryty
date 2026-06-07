@@ -161,6 +161,7 @@ type TopologyUpdater interface {
 type SnapshotOperator interface {
 	TakeSnapshot(ctx context.Context, tenant string) (*cold.Snapshot, error)
 	GetSnapshot(ctx context.Context, tenant, id string) (*cold.Snapshot, error)
+	ListSnapshots(ctx context.Context, tenant string, start, end time.Time, limit int) ([]cold.SnapshotMeta, error)
 	ReconstructState(ctx context.Context, tenant string, target time.Time) (*cold.Snapshot, error)
 }
 
@@ -569,6 +570,16 @@ func (s *Store) StoreEvents(ctx context.Context, events []models.Event) error {
 	return s.cold.StoreEvents(ctx, events)
 }
 
+// QueryEvents queries system events from the events table within a time range.
+func (s *Store) QueryEvents(ctx context.Context, agentID, category, severity string, start, end time.Time, limit int) ([]models.Event, error) {
+	return s.warm.QueryEvents(ctx, agentID, category, severity, start, end, limit)
+}
+
+// GetDistinctMetricNames returns all distinct metric names from the warm store.
+func (s *Store) GetDistinctMetricNames(ctx context.Context) ([]string, error) {
+	return s.warm.GetDistinctMetricNames(ctx)
+}
+
 // ---- Network Event Operations (Multi-Tier) ----
 
 // StoreNetworkEvents stores a batch of eBPF network events in the warm tier.
@@ -721,6 +732,27 @@ func (s *Store) GetSnapshot(ctx context.Context, tenant, id string) (*cold.Snaps
 
 	s.coldBreaker.RecordSuccess()
 	return snapshot, nil
+}
+
+// ListSnapshots lists snapshot metadata for a tenant within the given time range.
+// Protected by the cold-tier circuit breaker.
+func (s *Store) ListSnapshots(ctx context.Context, tenant string, start, end time.Time, limit int) ([]cold.SnapshotMeta, error) {
+	if s.snapshotMgr == nil {
+		return nil, fmt.Errorf("snapshot manager not configured")
+	}
+
+	if !s.coldBreaker.Allow() {
+		return nil, fmt.Errorf("cold store circuit breaker open")
+	}
+
+	metas, err := s.snapshotMgr.ListSnapshots(ctx, tenant, start, end, limit)
+	if err != nil {
+		s.coldBreaker.RecordFailure()
+		return nil, err
+	}
+
+	s.coldBreaker.RecordSuccess()
+	return metas, nil
 }
 
 // ReconstructState reconstructs the system state at a given point in time

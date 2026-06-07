@@ -529,6 +529,13 @@ func (m *mockSnapshotOperator) ReconstructState(_ context.Context, _ string, _ t
 	return m.snapshot, nil
 }
 
+func (m *mockSnapshotOperator) ListSnapshots(_ context.Context, _ string, _, _ time.Time, _ int) ([]cold.SnapshotMeta, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return []cold.SnapshotMeta{}, nil
+}
+
 // mockQueryDownsampler implements QueryDownsampler for unit tests.
 type mockQueryDownsampler struct {
 	metrics []models.Metric

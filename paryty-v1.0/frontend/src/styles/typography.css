@@ -1,0 +1,87 @@
+/**
+ * Typography — Phase 5 T20.0
+ *
+ * Loads Geist Variable and Geist Mono fonts.
+ * Sets body and heading defaults using --aef-* tokens.
+ *
+ * Body is MONOSPACE (Geist Mono) per design system spec.
+ * Headings use Geist Variable (proportional) for readability.
+ */
+
+/* === Font imports === */
+@import '@fontsource-variable/geist/index.css';
+
+/* === Body defaults === */
+body {
+  font-family: var(--aef-font-body);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--aef-text-primary);
+  background: var(--aef-bg);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* === Headings === */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--aef-font-heading);
+  font-weight: 600;
+  color: var(--aef-text-primary);
+  line-height: 1.3;
+}
+
+h1 { font-size: 24px; }
+h2 { font-size: 18px; }
+h3 { font-size: 15px; }
+h4 { font-size: 13px; }
+h5 { font-size: 12px; }
+h6 { font-size: 11px; }
+
+/* === Body text === */
+p {
+  font-family: var(--aef-font-body);
+  font-size: 13px;
+  color: var(--aef-text-primary);
+  line-height: 1.5;
+}
+
+small {
+  font-size: 11px;
+  color: var(--aef-text-secondary);
+}
+
+/* === Code / Pre === */
+code,
+kbd,
+samp,
+pre {
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+}
+
+pre {
+  background: var(--aef-surface-low);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-field);
+  padding: var(--aef-space-3);
+  overflow-x: auto;
+}
+
+code {
+  padding: 2px 6px;
+  background: var(--aef-surface-mid);
+  border-radius: var(--aef-radius-xs);
+  font-size: 11px;
+}
+
+pre code {
+  padding: 0;
+  background: transparent;
+  border-radius: 0;
+}

@@ -1,10 +1,11 @@
 import type { Timestamp } from './common';
 import type { TopologyNode, TopologyEdge } from './topology';
 
-export type TimelineSpeed = 0.5 | 1 | 2 | 4 | 8 | 16;
+export type TimelineSpeed = 0.25 | 0.5 | 1 | 2 | 4 | 8 | 16;
 export type TimelineState = 'playing' | 'paused' | 'stopped';
 
 export interface TimelineSnapshot {
+  id: string;
   timestamp: Timestamp;
   nodes: TopologyNode[];
   edges: TopologyEdge[];
@@ -25,4 +26,10 @@ export interface TimelinePosition {
   progress: number; // 0-1
   state: TimelineState;
   speed: TimelineSpeed;
+}
+
+export interface TimelineBookmark {
+  id: string;
+  timestamp: Timestamp;
+  label: string;
 }

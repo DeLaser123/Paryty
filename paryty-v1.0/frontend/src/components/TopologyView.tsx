@@ -1,11 +1,15 @@
 ﻿import { useRef, useEffect } from 'react';
 import { useTopology } from '../hooks/useTopology';
+import { useTopologyStore } from '../stores/topologyStore';
 import { TopologyRenderer } from '../engine/renderer';
 
 export default function TopologyView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<TopologyRenderer | null>(null);
-  const topology = useTopology();
+  const { topology, isLoading, error } = useTopology();
+  const searchQuery = useTopologyStore((s) => s.searchQuery);
+  const setSearchQuery = useTopologyStore((s) => s.setSearchQuery);
+  const selectedNode = useTopologyStore((s) => s.selectedNode);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -31,10 +35,10 @@ export default function TopologyView() {
   }, []);
 
   useEffect(() => {
-    if (topology.topology && rendererRef.current) {
-      rendererRef.current.update(topology.topology);
+    if (topology && rendererRef.current) {
+      rendererRef.current.update(topology);
     }
-  }, [topology.topology]);
+  }, [topology]);
 
   return (
     <div className="view-container">
@@ -44,20 +48,20 @@ export default function TopologyView() {
           <input
             type="text"
             placeholder="Search nodes..."
-            value={topology.searchQuery}
-            onChange={(e) => topology.setSearchQuery(e.target.value)}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
           />
-          {topology.isLoading && <span className="loading-indicator">Loading...</span>}
-          {topology.error && <span className="error-indicator">{topology.error}</span>}
+          {isLoading && <span className="loading-indicator">Loading...</span>}
+          {error && <span className="error-indicator">{error}</span>}
         </div>
       </div>
       <div ref={containerRef} className="topology-canvas" />
-      {topology.selectedNode && (
+      {selectedNode && (
         <div className="detail-panel">
-          <h3>{topology.selectedNode.name}</h3>
-          <p>Type: {topology.selectedNode.type}</p>
-          <p>Status: {topology.selectedNode.status}</p>
-          <pre>{JSON.stringify(topology.selectedNode.labels, null, 2)}</pre>
+          <h3>{selectedNode.name}</h3>
+          <p>Type: {selectedNode.type}</p>
+          <p>Status: {selectedNode.status}</p>
+          <pre>{JSON.stringify(selectedNode.labels, null, 2)}</pre>
         </div>
       )}
     </div>

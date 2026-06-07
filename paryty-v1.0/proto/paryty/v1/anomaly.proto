@@ -1,0 +1,174 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+
+// AnomalyDetectionService provides ML-powered anomaly detection.
+service AnomalyDetectionService {
+  // Detect anomalies in a single metric.
+  rpc DetectAnomalies(DetectAnomaliesRequest) returns (DetectAnomaliesResponse);
+
+  // Detect anomalies across multiple metrics (cross-metric).
+  rpc DetectCrossMetricAnomalies(DetectCrossMetricRequest) returns (DetectCrossMetricResponse);
+
+  // Get anomaly explanation.
+  rpc ExplainAnomaly(ExplainAnomalyRequest) returns (ExplainAnomalyResponse);
+
+  // Get detection model status.
+  rpc GetDetectionStatus(GetDetectionStatusRequest) returns (GetDetectionStatusResponse);
+}
+
+// DetectAnomaliesRequest requests anomaly detection on a single metric.
+message DetectAnomaliesRequest {
+  // Agent to check.
+  string agent_id = 1;
+  // Tenant scope.
+  string tenant_id = 2;
+  // Metric name.
+  string metric_name = 3;
+  // Recent values (last N data points).
+  repeated float values = 4;
+  // Corresponding timestamps (Unix seconds).
+  repeated int64 timestamps = 5;
+  // Detection sensitivity: 0.0 (less sensitive) to 1.0 (more sensitive). Default: 0.5.
+  float sensitivity = 6;
+}
+
+// DetectAnomaliesResponse contains detected anomalies.
+message DetectAnomaliesResponse {
+  // Agent checked.
+  string agent_id = 1;
+  // Tenant scope.
+  string tenant_id = 2;
+  // Metric name.
+  string metric_name = 3;
+  // Detected anomalies.
+  repeated Anomaly anomalies = 4;
+  // Overall anomaly score: 0.0 (normal) to 1.0 (highly anomalous).
+  float overall_score = 5;
+}
+
+// Anomaly represents a detected anomaly.
+message Anomaly {
+  // Timestamp of the anomaly.
+  int64 timestamp = 1;
+  // Anomalous value.
+  float value = 2;
+  // Anomaly score: 0.0 - 1.0.
+  float score = 3;
+  // Type of anomaly.
+  AnomalyType type = 4;
+  // Human-readable explanation.
+  string explanation = 5;
+  // Contributing factors.
+  repeated string contributing_factors = 6;
+  // Detection method that found this anomaly.
+  string detection_method = 7;
+  // Severity estimate.
+  Severity severity = 8;
+}
+
+// AnomalyType classifies the type of anomaly.
+enum AnomalyType {
+  ANOMALY_TYPE_UNSPECIFIED = 0;
+  // Single value anomaly (spike or dip).
+  ANOMALY_TYPE_POINT = 1;
+  // Unusual given surrounding context.
+  ANOMALY_TYPE_CONTEXTUAL = 2;
+  // Pattern anomaly across multiple points.
+  ANOMALY_TYPE_COLLECTIVE = 3;
+  // Trend change (slope shift).
+  ANOMALY_TYPE_TREND = 4;
+}
+
+// DetectCrossMetricRequest requests cross-metric anomaly detection.
+message DetectCrossMetricRequest {
+  // Agent to check.
+  string agent_id = 1;
+  // Tenant scope.
+  string tenant_id = 2;
+  // Map of metric_name -> values.
+  map<string, FloatArray> metrics = 3;
+  // Corresponding timestamps (Unix seconds).
+  repeated int64 timestamps = 4;
+}
+
+// FloatArray wraps a repeated float for use in maps.
+message FloatArray {
+  repeated float values = 1;
+}
+
+// DetectCrossMetricResponse contains cross-metric anomalies.
+message DetectCrossMetricResponse {
+  // Individual anomalies.
+  repeated Anomaly anomalies = 1;
+  // Cross-metric correlation anomalies.
+  repeated CorrelationAnomaly correlation_anomalies = 2;
+}
+
+// CorrelationAnomaly represents an anomaly in metric correlations.
+message CorrelationAnomaly {
+  // First metric in the correlation.
+  string metric_a = 1;
+  // Second metric in the correlation.
+  string metric_b = 2;
+  // Human-readable description (e.g., "CPU spike without memory increase").
+  string description = 3;
+  // Severity: 0.0 - 1.0.
+  float severity = 4;
+}
+
+// ExplainAnomalyRequest requests an explanation for a specific anomaly.
+message ExplainAnomalyRequest {
+  // Agent the anomaly occurred on.
+  string agent_id = 1;
+  // Tenant scope.
+  string tenant_id = 2;
+  // Metric name.
+  string metric_name = 3;
+  // Timestamp of the anomaly.
+  int64 timestamp = 4;
+}
+
+// ExplainAnomalyResponse provides a detailed anomaly explanation.
+message ExplainAnomalyResponse {
+  // The anomaly with full details.
+  Anomaly anomaly = 1;
+  // Similar past incidents.
+  repeated string similar_incidents = 2;
+  // Recommended actions.
+  repeated string recommendations = 3;
+}
+
+// GetDetectionStatusRequest requests the status of detection models.
+message GetDetectionStatusRequest {
+  // Tenant scope.
+  string tenant_id = 1;
+}
+
+// GetDetectionStatusResponse contains model status information.
+message GetDetectionStatusResponse {
+  // Map of model_name -> status.
+  map<string, ModelStatus> models = 1;
+  // Last training timestamp.
+  int64 last_training = 2;
+  // Anomalies detected in last 24 hours.
+  int32 anomalies_detected_24h = 3;
+  // Current false positive rate estimate.
+  float false_positive_rate = 4;
+}
+
+// ModelStatus represents the status of a single detection model.
+message ModelStatus {
+  // Model name.
+  string name = 1;
+  // Whether the model is trained and ready.
+  bool trained = 2;
+  // Model accuracy (0.0 - 1.0).
+  float accuracy = 3;
+  // Last update timestamp.
+  int64 last_updated = 4;
+}

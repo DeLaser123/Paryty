@@ -5,3 +5,7 @@ export * from './trace';
 export * from './event';
 export * from './alert';
 export * from './timeline';
+export * from './particle';
+export * from './agent';
+export * from './network';
+export * from './agentMetrics';

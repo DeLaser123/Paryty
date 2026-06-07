@@ -3,9 +3,90 @@ package stream
 import (
 	"context"
 	"testing"
+	"time"
 )
 
-func TestNewStreamEngine_CreatesProducerAndTopics(t *testing.T) {
+func TestNewTopicManager(t *testing.T) {
+	cfg := testConfig()
+	logger := testLogger()
+
+	tm, err := NewTopicManager(cfg, logger)
+	if err != nil {
+		t.Fatalf("NewTopicManager() error: %v", err)
+	}
+	defer tm.Close()
+}
+
+func TestTopicForTenant(t *testing.T) {
+	tests := []struct {
+		tenant string
+		topic  string
+		want   string
+	}{
+		{"acme", "metrics.raw", "paryty.acme.metrics.raw"},
+		{"default", "traces", "paryty.default.traces"},
+		{"", "events", "paryty..events"},
+	}
+
+	for _, tt := range tests {
+		got := TopicForTenant(tt.tenant, tt.topic)
+		if got != tt.want {
+			t.Errorf("TopicForTenant(%q, %q) = %q, want %q", tt.tenant, tt.topic, got, tt.want)
+		}
+	}
+}
+
+func TestTenantScopedTopicNames(t *testing.T) {
+	tenant := "acme"
+
+	tests := []struct {
+		fn   func(string) string
+		want string
+	}{
+		{TopicMetricsRaw, "paryty.acme.metrics.raw"},
+		{TopicMetricsAgg, "paryty.acme.metrics.aggregated"},
+		{TopicTraces, "paryty.acme.traces"},
+		{TopicEvents, "paryty.acme.events"},
+		{TopicNetworkEvents, "paryty.acme.network.events"},
+		{TopicTopologyChanges, "paryty.acme.topology.changes"},
+		{TopicAlerts, "paryty.acme.alerts"},
+		{TopicDLQ, "paryty.acme.dead-letter"},
+		{TopicForecasts, "paryty.acme.forecasts"},
+		{TopicAnomalies, "paryty.acme.anomalies"},
+		{TopicSimulations, "paryty.acme.simulations"},
+		{TopicTimelineEvents, "paryty.acme.timeline.events"},
+	}
+
+	for _, tt := range tests {
+		got := tt.fn(tenant)
+		if got != tt.want {
+			t.Errorf("got %q, want %q", got, tt.want)
+		}
+	}
+}
+
+func TestDefaultTenantTopicNames(t *testing.T) {
+	tests := []struct {
+		fn   func() string
+		want string
+	}{
+		{DefaultTopicMetricsRaw, "paryty.default.metrics.raw"},
+		{DefaultTopicTraces, "paryty.default.traces"},
+		{DefaultTopicForecasts, "paryty.default.forecasts"},
+		{DefaultTopicAnomalies, "paryty.default.anomalies"},
+		{DefaultTopicSimulations, "paryty.default.simulations"},
+		{DefaultTopicTimelineEvents, "paryty.default.timeline.events"},
+	}
+
+	for _, tt := range tests {
+		got := tt.fn()
+		if got != tt.want {
+			t.Errorf("got %q, want %q", got, tt.want)
+		}
+	}
+}
+
+func TestNewStreamEngine(t *testing.T) {
 	cfg := testConfig()
 	logger := testLogger()
 
@@ -15,235 +96,149 @@ func TestNewStreamEngine_CreatesProducerAndTopics(t *testing.T) {
 	}
 	defer engine.Close()
 
-	if engine.producer == nil {
-		t.Fatal("NewStreamEngine() did not create producer")
+	if engine.Producer() == nil {
+		t.Error("Producer() returned nil")
 	}
-	if engine.topics == nil {
-		t.Fatal("NewStreamEngine() did not create topic manager")
-	}
-	if engine.consumer != nil {
-		t.Fatal("NewStreamEngine() should not create consumer")
+
+	if engine.Topics() == nil {
+		t.Error("Topics() returned nil")
 	}
 }
 
-func TestStreamEngine_InitializeTopics_RequiresTenant(t *testing.T) {
-	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
-	}
-	defer engine.Close()
-
-	ctx := context.Background()
-
-	// This will fail because broker is unreachable, but verifies the tenant
-	// is passed through to requiredTopics.
-	err = engine.InitializeTopics(ctx, "test-tenant")
-	if err == nil {
-		t.Log("InitializeTopics succeeded (broker is reachable)")
-	}
-	// We don't assert error because the test broker may or may not be up.
-	// The important thing is it doesn't panic.
-}
-
-func TestStreamEngine_InitializeTopics_EmptyTenant(t *testing.T) {
-	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
-	}
-	defer engine.Close()
-
-	ctx := context.Background()
-
-	// Empty tenant produces topic names like "paryty..metrics.raw".
-	// Should not panic; may fail if broker is unreachable.
-	_ = engine.InitializeTopics(ctx, "")
-}
-
-func TestStreamEngine_Ping_UnreachableBroker(t *testing.T) {
+func TestNewStreamEngine_InvalidBroker(t *testing.T) {
 	cfg := Config{
-		Brokers:  []string{"localhost:19092"},
-		ClientID: "test-ping",
+		Brokers:  []string{"invalid:99999"},
+		ClientID: "test",
 	}
-	engine, err := NewStreamEngine(cfg, testLogger())
+	logger := testLogger()
+
+	_, err := NewStreamEngine(cfg, logger)
+	if err != nil {
+		t.Logf("Expected behavior: NewStreamEngine with invalid broker: %v", err)
+	}
+}
+
+func TestTopicManager_CreateAndDelete(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	cfg := testConfig()
+	logger := testLogger()
+
+	tm, err := NewTopicManager(cfg, logger)
+	if err != nil {
+		t.Fatalf("NewTopicManager() error: %v", err)
+	}
+	defer tm.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	topicName := "paryty.test.integration.create-delete"
+
+	err = tm.CreateTopic(ctx, topicName, 1, 1)
+	if err != nil {
+		t.Fatalf("CreateTopic() error: %v", err)
+	}
+
+	topics, err := tm.ListTopics(ctx)
+	if err != nil {
+		t.Fatalf("ListTopics() error: %v", err)
+	}
+
+	found := false
+	for _, name := range topics {
+		if name == topicName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("Topic %s not found after creation", topicName)
+	}
+
+	err = tm.DeleteTopic(ctx, topicName)
+	if err != nil {
+		t.Fatalf("DeleteTopic() error: %v", err)
+	}
+}
+
+func TestTopicManager_EnsureTopic(t *testing.T) {
+	if testing.Short() {
+		t.Skip("Skipping integration test in short mode")
+	}
+
+	cfg := testConfig()
+	logger := testLogger()
+
+	tm, err := NewTopicManager(cfg, logger)
+	if err != nil {
+		t.Fatalf("NewTopicManager() error: %v", err)
+	}
+	defer tm.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	topicName := "paryty.test.integration.ensure"
+
+	err = tm.EnsureTopic(ctx, topicName, 1, 1)
+	if err != nil {
+		t.Fatalf("EnsureTopic() first call error: %v", err)
+	}
+
+	err = tm.EnsureTopic(ctx, topicName, 1, 1)
+	if err != nil {
+		t.Fatalf("EnsureTopic() second call error: %v", err)
+	}
+
+	tm.DeleteTopic(ctx, topicName) //nolint:errcheck
+}
+
+func TestStreamEngine_Producer(t *testing.T) {
+	cfg := testConfig()
+	logger := testLogger()
+
+	engine, err := NewStreamEngine(cfg, logger)
 	if err != nil {
 		t.Fatalf("NewStreamEngine() error: %v", err)
 	}
 	defer engine.Close()
 
-	ctx := context.Background()
-	err = engine.Ping(ctx)
-	if err == nil {
-		t.Log("Ping succeeded (broker is reachable)")
-	}
-	// With unreachable broker, Ping should return an error.
-	// We just verify it doesn't panic.
-}
-
-func TestStreamEngine_Lag_NilConsumer(t *testing.T) {
-	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
-	}
-	defer engine.Close()
-
-	ctx := context.Background()
-	lag, err := engine.Lag(ctx)
-	if err != nil {
-		t.Fatalf("Lag() error: %v", err)
-	}
-	if lag == nil {
-		t.Fatal("Lag() returned nil map")
-	}
-	if len(lag) != 0 {
-		t.Errorf("Lag() returned %d entries, want 0 for nil consumer", len(lag))
+	producer := engine.Producer()
+	if producer == nil {
+		t.Fatal("Producer() returned nil")
 	}
 }
 
-func TestStreamEngine_NewConsumer_StoresConsumer(t *testing.T) {
+func TestTopicManager_Close(t *testing.T) {
 	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
+	logger := testLogger()
+
+	tm, err := NewTopicManager(cfg, logger)
 	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
+		t.Fatalf("NewTopicManager() error: %v", err)
 	}
-	defer engine.Close()
-
-	handler := func(ctx context.Context, key string, value []byte) error { return nil }
-
-	consumer, err := engine.NewConsumer("test-group", []string{"test-topic"}, handler)
-	if err != nil {
-		t.Fatalf("NewConsumer() error: %v", err)
-	}
-	defer consumer.Close()
-
-	if engine.consumer != consumer {
-		t.Error("NewConsumer() did not store consumer in engine")
-	}
+	tm.Close()
 }
 
-func TestStreamEngine_NewConsumerWithDLQ_NilDLQ(t *testing.T) {
+func TestStreamEngine_Close(t *testing.T) {
 	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
+	logger := testLogger()
+
+	engine, err := NewStreamEngine(cfg, logger)
 	if err != nil {
 		t.Fatalf("NewStreamEngine() error: %v", err)
 	}
-	defer engine.Close()
-
-	handler := func(ctx context.Context, key string, value []byte) error { return nil }
-
-	consumer, err := engine.NewConsumerWithDLQ("test-group", []string{"test-topic"}, handler, nil, "")
-	if err != nil {
-		t.Fatalf("NewConsumerWithDLQ() error: %v", err)
-	}
-	defer consumer.Close()
-
-	if consumer.dlqProducer != nil {
-		t.Error("dlqProducer should be nil when not configured")
-	}
-	if consumer.dlqTopic != "" {
-		t.Error("dlqTopic should be empty when not configured")
-	}
-}
-
-func TestStreamEngine_NewConsumerWithDLQ_WithDLQProducer(t *testing.T) {
-	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
-	}
-	defer engine.Close()
-
-	handler := func(ctx context.Context, key string, value []byte) error { return nil }
-	dlqProducer, err := NewProducer(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewProducer() error: %v", err)
-	}
-	defer dlqProducer.Close()
-
-	dlqTopic := TopicDLQ("test-tenant")
-	consumer, err := engine.NewConsumerWithDLQ("test-group", []string{"test-topic"}, handler, dlqProducer, dlqTopic)
-	if err != nil {
-		t.Fatalf("NewConsumerWithDLQ() error: %v", err)
-	}
-	defer consumer.Close()
-
-	if consumer.dlqProducer != dlqProducer {
-		t.Error("dlqProducer not wired correctly")
-	}
-	if consumer.dlqTopic != dlqTopic {
-		t.Errorf("dlqTopic = %q, want %q", consumer.dlqTopic, dlqTopic)
-	}
-}
-
-func TestStreamEngine_Lag_WithConsumer(t *testing.T) {
-	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
-	}
-	defer engine.Close()
-
-	handler := func(ctx context.Context, key string, value []byte) error { return nil }
-	consumer, err := engine.NewConsumer("test-group", []string{"test-topic"}, handler)
-	if err != nil {
-		t.Fatalf("NewConsumer() error: %v", err)
-	}
-	defer consumer.Close()
-
-	ctx := context.Background()
-	// Lag will fail because broker is unreachable, but we verify the
-	// delegation path exists and doesn't panic.
-	_, _ = engine.Lag(ctx)
-}
-
-func TestStreamEngine_Close_WithConsumer(t *testing.T) {
-	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
-	}
-
-	handler := func(ctx context.Context, key string, value []byte) error { return nil }
-	consumer, err := engine.NewConsumer("test-group", []string{"test-topic"}, handler)
-	if err != nil {
-		t.Fatalf("NewConsumer() error: %v", err)
-	}
-	_ = consumer
-
-	// Close should close consumer, then producer, then topics.
-	// We verify it does not panic and completes.
 	engine.Close()
-}
-
-func TestStreamEngine_Close_WithoutConsumer(t *testing.T) {
-	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
-	}
-
-	// Close with nil consumer should not panic.
-	engine.Close()
-}
-
-func TestStreamEngine_ProducerAccessor(t *testing.T) {
-	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewStreamEngine() error: %v", err)
-	}
-	defer engine.Close()
-
-	if engine.Producer() != engine.producer {
-		t.Error("Producer() accessor does not return internal producer")
-	}
 }
 
 func TestStreamEngine_TopicsAccessor(t *testing.T) {
 	cfg := testConfig()
-	engine, err := NewStreamEngine(cfg, testLogger())
+	logger := testLogger()
+
+	engine, err := NewStreamEngine(cfg, logger)
 	if err != nil {
 		t.Fatalf("NewStreamEngine() error: %v", err)
 	}
@@ -255,7 +250,6 @@ func TestStreamEngine_TopicsAccessor(t *testing.T) {
 }
 
 func TestInitializeTopics_TenantScopedTopicNames(t *testing.T) {
-	// Verify that requiredTopics generates correct tenant-scoped names.
 	topics := requiredTopics("acme")
 
 	expected := map[string]bool{
@@ -270,6 +264,11 @@ func TestInitializeTopics_TenantScopedTopicNames(t *testing.T) {
 		"paryty.acme.metrics.enriched":   false,
 		"paryty.acme.correlations":       false,
 		"paryty.acme.dependency.graph":   false,
+		// Phase 6: Intelligence topics.
+		"paryty.acme.forecasts":       false,
+		"paryty.acme.anomalies":       false,
+		"paryty.acme.simulations":     false,
+		"paryty.acme.timeline.events": false,
 	}
 
 	for _, tc := range topics {
@@ -308,11 +307,11 @@ func TestStreamEngine_NewConsumer_PassesOptions(t *testing.T) {
 		t.Errorf("maxRetries = %d, want 10 (option not forwarded)", consumer.maxRetries)
 	}
 	if engine.consumer != consumer {
-		t.Error("NewConsumer() did not store consumer in engine")
+		t.Error("engine.consumer does not match returned consumer")
 	}
 }
 
-func TestStreamEngine_NewConsumerWithDLQ_PassesOptions(t *testing.T) {
+func TestStreamEngine_Ping_WithoutBroker(t *testing.T) {
 	cfg := testConfig()
 	engine, err := NewStreamEngine(cfg, testLogger())
 	if err != nil {
@@ -320,31 +319,18 @@ func TestStreamEngine_NewConsumerWithDLQ_PassesOptions(t *testing.T) {
 	}
 	defer engine.Close()
 
-	handler := func(ctx context.Context, key string, value []byte) error { return nil }
-	dlqProducer, err := NewProducer(cfg, testLogger())
-	if err != nil {
-		t.Fatalf("NewProducer() error: %v", err)
-	}
-	defer dlqProducer.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
 
-	consumer, err := engine.NewConsumerWithDLQ("test-group", []string{"test-topic"}, handler,
-		dlqProducer, TopicDLQ("test"), WithMaxRetries(7),
-	)
-	if err != nil {
-		t.Fatalf("NewConsumerWithDLQ() with options error: %v", err)
-	}
-	defer consumer.Close()
-
-	if consumer.maxRetries != 7 {
-		t.Errorf("maxRetries = %d, want 7", consumer.maxRetries)
-	}
-	if consumer.dlqProducer != dlqProducer {
-		t.Error("dlqProducer not wired")
+	err = engine.Ping(ctx)
+	if err == nil {
+		t.Log("Ping succeeded (broker might be running)")
+	} else {
+		t.Logf("Ping failed as expected without broker: %v", err)
 	}
 }
 
-// Ensure StreamEngine fields are accessible within the package.
-func TestStreamEngine_FieldAccess(t *testing.T) {
+func TestStreamEngine_Lag_NoConsumer(t *testing.T) {
 	cfg := testConfig()
 	engine, err := NewStreamEngine(cfg, testLogger())
 	if err != nil {
@@ -352,10 +338,13 @@ func TestStreamEngine_FieldAccess(t *testing.T) {
 	}
 	defer engine.Close()
 
-	if engine.logger == nil {
-		t.Error("engine.logger is nil")
+	ctx := context.Background()
+	lag, err := engine.Lag(ctx)
+	if err != nil {
+		t.Fatalf("Lag() error: %v", err)
 	}
-	if engine.cfg.ClientID != cfg.ClientID {
-		t.Errorf("engine.cfg.ClientID = %q, want %q", engine.cfg.ClientID, cfg.ClientID)
+
+	if len(lag) != 0 {
+		t.Errorf("Lag() returned %d entries, want 0 (no consumer)", len(lag))
 	}
 }

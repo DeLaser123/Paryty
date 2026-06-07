@@ -1,0 +1,299 @@
+# Paryty Cluster Configuration
+
+cluster:
+  name: "paryty-prod"
+  tenant: "default"
+
+  # Ingestion layer
+  ingestion:
+    # Runtime connection config (read by internal/config package)
+    # NOTE: Changed from 50051 to 50052 because Multipass occupies 50051
+    port: 50052
+    tls: false
+    max_connections: 10000
+    # Deployment topology
+    replicas: 3
+    resources:
+      cpu: "2"
+      memory: "4Gi"
+    grpc:
+      port: 443
+      tls: true
+      max_connections: 10000
+
+  # Stream engine (runtime connection config)
+  stream:
+    brokers:
+      - "localhost:9092"
+    client_id: "paryty-cluster"
+    topics:
+      - name: "paryty.metrics.raw"
+        partitions: 12
+        retention: "7d"
+      - name: "paryty.metrics.aggregated"
+        partitions: 6
+        retention: "30d"
+      - name: "paryty.traces"
+        partitions: 12
+        retention: "7d"
+      - name: "paryty.topology"
+        partitions: 3
+        retention: "90d"
+
+  # Stream engine (deployment topology)
+  stream_engine:
+    type: "redpanda"
+    replicas: 3
+    storage:
+      class: "ssd"
+      size: "100Gi"
+    topics:
+      - name: "paryty.metrics.raw"
+        partitions: 12
+        retention: "7d"
+      - name: "paryty.metrics.aggregated"
+        partitions: 6
+        retention: "30d"
+      - name: "paryty.traces"
+        partitions: 12
+        retention: "7d"
+      - name: "paryty.topology"
+        partitions: 3
+        retention: "90d"
+
+  # Processing layer
+  processing:
+    pipeline:
+      consumer_group: "paryty-pipeline"
+      input_topics:
+        - "paryty.default.metrics.raw"
+        - "paryty.default.network.events"
+        - "paryty.default.traces"
+        - "paryty.default.events"
+        - "paryty.acme.metrics.raw"
+        - "paryty.acme.network.events"
+        - "paryty.acme.traces"
+        - "paryty.acme.events"
+        - "paryty.tenant1.metrics.raw"
+        - "paryty.tenant1.network.events"
+        - "paryty.tenant1.traces"
+        - "paryty.tenant1.events"
+        - "paryty.tenant-b.metrics.raw"
+        - "paryty.tenant-b.network.events"
+        - "paryty.tenant-b.traces"
+        - "paryty.tenant-b.events"
+        - "paryty.gai-tech.metrics.raw"
+        - "paryty.gai-tech.network.events"
+        - "paryty.gai-tech.traces"
+        - "paryty.gai-tech.events"
+      batch_size: 100
+      batch_timeout: "1s"
+      health_check_interval: "10s"
+
+    aggregator:
+      # Deployment topology
+      replicas: 2
+      resources:
+        cpu: "4"
+        memory: "8Gi"
+      # Runtime config
+      window_sizes:
+        - "1m"
+        - "5m"
+        - "1h"
+        - "1d"
+      grace_period: "30s"
+      snapshot_interval: "30s"
+      top_n_size: 10
+
+    correlator:
+      # Deployment topology
+      replicas: 2
+      resources:
+        cpu: "4"
+        memory: "8Gi"
+      # Runtime config
+      stale_node_timeout: "5m"
+      graph_snapshot_interval: "60s"
+      event_buffer_size: 10000
+      correlation_window: "30s"
+
+    enricher:
+      # Deployment topology
+      replicas: 1
+      resources:
+        cpu: "2"
+        memory: "4Gi"
+      # Runtime config
+      standard_label_keys:
+        - "env"
+        - "region"
+        - "team"
+        - "service"
+        - "version"
+      max_labels_per_metric: 20
+      label_prefix: "agent."
+
+    downsampler:
+      rules:
+        - source_window: "1m"
+          target_window: "5m"
+          retention_days: 7
+        - source_window: "5m"
+          target_window: "1h"
+          retention_days: 30
+        - source_window: "1h"
+          target_window: "1d"
+          retention_days: 90
+      run_interval: "1h"
+
+  # Storage layer
+  storage:
+    hot:
+      # Runtime connection config
+      addr: "host.containers.internal:6379"
+      password: ""
+      db: 0
+      pool_size: 10
+      ttl: "5m"
+      topology:
+        lock_retries: 3
+        lock_backoff_ms: 10
+      metrics:
+        sorted_set_ttl: "5m"
+        purge_interval: "1m"
+      alerts:
+        dedup_enabled: true
+      connections:
+        heartbeat_ttl: "30s"
+        disconnect_threshold: "60s"
+      # Deployment topology
+      type: "dragonfly"
+      replicas: 1
+      memory: "16Gi"
+    warm:
+      # Runtime connection config
+      addr: "host.containers.internal:8812"
+      ilp_addr: "host.containers.internal:9009"
+      database: "paryty"
+      username: "admin"
+      password: "quest"
+      max_conns: 20
+      ilp:
+        addr: "host.containers.internal:9009"
+        buffer_size: 10000
+        flush_interval: "1s"
+      rest:
+        endpoint: "http://questdb:9000"
+      schema:
+        auto_migrate: true
+      retention:
+        run_interval: "1h"
+        rules:
+          - table: "cpu_metrics"
+            max_age_days: 30
+            archive_to_cold: true
+          - table: "memory_metrics"
+            max_age_days: 30
+            archive_to_cold: true
+          - table: "disk_metrics"
+            max_age_days: 30
+            archive_to_cold: true
+          - table: "network_metrics"
+            max_age_days: 30
+            archive_to_cold: true
+          - table: "process_metrics"
+            max_age_days: 7
+            archive_to_cold: false
+          - table: "container_metrics"
+            max_age_days: 7
+            archive_to_cold: false
+          - table: "aggregated_metrics"
+            max_age_days: 90
+            archive_to_cold: true
+          - table: "spans"
+            max_age_days: 14
+            archive_to_cold: true
+          - table: "db_queries"
+            max_age_days: 14
+            archive_to_cold: true
+          - table: "topology_snapshots"
+            max_age_days: 7
+            archive_to_cold: true
+      # Deployment topology
+      type: "questdb"
+      replicas: 1
+      storage:
+        class: "ssd"
+        size: "500Gi"
+    cold:
+      # Runtime connection config
+      endpoint: "host.containers.internal:8333"
+      access_key: "minioadmin"
+      secret_key: "minioadmin"
+      use_ssl: false
+      region: "us-east-1"
+      bucket: "paryty-cold-storage"
+      snapshots:
+        interval: "5m"
+        compression: true
+        retention_days: 7
+      cache:
+        enabled: true
+        max_entries: 100
+        ttl: "1h"
+      # Deployment topology
+      type: "seaweedfs"
+      retention: "1y"
+
+  # Rate limiting
+  rate_limit:
+    max_batches_per_minute: 10000
+
+  # Flow control
+  flow_control:
+    desired_interval_ms: 10000
+    sampling_rate: 1.0
+
+  # Query layer
+  query:
+    replicas: 2
+    resources:
+      cpu: "2"
+      memory: "4Gi"
+    cache:
+      type: "dragonfly"
+      ttl: "5m"
+
+  # Intelligence layer
+  intelligence:
+    forecasting:
+      enabled: true
+      models:
+        - prophet
+        - neural_prophet
+        - linear_regression
+      forecast_horizon: "7d"
+    anomaly_detection:
+      enabled: true
+      methods:
+        - z_score
+        - isolation_forest
+        - lstm
+    simulation:
+      enabled: true
+      integrations:
+        - gremlin
+        - litmuschaos
+        - k6
+    timeline:
+      enabled: true
+      snapshot_interval: "5m"
+      retention: "1y"
+
+# Tenant configuration
+tenant:
+  auth:
+    enabled: true
+    api_key_header: "x-api-key"
+  fallback_tenant: "default"

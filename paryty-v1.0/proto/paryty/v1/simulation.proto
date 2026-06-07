@@ -1,0 +1,201 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "paryty/v1/common.proto";
+
+// SimulationService provides what-if analysis and chaos engineering.
+service SimulationService {
+  // Run a what-if scenario.
+  rpc RunScenario(RunScenarioRequest) returns (RunScenarioResponse);
+
+  // List available scenarios.
+  rpc ListScenarios(ListScenariosRequest) returns (ListScenariosResponse);
+
+  // Get scenario execution status.
+  rpc GetScenarioStatus(GetScenarioStatusRequest) returns (GetScenarioStatusResponse);
+
+  // Cancel a running scenario.
+  rpc CancelScenario(CancelScenarioRequest) returns (CancelScenarioResponse);
+}
+
+// RunScenarioRequest starts a what-if simulation.
+message RunScenarioRequest {
+  // Scenario definition.
+  WhatIfScenario scenario = 1;
+  // Tenant scope.
+  string tenant_id = 2;
+}
+
+// RunScenarioResponse contains simulation results.
+message RunScenarioResponse {
+  // Scenario execution result.
+  SimulationResult result = 1;
+}
+
+// WhatIfScenario defines a simulation scenario.
+message WhatIfScenario {
+  // Unique scenario ID.
+  string id = 1;
+  // Human-readable name.
+  string name = 2;
+  // Description of the scenario.
+  string description = 3;
+  // Infrastructure changes to simulate.
+  repeated InfraChange changes = 4;
+  // Traffic pattern for the simulation.
+  TrafficPattern traffic = 5;
+  // Simulation duration.
+  google.protobuf.Duration duration = 6;
+  // Metrics to track during simulation.
+  repeated string metrics = 7;
+  // Tags for categorization.
+  map<string, string> tags = 8;
+}
+
+// InfraChange represents a proposed infrastructure change.
+message InfraChange {
+  // Type of resource to change.
+  ChangeType type = 1;
+  // Target service/host/container.
+  string target = 2;
+  // Action: "add", "remove", "scale".
+  string action = 3;
+  // Number of instances.
+  int32 count = 4;
+  // Additional configuration.
+  map<string, string> config = 5;
+}
+
+// ChangeType classifies the type of infrastructure change.
+enum ChangeType {
+  CHANGE_TYPE_UNSPECIFIED = 0;
+  CHANGE_TYPE_HOST = 1;
+  CHANGE_TYPE_CONTAINER = 2;
+  CHANGE_TYPE_SERVICE = 3;
+  CHANGE_TYPE_NETWORK = 4;
+}
+
+// TrafficPattern defines simulated traffic.
+message TrafficPattern {
+  // Traffic type.
+  TrafficType type = 1;
+  // Requests per second.
+  int32 rps = 2;
+  // Duration of the traffic pattern.
+  google.protobuf.Duration duration = 3;
+  // Traffic profile: "steady", "ramp", "spike", "wave".
+  string profile = 4;
+}
+
+// TrafficType classifies traffic source.
+enum TrafficType {
+  TRAFFIC_TYPE_UNSPECIFIED = 0;
+  TRAFFIC_TYPE_SIMULATED = 1;
+  // V2.0: production traffic replay
+  TRAFFIC_TYPE_REPLAY = 2;
+  // V2.0: production traffic mirror
+  TRAFFIC_TYPE_MIRROR = 3;
+}
+
+// SimulationResult contains the results of a simulation.
+message SimulationResult {
+  // Scenario ID.
+  string scenario_id = 1;
+  // Execution status.
+  ScenarioStatus status = 2;
+  // Start time.
+  google.protobuf.Timestamp start_time = 3;
+  // End time.
+  google.protobuf.Timestamp end_time = 4;
+  // Metric values over simulation duration.
+  map<string, FloatArray> metrics = 5;
+  // High-level summary.
+  SimulationSummary summary = 6;
+  // Breaking point (if detected).
+  BreakingPoint breaking_point = 7;
+}
+
+// ScenarioStatus represents scenario execution state.
+enum ScenarioStatus {
+  SCENARIO_STATUS_UNSPECIFIED = 0;
+  SCENARIO_STATUS_PENDING = 1;
+  SCENARIO_STATUS_RUNNING = 2;
+  SCENARIO_STATUS_COMPLETE = 3;
+  SCENARIO_STATUS_FAILED = 4;
+  SCENARIO_STATUS_CANCELED = 5;
+}
+
+// SimulationSummary provides a high-level result summary.
+message SimulationSummary {
+  // Total simulated requests.
+  int64 total_requests = 1;
+  // Success rate (0.0 - 1.0).
+  float success_rate = 2;
+  // Average latency in milliseconds.
+  float avg_latency_ms = 3;
+  // P99 latency in milliseconds.
+  float p99_latency_ms = 4;
+  // Maximum CPU usage observed.
+  float max_cpu = 5;
+  // Maximum memory usage observed.
+  float max_memory = 6;
+  // Estimated monthly cost.
+  float cost_estimate = 7;
+  // Generated recommendations.
+  repeated string recommendations = 8;
+}
+
+// BreakingPoint represents where the system fails.
+message BreakingPoint {
+  // RPS at breaking point.
+  int32 rps = 1;
+  // P99 latency at breaking point in milliseconds.
+  float latency_ms = 2;
+  // Error rate at breaking point.
+  float error_rate = 3;
+  // What broke first: "cpu", "memory", "disk", "network".
+  string bottleneck = 4;
+  // Recommendations to avoid the breaking point.
+  repeated string recommendations = 5;
+}
+
+// ListScenariosRequest lists available scenarios.
+message ListScenariosRequest {
+  string tenant_id = 1;
+}
+
+// ListScenariosResponse returns available scenarios.
+message ListScenariosResponse {
+  repeated WhatIfScenario scenarios = 1;
+}
+
+// GetScenarioStatusRequest checks scenario execution status.
+message GetScenarioStatusRequest {
+  string scenario_id = 1;
+}
+
+// GetScenarioStatusResponse returns scenario status.
+message GetScenarioStatusResponse {
+  string scenario_id = 1;
+  ScenarioStatus status = 2;
+  // Progress: 0.0 - 1.0.
+  float progress = 3;
+  // Partial results (if running).
+  SimulationResult partial_result = 4;
+}
+
+// CancelScenarioRequest cancels a running scenario.
+message CancelScenarioRequest {
+  string scenario_id = 1;
+}
+
+// CancelScenarioResponse confirms cancellation.
+message CancelScenarioResponse {
+  bool success = 1;
+  string message = 2;
+}

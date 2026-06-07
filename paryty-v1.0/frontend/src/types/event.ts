@@ -2,6 +2,7 @@ import type { Labels, Timestamp, UUID } from './common';
 
 export type EventSeverity = 'info' | 'warning' | 'error' | 'critical';
 export type EventCategory = 'system' | 'application' | 'security' | 'audit';
+export type TransportMode = 'ws' | 'rest' | 'sse' | 'offline';
 
 export interface ParytyEvent {
   id: UUID;

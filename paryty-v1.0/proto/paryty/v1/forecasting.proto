@@ -1,0 +1,125 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+
+// ForecastingService provides ML-powered metric forecasting.
+service ForecastingService {
+  // Forecast a single metric for a given agent.
+  rpc ForecastMetric(ForecastMetricRequest) returns (ForecastMetricResponse);
+
+  // Forecast multiple metrics in batch.
+  rpc ForecastBatch(ForecastBatchRequest) returns (ForecastBatchResponse);
+
+  // Get model accuracy metrics.
+  rpc GetModelAccuracy(GetModelAccuracyRequest) returns (GetModelAccuracyResponse);
+
+  // Trigger model retraining.
+  rpc RetrainModels(RetrainModelsRequest) returns (RetrainModelsResponse);
+}
+
+// ForecastMetricRequest requests a forecast for a single metric.
+message ForecastMetricRequest {
+  // Agent to forecast for. Empty = aggregate across all agents.
+  string agent_id = 1;
+  // Tenant scope for the forecast.
+  string tenant_id = 2;
+  // Metric name (e.g., "cpu_usage", "memory_usage", "disk_usage").
+  string metric_name = 3;
+  // How far ahead to forecast in seconds. Default: 604800 (7 days).
+  int64 horizon_seconds = 4;
+  // Confidence level: 95 or 99. Default: 95.
+  int32 confidence_level = 5;
+  // Time step between forecast points in seconds. Default: 300 (5 min).
+  int32 step_seconds = 6;
+}
+
+// ForecastMetricResponse contains the forecast for a single metric.
+message ForecastMetricResponse {
+  // Agent the forecast is for.
+  string agent_id = 1;
+  // Tenant scope.
+  string tenant_id = 2;
+  // Metric name.
+  string metric_name = 3;
+  // Forecast data points.
+  repeated ForecastPoint forecast = 4;
+  // Model information.
+  ModelInfo model_info = 5;
+  // Overall confidence score (0.0 - 1.0).
+  float overall_confidence = 6;
+}
+
+// ForecastPoint is a single point in a forecast.
+message ForecastPoint {
+  // Unix timestamp for this forecast point.
+  int64 timestamp = 1;
+  // Forecasted value.
+  float value = 2;
+  // Confidence interval lower bound.
+  float lower_bound = 3;
+  // Confidence interval upper bound.
+  float upper_bound = 4;
+}
+
+// ModelInfo contains metadata about the forecasting model used.
+message ModelInfo {
+  // Best performing model name: "linear", "prophet", "xgboost", "ensemble".
+  string best_model = 1;
+  // Model weights in the ensemble.
+  map<string, float> weights = 2;
+  // Per-model MAPE (Mean Absolute Percentage Error).
+  map<string, float> accuracy = 3;
+  // Unix timestamp of last training.
+  int64 last_trained = 4;
+  // Number of training data points used.
+  int64 training_samples = 5;
+}
+
+// ForecastBatchRequest forecasts multiple metrics in one call.
+message ForecastBatchRequest {
+  repeated ForecastMetricRequest requests = 1;
+}
+
+// ForecastBatchResponse contains forecasts for all requested metrics.
+message ForecastBatchResponse {
+  repeated ForecastMetricResponse forecasts = 1;
+}
+
+// GetModelAccuracyRequest requests model accuracy information.
+message GetModelAccuracyRequest {
+  // Metric name to get accuracy for. Empty = all metrics.
+  string metric_name = 1;
+  // Tenant scope.
+  string tenant_id = 2;
+}
+
+// GetModelAccuracyResponse contains model accuracy data.
+message GetModelAccuracyResponse {
+  // Map of metric_name -> model info.
+  map<string, ModelInfo> models = 1;
+}
+
+// RetrainModelsRequest triggers model retraining.
+message RetrainModelsRequest {
+  // Metric name to retrain. Empty = all metrics.
+  string metric_name = 1;
+  // Tenant scope.
+  string tenant_id = 2;
+  // Force retrain even if model is recent.
+  bool force = 3;
+}
+
+// RetrainModelsResponse confirms retraining status.
+message RetrainModelsResponse {
+  // Whether retraining succeeded.
+  bool success = 1;
+  // Status message.
+  string message = 2;
+  // Updated model info per metric.
+  map<string, ModelInfo> updated_models = 3;
+}

@@ -9,20 +9,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
+	"github.com/twmb/franz-go/pkg/kgo"
 	"go.uber.org/zap"
 )
 
 // SSEHandler handles Server-Sent Events.
 type SSEHandler struct {
-	store  *storage.Store
-	logger *zap.Logger
+	store        *storage.Store
+	logger       *zap.Logger
+	kafkaBrokers []string
 }
 
 // NewSSEHandler creates a new SSE handler.
-func NewSSEHandler(store *storage.Store, logger *zap.Logger) *SSEHandler {
+func NewSSEHandler(store *storage.Store, logger *zap.Logger, kafkaBrokers []string) *SSEHandler {
 	return &SSEHandler{
-		store:  store,
-		logger: logger,
+		store:        store,
+		logger:       logger,
+		kafkaBrokers: kafkaBrokers,
 	}
 }
 
@@ -124,6 +127,64 @@ func (h *SSEHandler) HandleMetricsStream(c *gin.Context) {
 			fmt.Fprintf(c.Writer, "event: metrics\ndata: %s\n\n", data)
 			flusher.Flush()
 		}
+	}
+}
+
+// HandleEventStream handles SSE streaming of Paryty events from Redpanda.
+// Route: GET /api/v1/events/stream
+func (h *SSEHandler) HandleEventStream(c *gin.Context) {
+	tenant := tenantFromRequest(c)
+	topic := "paryty." + tenant + ".events"
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("Access-Control-Allow-Origin", "*")
+
+	ctx := c.Request.Context()
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "streaming not supported"})
+		return
+	}
+
+	client, err := kgo.NewClient(
+		kgo.SeedBrokers(h.kafkaBrokers...),
+		kgo.ConsumerGroup("sse-event-stream-"+tenant),
+		kgo.ConsumeTopics(topic),
+	)
+	if err != nil {
+		h.logger.Error("Failed to create Kafka consumer for SSE", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to connect to event stream"})
+		return
+	}
+	defer client.Close()
+
+	h.logger.Info("SSE event stream started",
+		zap.String("tenant", tenant),
+		zap.String("topic", topic),
+	)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
+		fetches := client.PollFetches(ctx)
+		if fetches.IsClientClosed() || ctx.Err() != nil {
+			return
+		}
+		if errs := fetches.Errors(); len(errs) > 0 {
+			h.logger.Error("SSE event fetch errors", zap.Int("count", len(errs)))
+			continue
+		}
+
+		fetches.EachRecord(func(record *kgo.Record) {
+			fmt.Fprintf(c.Writer, "event: event\ndata: %s\n\n", record.Value)
+			flusher.Flush()
+		})
 	}
 }
 

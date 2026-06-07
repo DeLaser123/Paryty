@@ -79,6 +79,18 @@ type SnapshotMetadata struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+// SnapshotMeta is a lightweight snapshot summary for listing.
+type SnapshotMeta struct {
+	ID         string    `json:"id"`
+	TenantID   string    `json:"tenant_id"`
+	Timestamp  time.Time `json:"timestamp"`
+	AgentCount int       `json:"agent_count"`
+	MetricCount int      `json:"metric_count"`
+	AlertCount int       `json:"alert_count"`
+	SizeBytes  int64     `json:"size_bytes"`
+	Compressed bool      `json:"compressed"`
+}
+
 type HotStoreReader interface {
 	GetTopology(ctx context.Context, tenant string) (*models.Topology, error)
 	GetAllAgentStates(ctx context.Context, tenant string) ([]models.AgentInfo, error)
@@ -164,6 +176,42 @@ func (m *SnapshotManager) GetSnapshot(ctx context.Context, tenant, id string) (*
 	}
 	_ = m.cacheSnapshotByID(ctx, tenant, id, snapshot)
 	return snapshot, nil
+}
+
+// ListSnapshots queries the topology_snapshots metadata table for snapshots
+// within the given time range, ordered by timestamp descending.
+func (m *SnapshotManager) ListSnapshots(ctx context.Context, tenant string, start, end time.Time, limit int) ([]SnapshotMeta, error) {
+	if m.questdb == nil {
+		return nil, fmt.Errorf("snapshot: questdb not configured")
+	}
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 1000 {
+		limit = 1000
+	}
+
+	rows, err := m.questdb.Query(ctx,
+		`SELECT snapshot_id, tenant_id, timestamp, agent_count, metric_count, alert_count, size_bytes, compressed
+		FROM topology_snapshots
+		WHERE tenant_id=$1 AND timestamp>=$2 AND timestamp<=$3
+		ORDER BY timestamp DESC
+		LIMIT $4`,
+		tenant, start, end, limit)
+	if err != nil {
+		return nil, fmt.Errorf("snapshot: list: %w", err)
+	}
+	defer rows.Close()
+
+	var metas []SnapshotMeta
+	for rows.Next() {
+		var m SnapshotMeta
+		if err := rows.Scan(&m.ID, &m.TenantID, &m.Timestamp, &m.AgentCount, &m.MetricCount, &m.AlertCount, &m.SizeBytes, &m.Compressed); err != nil {
+			continue
+		}
+		metas = append(metas, m)
+	}
+	return metas, rows.Err()
 }
 
 func (m *SnapshotManager) GetNearestSnapshot(ctx context.Context, tenant string, target time.Time) (*Snapshot, error) {

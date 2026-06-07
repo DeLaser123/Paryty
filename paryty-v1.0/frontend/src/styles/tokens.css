@@ -1,0 +1,56 @@
+/**
+ * Token Bridge — Phase 5 T20.0
+ *
+ * Imports the authoritative design-system tokens (--aef-*)
+ * and extends them with dashboard-specific layout tokens.
+ *
+ * NO hardcoded hex values outside of this file.
+ */
+
+/* === Authoritative token source === */
+@import '../paryty_design_system/tokens.css';
+
+/* === Dashboard layout tokens === */
+:root {
+  /* Chrome dimensions */
+  --aef-header-height: 48px;
+  --aef-statusbar-height: 28px;
+  --aef-panel-width: 360px;
+
+  /* Canvas / Topology surface */
+  --aef-canvas-bg: #0a0a0a;
+  --aef-canvas-grid: #151515;
+  --aef-canvas-grid-major: #1c1c1c;
+  --aef-canvas-node-stroke: #333333;
+  --aef-canvas-edge-color: #2a2a2a;
+  --aef-canvas-selection-ring: #ffffff;
+  --aef-canvas-minimap-bg: #080808;
+  --aef-canvas-minimap-viewport: rgba(255, 255, 255, 0.15);
+
+  /* Node health fills (matching token semantics) */
+  --aef-node-healthy: var(--aef-status-live);
+  --aef-node-degraded: var(--aef-status-warning);
+  --aef-node-critical: #ef4444;
+  --aef-node-unknown: var(--aef-text-secondary);
+
+  /* Transport degradation transition duration */
+  --aef-duration-degrade: 300ms;
+
+  /* Degradation multipliers (overridden by transport-mode--* classes) */
+  --aef-saturate-factor: 1.0;
+  --aef-particle-opacity: 0.85;
+  --aef-edge-opacity: 1.0;
+  --aef-glow-opacity: 1.0;
+
+  /* Glow / aura intensity for utilization */
+  --aef-glow-low: rgba(255, 255, 255, 0.04);
+  --aef-glow-medium: rgba(255, 255, 255, 0.10);
+  --aef-glow-high: rgba(255, 255, 255, 0.20);
+
+  /* Toast / notification z-index scale */
+  --aef-z-toast: 220;
+  --aef-z-modal: 200;
+  --aef-z-popover: 100;
+  --aef-z-header: 50;
+  --aef-z-sidebar: 40;
+}

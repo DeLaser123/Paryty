@@ -117,6 +117,12 @@ func TopicTopologyChanges(tenant string) string { return fmt.Sprintf("paryty.%s.
 func TopicAlerts(tenant string) string          { return fmt.Sprintf("paryty.%s.alerts", tenant) }
 func TopicDLQ(tenant string) string             { return fmt.Sprintf("paryty.%s.dead-letter", tenant) }
 
+// Tenant-scoped topic name functions for intelligence topics (Phase 6).
+func TopicForecasts(tenant string) string     { return fmt.Sprintf("paryty.%s.forecasts", tenant) }
+func TopicAnomalies(tenant string) string     { return fmt.Sprintf("paryty.%s.anomalies", tenant) }
+func TopicSimulations(tenant string) string   { return fmt.Sprintf("paryty.%s.simulations", tenant) }
+func TopicTimelineEvents(tenant string) string { return fmt.Sprintf("paryty.%s.timeline.events", tenant) }
+
 // Topic name constants for pipeline stage output topics.
 const (
 	// TopicMetricsEnriched is the topic suffix for enriched metrics output.
@@ -125,6 +131,18 @@ const (
 	TopicCorrelations = "correlations"
 	// TopicDependencyGraph is the topic suffix for dependency graph updates.
 	TopicDependencyGraph = "dependency.graph"
+)
+
+// Topic name constants for intelligence topics (Phase 6).
+const (
+	// TopicForecasts is the topic suffix for forecast results.
+	TopicForecastsSuffix = "forecasts"
+	// TopicAnomalies is the topic suffix for anomaly detection results.
+	TopicAnomaliesSuffix = "anomalies"
+	// TopicSimulations is the topic suffix for simulation results.
+	TopicSimulationsSuffix = "simulations"
+	// TopicTimelineEvents is the topic suffix for timeline events.
+	TopicTimelineEventsSuffix = "timeline.events"
 )
 
 // Default-tenant convenience functions. Use these when tenant context is not yet available.
@@ -146,6 +164,18 @@ func DefaultTopicCorrelations() string { return TopicForTenant(DefaultTenant, To
 // DefaultTopicDependencyGraph returns the dependency graph topic for the default tenant.
 func DefaultTopicDependencyGraph() string { return TopicForTenant(DefaultTenant, TopicDependencyGraph) }
 
+// DefaultTopicForecasts returns the forecasts topic for the default tenant.
+func DefaultTopicForecasts() string { return TopicForecasts(DefaultTenant) }
+
+// DefaultTopicAnomalies returns the anomalies topic for the default tenant.
+func DefaultTopicAnomalies() string { return TopicAnomalies(DefaultTenant) }
+
+// DefaultTopicSimulations returns the simulations topic for the default tenant.
+func DefaultTopicSimulations() string { return TopicSimulations(DefaultTenant) }
+
+// DefaultTopicTimelineEvents returns the timeline events topic for the default tenant.
+func DefaultTopicTimelineEvents() string { return TopicTimelineEvents(DefaultTenant) }
+
 // requiredTopics returns the topic configurations for a tenant.
 func requiredTopics(tenant string) []topicConfig {
 	return []topicConfig{
@@ -160,6 +190,11 @@ func requiredTopics(tenant string) []topicConfig {
 		{TopicForTenant(tenant, TopicMetricsEnriched), 12, 1},
 		{TopicForTenant(tenant, TopicCorrelations), 6, 1},
 		{TopicForTenant(tenant, TopicDependencyGraph), 3, 1},
+		// Phase 6: Intelligence topics.
+		{TopicForecasts(tenant), 3, 1},
+		{TopicAnomalies(tenant), 3, 1},
+		{TopicSimulations(tenant), 3, 1},
+		{TopicTimelineEvents(tenant), 3, 1},
 	}
 }
 

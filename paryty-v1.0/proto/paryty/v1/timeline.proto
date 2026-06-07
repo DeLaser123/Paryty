@@ -1,0 +1,217 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/duration.proto";
+import "paryty/v1/common.proto";
+
+// TimelineEngineService provides snapshot management, replay, diff, and export.
+service TimelineEngineService {
+  // Create a system state snapshot.
+  rpc CreateSnapshot(CreateSnapshotRequest) returns (CreateSnapshotResponse);
+
+  // List available snapshots.
+  rpc ListSnapshots(ListSnapshotsRequest) returns (ListSnapshotsResponse);
+
+  // Get a specific snapshot.
+  rpc GetSnapshot(GetSnapshotRequest) returns (GetSnapshotResponse);
+
+  // Diff two snapshots.
+  rpc DiffSnapshots(DiffSnapshotsRequest) returns (DiffSnapshotsResponse);
+
+  // Start a replay session.
+  rpc StartReplay(StartReplayRequest) returns (stream ReplayFrame);
+
+  // Export a snapshot or report.
+  rpc ExportReport(ExportReportRequest) returns (ExportReportResponse);
+
+  // Tag a snapshot.
+  rpc TagSnapshot(TagSnapshotRequest) returns (TagSnapshotResponse);
+}
+
+// CreateSnapshotRequest requests a new snapshot.
+message CreateSnapshotRequest {
+  // Tenant scope.
+  string tenant_id = 1;
+  // Optional tag to apply immediately.
+  string tag = 2;
+}
+
+// CreateSnapshotResponse confirms snapshot creation.
+message CreateSnapshotResponse {
+  // Created snapshot summary.
+  SnapshotSummary snapshot = 1;
+}
+
+// SnapshotSummary is a lightweight snapshot reference.
+message SnapshotSummary {
+  // Unique snapshot ID.
+  string id = 1;
+  // When the snapshot was captured.
+  google.protobuf.Timestamp captured_at = 2;
+  // Snapshot size in bytes.
+  int64 size_bytes = 3;
+  // Number of topology nodes.
+  int32 node_count = 4;
+  // Number of topology edges.
+  int32 edge_count = 5;
+  // Applied tags.
+  repeated string tags = 6;
+  // Tenant scope.
+  string tenant_id = 7;
+}
+
+// ListSnapshotsRequest lists available snapshots.
+message ListSnapshotsRequest {
+  // Time range filter.
+  TimeRange time_range = 1;
+  // Pagination.
+  PaginationRequest pagination = 2;
+  // Tenant scope.
+  string tenant_id = 3;
+  // Filter by tag.
+  string tag_filter = 4;
+}
+
+// ListSnapshotsResponse returns snapshot list.
+message ListSnapshotsResponse {
+  repeated SnapshotSummary snapshots = 1;
+  PaginationResponse pagination = 2;
+}
+
+// GetSnapshotRequest retrieves a specific snapshot.
+message GetSnapshotRequest {
+  string snapshot_id = 1;
+  // Include full topology data.
+  bool include_topology = 2;
+  // Include metrics data.
+  bool include_metrics = 3;
+  // Include alerts data.
+  bool include_alerts = 4;
+}
+
+// GetSnapshotResponse returns full snapshot data.
+message GetSnapshotResponse {
+  SnapshotSummary summary = 1;
+  // Full topology at snapshot time (if requested).
+  bytes topology_data = 2;
+  // Metrics summary (if requested).
+  map<string, float> metrics_summary = 3;
+  // Active alerts at snapshot time (if requested).
+  repeated AlertSnapshot alerts = 4;
+}
+
+// AlertSnapshot is a lightweight alert reference in a snapshot.
+message AlertSnapshot {
+  string id = 1;
+  string service_name = 2;
+  Severity severity = 3;
+  string message = 4;
+}
+
+// DiffSnapshotsRequest compares two snapshots.
+message DiffSnapshotsRequest {
+  // Source snapshot ID.
+  string from_snapshot_id = 1;
+  // Target snapshot ID.
+  string to_snapshot_id = 2;
+  // Tenant scope.
+  string tenant_id = 3;
+}
+
+// DiffSnapshotsResponse contains the diff between snapshots.
+message DiffSnapshotsResponse {
+  // Source snapshot.
+  SnapshotSummary from = 1;
+  // Target snapshot.
+  SnapshotSummary to = 2;
+  // Nodes added since source.
+  repeated string nodes_added = 3;
+  // Nodes removed since source.
+  repeated string nodes_removed = 4;
+  // Edges added since source.
+  repeated string edges_added = 5;
+  // Edges removed since source.
+  repeated string edges_removed = 6;
+  // Metric changes: metric_name -> delta.
+  map<string, MetricDelta> metric_changes = 7;
+  // Alerts resolved between snapshots.
+  repeated AlertSnapshot alerts_resolved = 8;
+  // New alerts between snapshots.
+  repeated AlertSnapshot alerts_new = 9;
+}
+
+// MetricDelta represents a change in a metric between snapshots.
+message MetricDelta {
+  double from_value = 1;
+  double to_value = 2;
+  double change = 3;
+  double change_pct = 4;
+}
+
+// StartReplayRequest starts a timeline replay session.
+message StartReplayRequest {
+  // Start of replay window.
+  google.protobuf.Timestamp start_time = 1;
+  // End of replay window.
+  google.protobuf.Timestamp end_time = 2;
+  // Playback speed (0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0).
+  float speed = 3;
+  // Tenant scope.
+  string tenant_id = 4;
+  // Labels filter.
+  Labels label_filter = 5;
+}
+
+// ReplayFrame is a single frame in a timeline replay.
+message ReplayFrame {
+  // Frame timestamp.
+  google.protobuf.Timestamp timestamp = 1;
+  // Topology state (JSON-encoded).
+  bytes topology_data = 2;
+  // Metrics at this point.
+  map<string, float> metrics = 3;
+  // Active alerts at this point.
+  repeated AlertSnapshot alerts = 4;
+  // Progress: 0.0 - 1.0.
+  float progress = 5;
+}
+
+// ExportReportRequest exports a snapshot or diff report.
+message ExportReportRequest {
+  // Snapshot ID to export (for single snapshot export).
+  string snapshot_id = 1;
+  // Diff export: from snapshot.
+  string from_snapshot_id = 2;
+  // Diff export: to snapshot.
+  string to_snapshot_id = 3;
+  // Export format: "json", "html".
+  string format = 4;
+  // Tenant scope.
+  string tenant_id = 5;
+}
+
+// ExportReportResponse returns the exported report.
+message ExportReportResponse {
+  // Export format used.
+  string format = 1;
+  // Exported data.
+  bytes data = 2;
+  // Content type (e.g., "application/json", "text/html").
+  string content_type = 3;
+}
+
+// TagSnapshotRequest adds a tag to a snapshot.
+message TagSnapshotRequest {
+  string snapshot_id = 1;
+  // Tag to add (e.g., "incident", "deployment", "baseline").
+  string tag = 2;
+}
+
+// TagSnapshotResponse confirms tagging.
+message TagSnapshotResponse {
+  bool success = 1;
+}

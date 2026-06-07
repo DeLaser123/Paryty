@@ -1,0 +1,93 @@
+# Paryty Intelligence Service Configuration
+# Phase 6: ML Forecasting + Anomaly Detection
+
+server:
+  port: 50051
+  max_workers: 10
+  log_level: info
+  health_check_interval: "30s"
+
+forecasting:
+  enabled: true
+  models:
+    linear:
+      window_size: 60
+      confidence_level: 0.95
+    prophet:
+      daily_seasonality: true
+      weekly_seasonality: true
+      changepoint_prior_scale: 0.05
+    xgboost:
+      n_estimators: 100
+      max_depth: 6
+      learning_rate: 0.1
+      lag_features: [1, 5, 15, 60]
+      rolling_windows: [5, 15, 60]
+  ensemble:
+    weight_update_interval: 3600  # seconds (1 hour)
+    min_weight: 0.1
+    max_weight: 0.6
+    max_history: 168  # 7 days of hourly entries
+  retrain_interval: 86400  # seconds (24 hours)
+  model_store_path: /data/models/forecasting
+  supported_metrics:
+    - cpu_usage
+    - memory_usage
+    - disk_usage
+    - network_rx_bytes
+    - network_tx_bytes
+    - disk_read_bytes
+    - disk_write_bytes
+    - process_count
+
+anomaly:
+  enabled: true
+  models:
+    zscore:
+      window_size: 60
+      threshold: 3.0
+    iqr:
+      window_size: 60
+      multiplier: 1.5
+    ewma:
+      alpha: 0.3
+      threshold: 3.0
+    isolation_forest:
+      n_estimators: 100
+      contamination: 0.05
+      max_samples: 256
+    autoencoder:
+      input_dim: 60
+      encoding_dim: 16
+      threshold_percentile: 95.0
+      epochs: 50
+      batch_size: 32
+  ensemble:
+    vote_threshold: 0.5
+    weights:
+      statistical: 0.30
+      isolation_forest: 0.35
+      autoencoder: 0.35
+  model_store_path: /data/models/anomaly
+
+data:
+  questdb:
+    host: questdb
+    port: 8812
+    database: paryty
+    username: admin
+    password: quest
+    max_connections: 10
+  dragonfly:
+    host: dragonfly
+    port: 6379
+    db: 0
+    pool_size: 10
+
+# Tenants this service handles
+tenants:
+  - gai-tech
+  - default
+  - tenant1
+  - tenant-b
+  - acme

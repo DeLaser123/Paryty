@@ -1,9 +1,9 @@
 # Phase 5 Hardened Specification — Frontend Visualization
 
-**Version:** 1.0.0
-**Status:** LOCKED — All architectural decisions finalized
-**Target LOC:** ~12,000 (TypeScript/React)
-**Estimated Effort:** 4-6 weeks for a senior frontend engineer
+**Version:** 1.2.0
+**Status:** OPEN — Progressive Upgrade. Core connectivity bridge and topology rendering complete. Design system integrated.
+**Target LOC:** ~12,000 (TypeScript/React) — ~5,500 built, ~6,500 remaining for progressive upgrades
+**Estimated Effort:** 2-4 additional weeks for a senior frontend engineer (from current baseline)
 
 ---
 
@@ -42,15 +42,22 @@ Phase 5 transforms the Paryty frontend from a basic placeholder into a productio
 | 3 | Particle System | **A — PixiJS ParticleContainer** | GPU-accelerated particles along edges. Color = throughput, speed = latency. |
 | 4 | Visual Theme | **Custom — Monochromatic** | Black and white theme with Geist Sans/Mono. IDE-style, monochromatic digital twin aesthetic. |
 
-### 1.3 Visual Theme — CRITICAL IMPLEMENTATION NOTE
+### 1.3 Visual Theme — DESIGN SYSTEM REFERENCE
 
-> **STOP GATE: Before implementing any styling, colors, fonts, or visual effects, the implementing agent MUST stop and request the user's preferred UI/UX rulebook.** The user has a custom styling rules file that will be placed in the repository. Do NOT assume any color palette, font sizing, spacing, or visual effects. Wait for the rulebook before writing any CSS or theme code.
+> **REFERENCE GATE: The implementing agent MUST use the Paryty Design System as the single source of truth for all styling.** The design system is located at `frontend/src/paryty_design_system/` and contains the complete token system, component styles, interaction patterns, and motion system. All Phase 5 frontend code MUST replicate and extend this design system — do NOT invent new color palettes, spacing scales, typography, or visual effects.
 
-**Known preferences (confirmed by user):**
-- **Color palette:** Black and white (monochromatic)
-- **Typography:** Geist Sans (Headings, Titles & Labels) + Geist Mono (UI Text, code/data)
-- **Aesthetic:** IDE-style, digital twin, beautiful monochromatic UI/UX
-- **Framework:** CSS variables for all theme tokens (enables future theme switching)
+**Design system files (authoritative reference):**
+- `frontend/src/paryty_design_system/tokens.css` — CSS custom properties: colors, typography, radius, spacing, motion tokens
+- `frontend/src/paryty_design_system/design-system-page.css` — Complete component styles: buttons, counters, tables, cards, nav, scroll, icons, dropdowns, modals, toasts, command palette, context menus, animated navigation, motion system
+- `frontend/src/paryty_design_system/DesignSystemPage.tsx` — Interactive showcase of all design system components (16 sections)
+
+**Confirmed design system values:**
+- **Color palette:** Pure black (#000) background, white (#fff) text, monochromatic gray surfaces (#080808, #101010, #141414, #1a1a1a), accent variants (#4719FF violet, #DC4714 ember)
+- **Typography:** Geist Variable (headings) + Geist Mono (body/UI text)
+- **Spacing scale:** 4px base, 8/12/16/20/24/32/40/48px
+- **Radius scale:** Mathematical — control 10px, field 12px, card 14px, panel 20px, sheet 24px, full 9999px
+- **Motion system:** Instant 60ms, fast 120ms, standard 220ms, slow 380ms; spring curves with subtle/normal/obvious overshoot
+- **CSS variable prefix:** `--aef-*` (all design tokens use this prefix)
 
 ### 1.4 What Gets Built
 
@@ -61,17 +68,82 @@ Phase 5 transforms the Paryty frontend from a basic placeholder into a productio
 | 19 | State Management | ~2,000 | Enhanced Zustand stores with subscriptions and computed state |
 | 20 | UI Components | ~2,000 | Dashboard, topology view, timeline replay, alerts panel |
 
-### 1.5 Existing Code Assessment
+### 1.5 Existing Code Assessment (As-Built Baseline — June 2026)
 
-**What exists (stubs/basic):**
-- `pixiApp.ts` (188 lines): Basic PixiJS renderer with individual Graphics per node. No instancing, no clustering, no particles.
-- `renderer.ts` (118 lines): Bridge between Zustand and PixiJS. Uses layout worker. No instanced rendering.
-- `websocket.ts` (224 lines): Solid WebSocket client with auto-reconnect, heartbeat, subscriptions. Good foundation.
-- `sse.ts` (108 lines): SSE client for timeline replay. Basic but functional.
-- `sharedBuffer.ts` (4.1KB): SharedArrayBuffer ring buffer for zero-copy communication.
-- Workers (3 files): `topologyLayout.worker.ts` (3.9KB), `metricProcessor.worker.ts` (3.7KB), `dataParser.worker.ts` (1KB).
-- Stores (5 files): topologyStore (115 lines), metricsStore (84 lines), timelineStore (115 lines), alertsStore, settingsStore.
-- Components (5 files): TopologyView, MetricsView, TimelineView, AlertView, Layout. All basic placeholders.
+**What has been built (Phase 5 baseline):**
+
+**Layer 17 — GPU Rendering Engine (~3,200 LOC):**
+- `pixiApp.ts`: PixiJS application with instanced rendering support, viewport integration, and animation loop.
+- `renderer.ts`: Bridge between Zustand stores and PixiJS rendering pipeline. Connects topology data to instanced renderer.
+- `instancing.ts`: ParticleContainer-based instanced node renderer. Supports 15K+ nodes with spatial index for viewport culling.
+- `clustering.ts`: Hierarchical clustering layout using d3-force within clusters, grid arrangement of cluster groups.
+- `particles.ts`: GPU-accelerated edge particle system for data flow visualization. Throughput = brightness, latency = speed.
+- `effects.ts`: Health glow effects (pulsing for unhealthy nodes), edge animations by throughput, alert pulse rings.
+- `viewport.ts`: Zoom/pan/fit controller with mouse wheel zoom, click-drag pan, programmatic fit-to-content.
+- `textures/`: Runtime texture atlas generation for node shapes (circle, square, diamond, hexagon) × status (healthy, degraded, unhealthy, unknown).
+- `workers/`: Web Workers for topology layout computation and metric processing.
+
+**Layer 18 — Real-Time Data Pipeline (~1,000 LOC):**
+- `websocket.ts`: WebSocket client with auto-reconnect, heartbeat, subscriptions, backpressure (message batching per 16ms frame), deduplication by message ID. Protocol aligned: sends `{type, channel, id}`, receives `{type, channel, data, timestamp}`.
+- `sse.ts`: SSE client for timeline replay with event-driven streaming.
+- `rest.ts`: REST API client with LRU cache (5s TTL), supports `GET /api/v1/topology`, snapshot queries, and DB-backed endpoints.
+- `sharedBuffer.ts`: SharedArrayBuffer ring buffer for zero-copy worker communication.
+
+**Layer 19 — State Management (~800 LOC):**
+- `topologyStore.ts`: Topology data, viewport state, selected node/edge, cluster state. Uses Zustand with individual selectors for render performance.
+- `metricsStore.ts`: Real-time metrics streaming state, auto-downsampling, time range.
+- `timelineStore.ts`: Playback state (play/pause/stop/seek/speed), snapshot management, diff mode.
+- `alertsStore.ts`: Alert list, grouping, acknowledge, severity filtering.
+- `settingsStore.ts`: Theme preferences (dark mode), layout density, animation toggles.
+
+**Layer 20 — UI Components (~1,500 LOC):**
+- `layout/AppShell.tsx`: Main SPA shell — sidebar + header + content area + status bar. Uses react-router-dom routing.
+- `layout/Sidebar.tsx`: Navigation sidebar with topology/metrics/timeline/alerts tabs. Monochromatic design system styling.
+- `layout/Header.tsx`: Top bar with agent count, connection status indicators.
+- `layout/StatusBar.tsx`: Bottom bar showing connection state, agent count, latency.
+- `topology/TopologyCanvas.tsx`: Main topology canvas with PixiJS integration. Uses Zustand selectors (not full-store subscribe) for performance.
+- `topology/NodeDetailPanel.tsx`: Slide-over detail panel for selected nodes.
+- `topology/EdgeDetailPanel.tsx`: Slide-over detail panel for selected edges.
+- `topology/TopologyControls.tsx`: Zoom in/out, fit-to-content, filter controls.
+- `topology/SearchOverlay.tsx`: Node search with autocomplete.
+- `topology/ClusterBreadcrumb.tsx`: Breadcrumb navigation for cluster drill-down.
+- `metrics/MetricChart.tsx`: Recharts-based time-series chart component.
+- `metrics/MetricCards.tsx`: Summary metric cards with sparklines.
+- `timeline/TimelineScrubber.tsx`: Drag-to-scrub timeline with play/pause/stop.
+- `alerts/AlertList.tsx`, `AlertCard.tsx`, `AlertPanel.tsx`: Alert management components.
+- `paryty_design_system/`: Complete design system (tokens.css, component styles, interactive showcase page). Authoritative visual reference.
+
+**Backend-Frontend Connectivity Bridge (June 2026 fix):**
+- **JSON field normalization**: Go API now returns camelCase fields (`sourceId`, `targetId`, `lastSeen`, `status`) via `FrontendTopology` DTOs in `rest.go`, matching TypeScript `TopologyNode`/`TopologyEdge` types.
+- **Multi-tenant aggregation**: Query API aggregates topology across all tenants when no `X-Tenant-ID` header is present, solving the "default tenant has no data" problem.
+- **WebSocket protocol alignment**: Go `WSMessage` accepts both `channel` and `topic` fields. `WSResponse` uses `channel`/`data`/`timestamp` matching frontend `WsIncomingMessage`.
+- **Zustand selector optimization**: TopologyCanvas uses individual `useTopologyStore((s) => s.field)` selectors instead of full-store subscription, preventing unnecessary re-renders.
+- **Verified end-to-end**: Agent → gRPC Ingestion (50052) → Redpanda (9092) → Pipeline → DragonflyDB (6379) → Query API (8080) → Frontend (3000). Live topology data (100+ nodes) rendering at 60fps.
+
+### 1.6 Phase 5 Implementation Status — CURRENT STATE
+
+> **⚠️ CRITICAL GUARDRAIL FOR ANY AI AGENT:**
+>
+> Phase 5 is **NOT CLOSED**. It is an **OPEN PROGRESSIVE UPGRADE**. The core connectivity bridge, topology rendering engine, and all four layer scaffolds are built and verified working end-to-end. HOWEVER, many of the spec items below (Sections 3-11) describe additional features, refinements, and optimizations that may or may not have been implemented beyond the baseline described in Section 1.5.
+>
+> **BEFORE YOU MODIFY ANY PHASE 5 CODE, YOU MUST:**
+> 1. **Read the as-built baseline in Section 1.5** to understand what already exists and works.
+> 2. **Review the spec items in Sections 3-11** to understand the full vision.
+> 3. **Ask the user explicitly**: *"Phase 5 is open. I see the following is already built: [summarize from 1.5]. The spec also calls for: [list items from Sections 3-11 that may be missing]. What changes, new features, or upgrades would you like me to make?"*
+> 4. **Do NOT assume** any spec item is "missing" and needs building — the code may have evolved beyond what the spec describes. Always verify current file state before modifying.
+>
+> **Phase 5 code is PRODUCTION-LIVE for topology visualization.** Treat it with the care due to working production code. All changes must be backward-compatible with the current connectivity bridge.
+
+| Area | Status | Notes |
+|------|--------|-------|
+| Layer 17: GPU Rendering Engine | **BASELINE BUILT** | Instanced rendering, clustering, particles, viewport, textures all implemented. May need refinement per Sections 3.2-3.7. |
+| Layer 18: Real-Time Data Pipeline | **BASELINE BUILT** | WebSocket with backpressure/batching, SSE, REST with caching. Web Workers active. May need enhancement per Sections 4.1-4.3. |
+| Layer 19: State Management | **BASELINE BUILT** | All 5 Zustand stores with subscriptions and computed state. May need enhancement per Sections 5.1-5.3. |
+| Layer 20: UI Components | **BASELINE BUILT** | App shell, topology canvas, detail panels, controls, metrics cards, timeline scrubber, alerts. May need enhancement per Sections 6.1-6.4. |
+| Connectivity Bridge | **VERIFIED WORKING** | DTO normalization, tenant aggregation, WebSocket protocol alignment. End-to-end verified. |
+| Design System Integration | **VERIFIED** | All components use `--aef-*` tokens from `paryty_design_system/`. |
+| Performance Targets (Section 9) | **BASELINE MET** | 100+ nodes at 60fps. 15K node target not yet stress-tested. Zustand selector optimization applied. |
+| Verification Gates (Section 8) | **PARTIAL** | Gates 1-6 described but not all automated. Manual visual verification passed. |
 
 ---
 
@@ -174,10 +246,16 @@ frontend/src/
 │   ├── alert.ts                # ENHANCE — Alert group types
 │   └── common.ts               # ENHANCE — Shared types
 ├── styles/
-│   ├── tokens.css              # NEW — CSS custom properties (theme tokens)
+│   ├── tokens.css              # REFERENCE — Import from paryty_design_system/tokens.css
 │   ├── globals.css             # NEW — Global styles, resets
-│   ├── typography.css          # NEW — Geist Sans/Mono font definitions
+│   ├── typography.css          # NEW — Geist font imports (use @fontsource-variable/geist)
 │   └── utilities.css           # NEW — Utility classes
+├── paryty_design_system/       # REFERENCE — Authoritative design system (DO NOT MODIFY)
+│   ├── tokens.css              # CSS custom properties: colors, typography, radius, spacing, motion
+│   ├── design-system-page.css  # Complete component styles (16 sections)
+│   ├── DesignSystemPage.tsx    # Interactive showcase of all components
+│   ├── main.tsx                # Entry point with ?ds=1 query param
+│   └── __tests__/              # Puppeteer + evidence bundle tests
 └── index.css                   # UPDATE — Import new style files
 ```
 
@@ -410,8 +488,7 @@ export interface TextureConfig {
 
 // DEFAULT TEXTURE CONFIG (Monochromatic theme)
 //
-// NOTE: Colors will be updated when user's UI/UX rulebook is provided.
-// These are placeholder monochromatic values.
+// NOTE: Colors sourced from paryty_design_system/tokens.css (--aef-* tokens).
 export const DEFAULT_TEXTURE_CONFIG: TextureConfig = {
   size: 64,
   typeShapes: {
@@ -993,7 +1070,7 @@ export class ViewportController {
 // Visual effects for the topology canvas.
 //
 // NOTE: All color values are monochromatic (black/white/gray).
-// Will be updated when user's UI/UX rulebook is provided.
+// Values sourced from paryty_design_system/tokens.css (--aef-* tokens).
 
 import * as PIXI from 'pixi.js';
 
@@ -1473,144 +1550,57 @@ export function TimelineScrubber() {
 
 ## 7. Theme & Design System
 
-### 7.1 CRITICAL: UI/UX Rulebook Gate
+### 7.1 Design System Reference (AUTHORITATIVE)
 
-> **STOP GATE: Before implementing any styling, the implementing agent MUST request the user's UI/UX rulebook file.** The following is a STRUCTURAL placeholder only. All color values, font sizes, spacing, and visual effects must come from the user's rulebook.
+> **The Paryty Design System at `frontend/src/paryty_design_system/` is the single source of truth for all frontend styling.** All Phase 5 UI code MUST consume the CSS custom properties and component class patterns defined in the design system. Do NOT create parallel token systems or deviate from the established visual language.
 
-### 7.2 CSS Token Structure (Placeholder)
+**Reference files:**
 
-**File:** `frontend/src/styles/tokens.css`:
+| File | Purpose |
+|------|---------|
+| `tokens.css` | All CSS custom properties (`--aef-*`): colors, typography, radius, spacing, motion |
+| `design-system-page.css` | Component styles: buttons, counters, tables, cards, nav, scroll, icons, dropdowns, modals, toasts, command palette, context menus, animated navigation, motion system |
+| `DesignSystemPage.tsx` | Interactive showcase with 16 sections covering every design system component |
 
-```css
-/*
- * THEME TOKENS — MONOCHROMATIC PLACEHOLDER
- *
- * !! DO NOT USE THESE VALUES DIRECTLY !!
- * !! WAIT FOR USER'S UI/UX RULEBOOK !!
- *
- * Structure is defined. Values will be provided by user.
- */
+**Token prefix convention:** All CSS custom properties use the `--aef-*` prefix. Phase 5 code MUST use these tokens via `var(--aef-*)` — never hardcode hex values, font sizes, or spacing.
 
-:root {
-  /* === COLORS (Monochromatic) === */
-  /* Background layers (darkest to lightest) */
-  --color-bg-0: #000000;        /* Deepest background */
-  --color-bg-1: #0a0a0a;        /* App background */
-  --color-bg-2: #111111;        /* Card/panel background */
-  --color-bg-3: #1a1a1a;        /* Elevated surface */
-  --color-bg-4: #222222;        /* Hover/active surface */
+### 7.2 CSS Token Structure (Authoritative)
 
-  /* Foreground layers (dimmest to brightest) */
-  --color-fg-0: #333333;        /* Disabled/invisible */
-  --color-fg-1: #555555;        /* Muted text */
-  --color-fg-2: #888888;        /* Secondary text */
-  --color-fg-3: #bbbbbb;        /* Primary text */
-  --color-fg-4: #ffffff;        /* Emphasized text */
+**File:** `frontend/src/paryty_design_system/tokens.css` — This file IS the token source. Phase 5 code imports it directly.
 
-  /* Accent (monochromatic — only white/gray/black) */
-  --color-accent: #ffffff;      /* Primary accent */
-  --color-accent-dim: #888888;  /* Dimmed accent */
-
-  /* Status (monochromatic brightness) */
-  --color-healthy: #ffffff;     /* Bright white */
-  --color-degraded: #888888;    /* Mid gray */
-  --color-unhealthy: #444444;   /* Dark gray */
-  --color-unknown: #666666;     /* Unknown gray */
-
-  /* === TYPOGRAPHY === */
-  --font-sans: 'Geist Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-  --font-mono: 'Geist Mono', 'SF Mono', 'Fira Code', monospace;
-
-  --text-xs: 0.75rem;      /* 12px */
-  --text-sm: 0.875rem;     /* 14px */
-  --text-base: 1rem;       /* 16px */
-  --text-lg: 1.125rem;     /* 18px */
-  --text-xl: 1.25rem;      /* 20px */
-  --text-2xl: 1.5rem;      /* 24px */
-
-  --font-normal: 400;
-  --font-medium: 500;
-  --font-semibold: 600;
-  --font-bold: 700;
-
-  /* === SPACING === */
-  --space-1: 0.25rem;      /* 4px */
-  --space-2: 0.5rem;       /* 8px */
-  --space-3: 0.75rem;      /* 12px */
-  --space-4: 1rem;         /* 16px */
-  --space-5: 1.25rem;      /* 20px */
-  --space-6: 1.5rem;       /* 24px */
-  --space-8: 2rem;         /* 32px */
-
-  /* === BORDERS === */
-  --border-color: #222222;
-  --border-width: 1px;
-  --border-radius-sm: 4px;
-  --border-radius-md: 6px;
-  --border-radius-lg: 8px;
-
-  /* === SHADOWS (subtle, monochromatic) === */
-  --shadow-sm: 0 1px 2px rgba(255, 255, 255, 0.05);
-  --shadow-md: 0 4px 6px rgba(255, 255, 255, 0.05);
-  --shadow-lg: 0 10px 15px rgba(255, 255, 255, 0.05);
-
-  /* === LAYOUT === */
-  --sidebar-width: 240px;
-  --header-height: 48px;
-  --statusbar-height: 28px;
-  --panel-width: 360px;
-}
-```
+**Token categories defined in `tokens.css`:**
+- **Color tokens** (26 tokens): `--aef-bg`, `--aef-surface-low/mid/card/hover`, `--aef-border/border-strong`, `--aef-text-primary/secondary/inverse`, `--aef-icon/icon-inverse`, `--aef-selected-bg/text/icon`, `--aef-dot-normal`, `--aef-status-live/warning` (with soft variants), `--aef-progress-active/track`, `--aef-btn-active/inactive-*`, `--aef-counter-*`, `--aef-table-*`
+- **Typography** (2 tokens): `--aef-font-heading` (Geist Variable), `--aef-font-body` (Geist Mono)
+- **Radius scale** (9 tokens): Mathematical progression from 6px to 9999px
+- **Spacing scale** (9 tokens): 4px to 48px
+- **Motion tokens** (8 tokens): Duration (60ms-380ms) + easing curves (emphasized, settle, exit, linear) + spring variants (subtle, normal, obvious)
 
 ### 7.3 Typography
 
-**File:** `frontend/src/styles/typography.css`:
+**Font loading:** The design system uses `@fontsource-variable/geist` (imported in `main.tsx`). Phase 5 code MUST use the same font package. The `--aef-font-heading` and `--aef-font-body` tokens defined in `tokens.css` resolve to Geist Variable and Geist Mono respectively.
 
-```css
-/* Geist Sans and Geist Mono font definitions */
-/* Load from CDN or local assets */
+### 7.4 Design System Component Catalog
 
-@font-face {
-  font-family: 'Geist Sans';
-  src: url('/fonts/GeistSans-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
+The design system provides 16 interactive sections (all demonstrated in `DesignSystemPage.tsx`):
 
-@font-face {
-  font-family: 'Geist Sans';
-  src: url('/fonts/GeistSans-Medium.woff2') format('woff2');
-  font-weight: 500;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* ... additional weights ... */
-
-@font-face {
-  font-family: 'Geist Mono';
-  src: url('/fonts/GeistMono-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-/* ... additional weights ... */
-
-body {
-  font-family: var(--font-sans);
-  font-size: var(--text-base);
-  color: var(--color-fg-3);
-  background-color: var(--color-bg-1);
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
-code, pre, .mono {
-  font-family: var(--font-mono);
-}
-```
+| Section | Component | CSS Classes | Token Prefix |
+|---------|-----------|-------------|---------------|
+| 1. Color Tokens | Swatches | `.ds-token-swatch` | `--aef-*` |
+| 2. Typography | Specimens | `.ds-type-*` | `--aef-font-*` |
+| 3. Buttons | Active/Inactive | `.aef-btn`, `.aef-btn-active/inactive` | `--aef-btn-*` |
+| 4. Counters | Neutral/Active/Variant | `.aef-counter`, `.aef-counter-*` | `--aef-counter-*` |
+| 5. Progress | Track + Fill | `.aef-progress-track/fill` | `--aef-progress-*` |
+| 6. Indicators | Dots | `.aef-dot`, `.aef-dot-active` | `--aef-dot-*` |
+| 7. Tables | Card + Table | `.aef-table-card`, `.aef-table` | `--aef-table-*` |
+| 8. Container Cards | Header + Body | `.aef-container-card` | `--aef-surface-*` |
+| 9. Nav Previews | Sidebar + Dashboard | `.ds-sidebar`, `.ds-dashboard-*` | `--aef-sidebar-*` |
+| 10. Dashboard Preview | Full Layout | `.ds-dashboard-preview` | All tokens |
+| 11. Radius Math | Scale + Nesting | `.ds-radius-*` | `--aef-radius-*` |
+| 12. Proprietary Scroll | V/H + Fade edges | `.aef-scroll-wrap/region` | `--aef-*` |
+| 13. Icon Library | 50 icons, 10 categories | `.aef-icon`, `.aef-icon--*` | `--aef-icon` |
+| 14. Dropdowns/Menus | Dropdown, Popover, Modal, Toast, Command Palette, Context Menu | `.aef-dropdown-*`, `.aef-popover-*`, `.aef-modal-*`, `.aef-toast-*`, `.aef-cmd-*`, `.aef-context-*` | All tokens |
+| 15. Animated Navigation | Glide pill, collapse/expand | `.aef-anim-sidebar`, `.aef-anim-nav-*`, `.aef-nav-glidepill` | `--aef-selected-*`, `--aef-spring-*` |
+| 16. Motion System | Hover lift, press depth, focus ring, loading, enter | `.aef-motion-*` | `--aef-duration-*`, `--aef-ease-*`, `--aef-spring-*` |
 
 ---
 
@@ -1881,3 +1871,5 @@ code, pre, .mono {
 ---
 
 **END OF PHASE 5 HARDENED SPECIFICATION**
+
+> **REMINDER:** This spec is OPEN for progressive upgrade. See Section 1.6 for current status and mandatory AI agent guardrails before modifying any code.

@@ -1,0 +1,121 @@
+
+:root {
+  /* Color tokens */
+  --aef-bg: #000000;
+  --aef-surface-low: #080808;
+  --aef-surface-mid: #101010;
+  --aef-surface-card: #141414;
+  --aef-surface-hover: #1a1a1a;
+  --aef-border: #212121;
+  --aef-border-strong: #444444;
+  --aef-border-width: 1px;
+  --aef-text-primary: #ffffff;
+  --aef-text-secondary: #656565;
+  --aef-text-inverse: #000000;
+  --aef-icon: #ffffff;
+  --aef-icon-inverse: #000000;
+  --aef-selected-bg: #ffffff;
+  --aef-selected-text: #000000;
+  --aef-selected-icon: #000000;
+  --aef-dot-normal: #ffffff;
+  --aef-status-live: #4ade80;
+  --aef-status-live-soft: #4ade8040;
+  --aef-status-warning: #fb923c;
+  --aef-status-warning-soft: #fb923c40;
+  --aef-transport-ws: #4ade80;
+  --aef-transport-ws-soft: #4ade8040;
+  --aef-transport-rest: #f59e0b;
+  --aef-transport-rest-soft: #f59e0b40;
+  --aef-transport-sse: #f97316;
+  --aef-transport-sse-soft: #f9731640;
+  --aef-transport-offline: #ef4444;
+  --aef-transport-offline-soft: #ef444440;
+  --aef-progress-active: #ffffff;
+  --aef-progress-track: #212121;
+  --aef-btn-active-bg: #ffffff;
+  --aef-btn-active-text: #000000;
+  --aef-btn-inactive-bg: #080808;
+  --aef-btn-inactive-border: 1px solid #212121;
+  --aef-btn-inactive-text: #ffffff;
+  --aef-counter-neutral-bg: #080808;
+  --aef-counter-neutral-border: 1px solid #212121;
+  --aef-counter-neutral-text: #ffffff;
+  --aef-counter-active-bg: #ffffff;
+  --aef-counter-active-text: #000000;
+  --aef-counter-variant-a: #4719FF;
+  --aef-counter-variant-b: #DC4714;
+  --aef-counter-variant-text: #ffffff;
+  --aef-table-title-bg: #141414;
+  --aef-table-title-text: #ffffff;
+  --aef-table-border: #212121;
+  --aef-table-header-bg: #101010;
+  --aef-table-header-text: #ffffff;
+  --aef-table-row-bg: #080808;
+  --aef-table-row-text: #656565;
+  --aef-sidebar-width: 244px;
+  --aef-sidebar-collapsed: 56px;
+
+  /* Layout tokens */
+  --aef-header-height: 44px;
+  --aef-statusbar-height: 28px;
+  --aef-z-sidebar: 100;
+  --aef-z-header: 90;
+  --aef-canvas-bg: #000000;
+  --aef-panel-width: 320px;
+
+  /* Typography */
+  --aef-font-heading: 'Geist Variable', 'Geist', system-ui, sans-serif;
+  --aef-font-body: 'Geist Mono', 'IBM Plex Mono', ui-monospace, 'Courier New', monospace;
+
+  /* Radius - Mathematical Scale
+     Default formula: clamp(10px, min(w, h) * 0.22, 28px)
+     Large surface:   clamp(18px, min(w, h) * 0.08, 36px)
+     Nested rule:     child = max(parent - inset, radius-control) */
+  --aef-radius-control: 10px;
+  --aef-radius-field:   12px;
+  --aef-radius-card:    14px;
+  --aef-radius-panel:   20px;
+  --aef-radius-sheet:   24px;
+  --aef-radius-full:    9999px;
+  /* Legacy aliases kept for backward compatibility */
+  --aef-radius-xs:   6px;
+  --aef-radius-sm:   var(--aef-radius-control);
+  --aef-radius-pill: var(--aef-radius-full);
+
+  /* Spacing */
+  --aef-space-1:  4px;
+  --aef-space-2:  8px;
+  --aef-space-3:  12px;
+  --aef-space-4:  16px;
+  --aef-space-5:  20px;
+  --aef-space-6:  24px;
+  --aef-space-8:  32px;
+  --aef-space-10: 40px;
+  --aef-space-12: 48px;
+
+  /* Motion tokens */
+  --aef-duration-instant:  60ms;
+  --aef-duration-fast:     120ms;
+  --aef-duration-standard: 220ms;
+  --aef-duration-slow:     380ms;
+  --aef-ease-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --aef-ease-settle:     cubic-bezier(0.34, 1.56, 0.64, 1);
+  --aef-ease-exit:       cubic-bezier(0.4, 0, 1, 1);
+  --aef-ease-linear:     linear;
+
+  /* Spring motion variants - subtle, normal, obvious overshoot */
+  --aef-spring-subtle:   cubic-bezier(0.34, 1.20, 0.64, 1);
+  --aef-spring-normal:   cubic-bezier(0.34, 1.56, 0.64, 1);
+  --aef-spring-obvious:  cubic-bezier(0.25, 1.80, 0.64, 1);
+}
+
+/* Invisible scroll surface utility — no scrollbar chrome, scroll behavior preserved */
+.aef-container-card__body,
+.aef-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.aef-container-card__body::-webkit-scrollbar,
+.aef-scroll::-webkit-scrollbar {
+  display: none;
+}

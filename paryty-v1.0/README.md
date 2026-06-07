@@ -4,6 +4,15 @@
 
 Paryty is a next-generation observability platform that provides digital twin capabilities for software applications.
 
+## Project Status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Phase 1-4: Agent + Cluster Backend | ✅ **COMPLETE** | Rust agent (metal/eBPF/supervisor), Go cluster (ingestion/stream/processing/storage/query). Both agents and all services running end-to-end. |
+| Phase 5: Frontend Visualization | 🔓 **OPEN** | Core connectivity bridge and topology rendering verified working. Remaining as progressive upgrade. See `docs/development/phase-5-hardened-spec.md` Section 1.6. |
+
+> **⚠️ For AI agents working on Phase 5:** Phase 5 is NOT closed. Read the hardened spec Section 1.6 for mandatory guardrails. You MUST ask the user what changes are needed before modifying any Phase 5 code.
+
 ## Key Features
 
 - **GPU-Accelerated Visualization** � PixiJS-powered topology maps with particle animations

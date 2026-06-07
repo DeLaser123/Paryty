@@ -7,7 +7,7 @@ export function useTimeline() {
   const store = useTimelineStore();
 
   const startStreaming = useCallback(() => {
-    const url = `/api/v1/timeline/stream?start=${encodeURIComponent(store.config.startTime)}&end=${encodeURIComponent(store.config.endTime)}&speed=${store.config.speed}`;
+    const url = `/api/v1/timeline/replay?start=${encodeURIComponent(store.config.startTime)}&end=${encodeURIComponent(store.config.endTime)}&speed=${store.config.speed}`;
     const sse = new SSEClient({ url });
 
     sse.on('snapshot', (event) => {

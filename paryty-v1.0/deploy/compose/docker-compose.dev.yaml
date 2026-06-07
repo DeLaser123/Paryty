@@ -38,14 +38,14 @@ services:
       - --advertise-rpc-addr
       - redpanda:33145
     volumes:
-      - redpanda-data:/var/lib/redpanda/data
+      - D:/ParytyData/redpanda:/var/lib/redpanda/data
 
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
     ports:
       - "6379:6379"
     volumes:
-      - dragonfly-data:/data
+      - D:/ParytyData/dragonfly:/data
 
   questdb:
     image: questdb/questdb:latest
@@ -54,14 +54,14 @@ services:
       - "9009:9009"  # Web console
       - "8812:8812"  # InfluxDB line protocol
     volumes:
-      - questdb-data:/var/lib/questdb
+      - D:/ParytyData/questdb:/var/lib/questdb
 
   postgres:
     image: postgres:16-alpine
     ports:
       - "5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - D:/ParytyData/postgres:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: paryty
       POSTGRES_USER: paryty
@@ -74,7 +74,7 @@ services:
       - "19333:19333"  # Master gRPC
     command: master -ip=seaweedfs-master -port=9333 -volumePreallocate=false
     volumes:
-      - seaweedfs-master-data:/data
+      - D:/ParytyData/seaweedfs-master:/data
 
   seaweedfs-volume:
     image: chrislusf/seaweedfs:latest
@@ -83,7 +83,7 @@ services:
       - "18080:18080"  # Volume gRPC
     command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:8080
     volumes:
-      - seaweedfs-volume-data:/data
+      - D:/ParytyData/seaweedfs-volume:/data
     depends_on:
       - seaweedfs-master
 
@@ -94,7 +94,7 @@ services:
       - "18888:18888"  # Filer gRPC
     command: filer -master=seaweedfs-master:9333 -port=8888
     volumes:
-      - seaweedfs-filer-data:/data
+      - D:/ParytyData/seaweedfs-filer:/data
     depends_on:
       - seaweedfs-master
       - seaweedfs-volume
@@ -197,11 +197,55 @@ services:
     depends_on:
       - paryty-query
 
+  # --- Phase 6: Intelligence Layer ---
+
+  paryty-intelligence:
+    build:
+      context: ../../intelligence
+      dockerfile: Dockerfile
+    ports:
+      - "50051:50051"  # gRPC intelligence service
+    environment:
+      INTELLIGENCE_PORT: "50051"
+      QUESTDB_HOST: questdb
+      QUESTDB_PORT: "8812"
+      QUESTDB_DATABASE: paryty
+      DRAGONFLY_HOST: dragonfly
+      DRAGONFLY_PORT: "6379"
+      LOG_LEVEL: info
+    volumes:
+      - D:/ParytyData/intelligence/models:/data/models
+      - ../../configs/intelligence/intelligence.yaml:/app/config/intelligence.yaml:ro
+    depends_on:
+      - questdb
+      - dragonfly
+      - redpanda
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); ch.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  # Gai-Tech Linux Agent (Phase 6 validation tenant)
+  paryty-agent-gai-tech:
+    build:
+      context: ../../
+      dockerfile: deploy/docker/Dockerfile.agent
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - ../../configs/agent/agent-gai-tech-linux.yaml:/app/config/agent.yaml:ro
+    environment:
+      PARYTY_CLUSTER_ADDR: paryty-ingestion:50052
+      PARYTY_LOG_LEVEL: info
+      PARYTY_TENANT_ID: gai-tech
+    privileged: true
+    pid: host
+    depends_on:
+      - paryty-ingestion
+
 volumes:
-  redpanda-data:
-  dragonfly-data:
-  questdb-data:
-  postgres-data:
-  seaweedfs-master-data:
-  seaweedfs-volume-data:
-  seaweedfs-filer-data:
+  # Named volumes kept for services that don't need D: drive persistence
+  # All data volumes now use D:/ParytyData/ bind mounts above
+  placeholder:

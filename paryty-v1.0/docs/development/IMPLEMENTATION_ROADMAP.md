@@ -1,30 +1,27 @@
 # PARYTY V1.0: THE COMPLETE ROADMAP TO 100K+ LOC
 
-## CURRENT STATE HONEST ASSESSMENT
+## CURRENT STATE ASSESSMENT
 
-You have **~29K LOC of scaffolding and basic implementations**. Here's what's actually real:
+> **Last updated: June 2026.** Phase 1-4 COMPLETE. Phase 5 OPEN (baseline built), Phase 6-8 not started.
 
-✅ **Working at basic level:**
-- CPU collector (Linux /proc/stat reading, ~200 LOC)
-- Basic aggregation logic (avg/min/max/percentile, ~277 LOC)
-- PixiJS renderer (basic node/edge drawing, ~188 LOC)
-- Proto definitions (~2,000 LOC across 6 files)
-- Project structure and build infrastructure
+### Phase 1-4: COMPLETE ✅
+- Rust agent: Metal scrapers (CPU, memory, disk, network, process tree, container detection), communication layer (gRPC streaming, edge buffer, Zstd compression, flow control, reconnection), eBPF network observer (TCP tracking, DNS mapping, HTTP inspection, DB protocol inspection)
+- Go cluster: Ingestion service (gRPC server, auth/tenancy, Redpanda producer), processing pipeline (aggregator, correlator, enricher — single binary), storage layer (Dragonfly hot store, QuestDB warm store, SeaweedFS cold store), query API (REST + WebSocket + SSE), multi-tenant control plane
+- Both agents (tenant1 + tenant-b) running end-to-end, verified data flow through full pipeline
 
-❌ **Stub/placeholder (marked with TODO or empty):**
-- TCP tracker: Returns `Ok(Vec::new())` — **zero actual eBPF**
-- HTTP inspector: Returns `Ok(None)` — **zero parsing**
-- DNS mapper, DB inspector: Same pattern
-- Dragonfly client: **Doesn't exist** (only store.go interface)
-- QuestDB client: **Doesn't exist**
-- SeaweedFS client: **Doesn't exist**
-- Correlator: **Not implemented**
-- Enricher: **Not implemented**
-- Intelligence layer (forecasting, anomaly detection, simulation, timeline): **Doesn't exist**
-- Frontend GPU workers, particle systems, force layout: **Basic scaffolding**
-- Go SDK: **Minimal wrapper**
+### Phase 5: OPEN — Baseline Built 🔓
+- **GPU Rendering Engine** (~3,200 LOC): Instanced rendering, hierarchical clustering, particle system, viewport, effects, texture atlas
+- **Real-Time Data Pipeline** (~1,000 LOC): WebSocket with backpressure/batching, SSE, REST with LRU cache, Web Workers
+- **State Management** (~800 LOC): 5 Zustand stores with selector optimization
+- **UI Components** (~1,500 LOC): App shell, topology canvas, detail panels, metrics cards, timeline scrubber, alerts
+- **Connectivity Bridge**: DTO normalization, tenant aggregation, WebSocket protocol alignment — verified end-to-end
+- **Design System**: Complete paryty_design_system/ with `--aef-*` tokens, 16 component sections
+- See `docs/development/phase-5-hardened-spec.md` Section 1.6 for full status and **mandatory AI agent guardrails**
 
-**Reality:** You have architecture, build system, and ~15-20% of the actual implementation done.
+### Phase 6-8: NOT STARTED ❌
+- Intelligence layer (forecasting, anomaly detection, simulation, timeline engine)
+- Multi-language SDKs (Python, Java, Node.js)
+- Production hardening (TLS, RBAC, audit logging, K8s manifests, Helm charts, CI/CD, load testing)
 
 ---
 
@@ -493,10 +490,11 @@ This is organized in **8 phases**, each building on the previous. **You control 
 
 ---
 
-### PHASE 5: FRONTEND VISUALIZATION (Weeks 13-16)
-**Target: +12,000 LOC → Total: ~88K LOC**
+### PHASE 5: FRONTEND VISUALIZATION — 🔓 OPEN (Progressive Upgrade)
+**Status:** Baseline built (~5,500 LOC). Core connectivity bridge verified. Remaining ~6,500 LOC open for user-directed upgrades.
+**Spec:** `docs/development/phase-5-hardened-spec.md` — Section 1.6 has mandatory AI agent guardrails.
 
-**Goal:** GPU-accelerated, real-time observability dashboard
+**Goal:** GPU-accelerated, real-time observability dashboard (BASELINE ACHIEVED) | **⚠️ DO NOT modify Phase 5 code without user confirmation. See spec Section 1.6.**
 
 #### Layer 17: GPU Rendering Engine (TypeScript) — ~5,000 LOC
 
@@ -883,9 +881,11 @@ For each phase, deploy specialized agents:
 - ✅ API key validation rejects invalid keys with Unauthenticated error
 
 **Phase 5 Acceptance:**
-- ✅ Frontend renders 15K nodes at 60fps
-- ✅ Real-time metrics update via WebSocket
-- ✅ Timeline replay works with speed controls
+- ✅ Frontend renders 100+ nodes at 60fps (15K node target not yet stress-tested)
+- ✅ Real-time topology updates via WebSocket (backpressure + batching verified)
+- ✅ REST API returns live topology data (multi-tenant aggregation verified)
+- ⏳ Timeline replay with speed controls (SSE client exists, replay engine pending)
+- ⚠️ **Phase 5 is OPEN — ask user before modifying any Phase 5 code. See spec Section 1.6.**
 
 **Phase 6 Acceptance:**
 - ✅ Forecasting predicts CPU usage 7 days ahead with <10% error
@@ -1074,8 +1074,8 @@ These principles apply across ALL phases and override any agent suggestion:
 | `docs/phase-2-hardened-spec.md` | 1,948 | ~10,000 | LOCKED |
 | `docs/phase-3-hardened-spec.md` | 2,185 | ~8,000 | LOCKED |
 | `docs/phase-4-hardened-spec.md` | 3,152 | ~13,500 | LOCKED |
-| `docs/phase-5-hardened-spec.md` | 1,883 | ~10,400 | LOCKED |
+| `docs/phase-5-hardened-spec.md` | 1,876 | ~10,400 | **OPEN** 🔓 |
 | `docs/phase-6-hardened-spec.md` | 3,165 | ~14,200 | LOCKED |
 | `docs/phase-7-hardened-spec.md` | 1,482 | ~4,200 | LOCKED |
 | `docs/phase-8-hardened-spec.md` | 2,325 | ~7,000 | LOCKED |
-| **Total** | **17,973** | **~77,800** | **ALL LOCKED** |
+| **Total** | **17,966** | **~77,800** | **Phase 5 OPEN** 🔓 |

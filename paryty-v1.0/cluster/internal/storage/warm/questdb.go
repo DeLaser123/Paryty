@@ -696,6 +696,70 @@ func (c *Client) QueryMetrics(ctx context.Context, agentID string, metricName st
 	return metrics, rows.Err()
 }
 
+// QueryEvents queries system events from the events table within a time range.
+func (c *Client) QueryEvents(ctx context.Context, agentID, category, severity string, start, end time.Time, limit int) ([]models.Event, error) {
+	where := "WHERE timestamp >= $1 AND timestamp <= $2"
+	args := []interface{}{start, end}
+	argIdx := 3
+
+	if agentID != "" {
+		where += fmt.Sprintf(" AND agent_id = $%d", argIdx)
+		args = append(args, agentID)
+		argIdx++
+	}
+	if category != "" {
+		where += fmt.Sprintf(" AND category = $%d", argIdx)
+		args = append(args, category)
+		argIdx++
+	}
+	if severity != "" {
+		where += fmt.Sprintf(" AND severity = $%d", argIdx)
+		args = append(args, severity)
+		argIdx++
+	}
+
+	query := fmt.Sprintf(`SELECT id, agent_id, source, category, severity, title, description, timestamp
+		FROM events %s
+		ORDER BY timestamp DESC
+		LIMIT $%d`, where, argIdx)
+	args = append(args, limit)
+
+	rows, err := c.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query events: %w", err)
+	}
+	defer rows.Close()
+
+	var events []models.Event
+	for rows.Next() {
+		var e models.Event
+		if err := rows.Scan(&e.ID, &e.AgentID, &e.Source, &e.Category, &e.Severity, &e.Title, &e.Description, &e.Timestamp); err != nil {
+			continue
+		}
+		events = append(events, e)
+	}
+	return events, rows.Err()
+}
+
+// GetDistinctMetricNames returns all distinct metric names from the metrics table.
+func (c *Client) GetDistinctMetricNames(ctx context.Context) ([]string, error) {
+	rows, err := c.pool.Query(ctx, `SELECT DISTINCT name FROM metrics ORDER BY name`)
+	if err != nil {
+		return nil, fmt.Errorf("get distinct metric names: %w", err)
+	}
+	defer rows.Close()
+
+	var names []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			continue
+		}
+		names = append(names, name)
+	}
+	return names, rows.Err()
+}
+
 // WriteAggregatedMetric writes a single aggregated metric to QuestDB.
 func (c *Client) WriteAggregatedMetric(ctx context.Context, tenant string, m *models.AggregatedMetric) error {
 	// Serialize labels to JSON string.

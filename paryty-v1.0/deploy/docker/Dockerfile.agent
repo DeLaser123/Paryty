@@ -4,12 +4,12 @@
 # Usage: podman build -t paryty/agent -f deploy/docker/Dockerfile.agent .
 
 # Build stage
-FROM rust:1.82-alpine AS builder
+FROM rust:1.87-alpine AS builder
 
 WORKDIR /app
 
 # Install build dependencies
-RUN apk add --no-cache musl-dev protobuf-dev
+RUN apk add --no-cache musl-dev protobuf-dev make elfutils-dev linux-headers clang llvm lld libbpf-dev zlib-static
 
 # Copy proto files first (from project root context)
 COPY proto/ /app/proto/

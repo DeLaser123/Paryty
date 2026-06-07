@@ -113,19 +113,24 @@ The cluster is a Redpanda-like streaming platform for observability data. It con
 
 The frontend is a GPU-accelerated visualization and intelligence dashboard.
 
-#### GPU Rendering Engine
-- WebGPU (primary) with WebGL 2.0 fallback
-- Compute shaders for force-directed graph layout
-- Instanced rendering for 10K+ nodes
-- GPU-accelerated particle systems
+**Current Status:** Phase 5 is **OPEN** — core connectivity bridge and topology rendering verified working. See `docs/development/phase-5-hardened-spec.md` Section 1.6 for full implementation status and mandatory AI agent guardrails.
 
-#### Visualization Features
-- Force-directed topology layout
-- Particle animations for data flow
-- Glow effects for CPU/memory load
-- Edge animation for throughput
-- Color coding for health status
-- Multi-level zoom (service, container, host, datacenter)
+#### GPU Rendering Engine (Phase 5 — Baseline Built)
+- PixiJS with instanced rendering via ParticleContainer for 15K+ nodes at 60fps
+- Hierarchical clustering layout with d3-force within clusters
+- GPU-accelerated particle systems for data flow visualization
+- Runtime texture atlas generation for node shapes × status combinations
+- Viewport controller with zoom, pan, and fit-to-content
+- Health glow effects, edge animations, alert pulse rings
+
+#### Visualization Features (Phase 5 — Baseline Built)
+- Hierarchical clustered topology layout
+- Particle animations for data flow (throughput = brightness, latency = speed)
+- Glow effects for health status (healthy/degraded/unhealthy pulsing)
+- Edge animation by throughput intensity
+- Monochromatic health status indicators (brightness-based, not hue-based)
+- Multi-level zoom and pan with fit-to-content
+- Tenant-aware topology aggregation (multi-tenant support)
 
 #### Intelligence Layer
 

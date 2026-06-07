@@ -77,7 +77,7 @@ func main() {
 	wsHandler := api.NewWebSocketHandler(store, logger)
 
 	// Create SSE handler
-	sseHandler := api.NewSSEHandler(store, logger)
+	sseHandler := api.NewSSEHandler(store, logger, cfg.Cluster.Stream.Brokers)
 
 	// Set Gin mode
 	gin.SetMode(gin.ReleaseMode)
@@ -106,8 +106,38 @@ func main() {
 	// Wire SSE endpoints
 	router.GET("/api/v1/timeline/replay", sseHandler.HandleTimeline)
 	router.GET("/api/v1/metrics/:agent_id/stream", sseHandler.HandleMetricsStream)
+	router.GET("/api/v1/events/stream", sseHandler.HandleEventStream)
+
+	// Wire intelligence API handlers (Phase 6)
+	intelCfg := api.NewIntelConfigFromEnv()
+	intelHandlers, err := api.NewIntelHandlers(intelCfg, logger)
+	if err != nil {
+		logger.Warn("Failed to initialize intelligence handlers (intelligence service may not be running)",
+			zap.Error(err),
+			zap.String("address", intelCfg.Address),
+		)
+		// Non-fatal: the rest of the query service works without intelligence.
+	} else {
+		intelHandlers.RegisterRoutes(root)
+		defer intelHandlers.Close()
+		logger.Info("Intelligence API routes registered",
+			zap.String("address", intelCfg.Address),
+		)
+	}
 
 	logger.Info("All query routes registered")
+
+	// Start Redpanda event consumers for WebSocket fanout (all active tenants)
+	tenants := []string{"default", "gai-tech", "tenant1", "tenant-b"}
+	for _, t := range tenants {
+		tenant := t // capture loop variable
+		go func() {
+			if err := wsHandler.StartEventConsumer(ctx, cfg.Cluster.Stream.Brokers, tenant); err != nil {
+				logger.Warn("Event consumer stopped", zap.String("tenant", tenant), zap.Error(err))
+			}
+		}()
+	}
+	logger.Info("WebSocket event consumers started", zap.Int("tenants", len(tenants)))
 
 	// Create HTTP server
 	srv := &http.Server{

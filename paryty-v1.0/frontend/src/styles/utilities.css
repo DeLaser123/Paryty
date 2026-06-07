@@ -1,0 +1,158 @@
+/**
+ * Utilities — Phase 5 T20.0
+ *
+ * Composable utility classes using --aef-* tokens exclusively.
+ * All spacing, radii, colors, and transitions reference design tokens.
+ */
+
+/* === Text === */
+
+.aef-truncate {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.aef-truncate-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.aef-truncate-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.aef-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+.aef-text-xs { font-size: 10px; }
+.aef-text-sm { font-size: 11px; }
+.aef-text-base { font-size: 13px; }
+.aef-text-lg { font-size: 15px; }
+.aef-text-xl { font-size: 18px; }
+
+.aef-text-secondary { color: var(--aef-text-secondary); }
+.aef-text-primary { color: var(--aef-text-primary); }
+
+/* === Flex === */
+
+.aef-flex-center {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.aef-flex-col {
+  display: flex;
+  flex-direction: column;
+}
+
+.aef-items-center {
+  display: flex;
+  align-items: center;
+}
+
+.aef-justify-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+/* === Gap (4px grid) === */
+
+.aef-gap-1 { gap: var(--aef-space-1); }
+.aef-gap-2 { gap: var(--aef-space-2); }
+.aef-gap-3 { gap: var(--aef-space-3); }
+.aef-gap-4 { gap: var(--aef-space-4); }
+.aef-gap-5 { gap: var(--aef-space-5); }
+.aef-gap-6 { gap: var(--aef-space-6); }
+.aef-gap-7 { gap: var(--aef-space-8); }
+.aef-gap-8 { gap: var(--aef-space-10); }
+
+/* === Padding (4px grid) === */
+
+.aef-p-1 { padding: var(--aef-space-1); }
+.aef-p-2 { padding: var(--aef-space-2); }
+.aef-p-3 { padding: var(--aef-space-3); }
+.aef-p-4 { padding: var(--aef-space-4); }
+.aef-p-5 { padding: var(--aef-space-5); }
+.aef-p-6 { padding: var(--aef-space-6); }
+.aef-p-7 { padding: var(--aef-space-8); }
+.aef-p-8 { padding: var(--aef-space-10); }
+
+/* === Margin (4px grid) === */
+
+.aef-m-1 { margin: var(--aef-space-1); }
+.aef-m-2 { margin: var(--aef-space-2); }
+.aef-m-3 { margin: var(--aef-space-3); }
+.aef-m-4 { margin: var(--aef-space-4); }
+.aef-m-5 { margin: var(--aef-space-5); }
+.aef-m-6 { margin: var(--aef-space-6); }
+.aef-m-7 { margin: var(--aef-space-8); }
+.aef-m-8 { margin: var(--aef-space-10); }
+
+/* === Backgrounds === */
+
+.aef-bg-surface-low { background: var(--aef-surface-low); }
+.aef-bg-surface-mid { background: var(--aef-surface-mid); }
+.aef-bg-surface-card { background: var(--aef-surface-card); }
+.aef-bg { background: var(--aef-bg); }
+
+/* === Border === */
+
+.aef-border {
+  border: var(--aef-border-width) solid var(--aef-border);
+}
+
+.aef-border-strong {
+  border: var(--aef-border-width) solid var(--aef-border-strong);
+}
+
+.aef-border-bottom {
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+}
+
+.aef-border-top {
+  border-top: var(--aef-border-width) solid var(--aef-border);
+}
+
+/* === Active card state (from design system) === */
+
+.aef-card-active {
+  border-color: var(--aef-text-primary) !important;
+  transition: border-color var(--aef-duration-fast) var(--aef-spring-subtle) !important;
+}
+
+/* === Border radius === */
+
+.aef-radius-control { border-radius: var(--aef-radius-control); }
+.aef-radius-field { border-radius: var(--aef-radius-field); }
+.aef-radius-card { border-radius: var(--aef-radius-card); }
+.aef-radius-panel { border-radius: var(--aef-radius-panel); }
+.aef-radius-full { border-radius: var(--aef-radius-full); }
+
+/* === Status colors === */
+
+.aef-status-live { color: var(--aef-status-live); }
+.aef-status-warning { color: var(--aef-status-warning); }
+
+/* === Display === */
+
+.aef-hidden { display: none; }
+.aef-block { display: block; }
+.aef-inline { display: inline; }
+.aef-flex { display: flex; }
