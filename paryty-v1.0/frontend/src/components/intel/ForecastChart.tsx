@@ -8,19 +8,23 @@
  */
 
 import { memo, useRef, useEffect, useCallback, useState } from 'react';
+import { TrendingUp, Clock } from 'lucide-react';
 import type { ForecastSeries } from '../../types/intel';
 import { KEY_METRICS, KEY_METRIC_LABELS } from '../../types/intel';
+import { ParytySelect } from '../common/ParytySelect';
 
 // ─── Chart Constants ─────────────────────────────────────────────
 
 const PADDING = { top: 24, right: 24, bottom: 40, left: 56 };
-const GRID_COLOR = 'rgba(255, 255, 255, 0.06)';
-const AXIS_COLOR = 'rgba(255, 255, 255, 0.15)';
+const GRID_COLOR = 'rgba(255, 255, 255, 0.04)';
+const AXIS_COLOR = 'rgba(255, 255, 255, 0.12)';
 const LABEL_COLOR = 'rgba(255, 255, 255, 0.4)';
-const HISTORICAL_COLOR = '#4ade80';
-const FORECAST_COLOR = '#60a5fa';
-const CONFIDENCE_COLOR = 'rgba(96, 165, 250, 0.12)';
-const CONFIDENCE_BORDER_COLOR = 'rgba(96, 165, 250, 0.25)';
+const HISTORICAL_COLOR = 'rgba(255, 255, 255, 0.85)';
+const FORECAST_COLOR = 'rgba(255, 255, 255, 0.55)';
+const CONFIDENCE_COLOR = 'rgba(255, 255, 255, 0.06)';
+const CONFIDENCE_BORDER_COLOR = 'rgba(255, 255, 255, 0.12)';
+const HISTORICAL_FILL = 'rgba(255, 255, 255, 0.08)';
+const FORECAST_FILL = 'rgba(255, 255, 255, 0.04)';
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
@@ -218,11 +222,27 @@ export const ForecastChart = memo(function ForecastChart({
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // ─── Historical Line (solid) ─────────────────────────────────
+    // ─── Historical Line + Area Fill ──────────────────────────────
 
-    // Assume first half is historical, second half is forecast
     const splitIdx = Math.floor(points.length / 2);
 
+    // Area fill under historical
+    ctx.beginPath();
+    ctx.moveTo(mapX(points[0].timestamp), chartY + chartH);
+    for (let i = 0; i <= splitIdx; i++) {
+      const x = mapX(points[i].timestamp);
+      const y = mapY(points[i].value);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(mapX(points[splitIdx].timestamp), chartY + chartH);
+    ctx.closePath();
+    const histGradient = ctx.createLinearGradient(0, chartY, 0, chartY + chartH);
+    histGradient.addColorStop(0, HISTORICAL_FILL);
+    histGradient.addColorStop(1, 'rgba(255, 255, 255, 0.01)');
+    ctx.fillStyle = histGradient;
+    ctx.fill();
+
+    // Historical line (solid)
     ctx.strokeStyle = HISTORICAL_COLOR;
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -234,8 +254,25 @@ export const ForecastChart = memo(function ForecastChart({
     }
     ctx.stroke();
 
-    // ─── Forecast Line (dashed) ──────────────────────────────────
+    // ─── Forecast Line + Area Fill (dashed) ──────────────────────
 
+    // Area fill under forecast
+    ctx.beginPath();
+    ctx.moveTo(mapX(points[splitIdx].timestamp), chartY + chartH);
+    for (let i = splitIdx; i < points.length; i++) {
+      const x = mapX(points[i].timestamp);
+      const y = mapY(points[i].value);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(mapX(points[points.length - 1].timestamp), chartY + chartH);
+    ctx.closePath();
+    const fcGradient = ctx.createLinearGradient(0, chartY, 0, chartY + chartH);
+    fcGradient.addColorStop(0, FORECAST_FILL);
+    fcGradient.addColorStop(1, 'rgba(255, 255, 255, 0.01)');
+    ctx.fillStyle = fcGradient;
+    ctx.fill();
+
+    // Forecast line (dashed)
     ctx.strokeStyle = FORECAST_COLOR;
     ctx.lineWidth = 2;
     ctx.setLineDash([6, 4]);
@@ -341,68 +378,71 @@ export const ForecastChart = memo(function ForecastChart({
   }, []);
 
   return (
-    <div className="forecast-chart" data-testid="forecast-chart">
-      <div className="forecast-chart__header">
-        <h3 className="forecast-chart__title">Forecast Detail</h3>
-        <select
-          className="forecast-chart__selector"
+    <div className="aef-container-card" data-testid="forecast-chart">
+      <div className="aef-container-card__header">
+        <div className="aef-container-card__icon"><TrendingUp size={16} /></div>
+        <h3 className="aef-container-card__title">Forecast Detail</h3>
+        <ParytySelect
+          options={KEY_METRICS.map((m) => ({ label: KEY_METRIC_LABELS[m], value: m }))}
           value={selectedMetric}
-          onChange={(e) => onMetricChange(e.target.value)}
-          data-testid="forecast-metric-selector"
-        >
-          {KEY_METRICS.map((m) => (
-            <option key={m} value={m}>
-              {KEY_METRIC_LABELS[m]}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="forecast-chart__canvas-wrapper" ref={containerRef}>
-        <canvas
-          ref={canvasRef}
-          style={{ width: '100%', height: '100%' }}
-          onMouseMove={handleMouseMove}
-          onMouseLeave={handleMouseLeave}
-          data-testid="forecast-canvas"
+          onChange={onMetricChange}
+          placeholder="Select metric"
+          testId="forecast-metric-selector"
         />
-
-        {tooltip && (
-          <div
-            className="forecast-chart__tooltip"
-            style={{
-              left: tooltip.x + 12,
-              top: tooltip.y - 60,
-            }}
-            data-testid="forecast-tooltip"
-          >
-            <div className="forecast-chart__tooltip-time">
-              {formatTimestamp(tooltip.timestamp)}
-            </div>
-            <div className="forecast-chart__tooltip-value">
-              {tooltip.isForecast ? '🔮 Forecast' : '📊 Historical'}:{' '}
-              {formatValue(tooltip.value)}
-            </div>
-            <div className="forecast-chart__tooltip-range">
-              Range: {formatValue(tooltip.lower)} – {formatValue(tooltip.upper)}
-            </div>
-          </div>
-        )}
       </div>
 
-      <div className="forecast-chart__legend">
-        <span className="forecast-chart__legend-item">
-          <span className="forecast-chart__legend-swatch" style={{ background: HISTORICAL_COLOR }} />
-          Historical
-        </span>
-        <span className="forecast-chart__legend-item">
-          <span className="forecast-chart__legend-swatch" style={{ background: FORECAST_COLOR }} />
-          Forecast
-        </span>
-        <span className="forecast-chart__legend-item">
-          <span className="forecast-chart__legend-swatch" style={{ background: CONFIDENCE_COLOR }} />
-          Confidence Interval
-        </span>
+      <div className="aef-container-card__body">
+        <div className="forecast-chart__canvas-wrapper" ref={containerRef}>
+          <canvas
+            ref={canvasRef}
+            style={{ width: '100%', height: '100%' }}
+            onMouseMove={handleMouseMove}
+            onMouseLeave={handleMouseLeave}
+            data-testid="forecast-canvas"
+          />
+
+          {tooltip && (
+            <div
+              className="forecast-chart__tooltip"
+              style={{
+                left: tooltip.x + 12,
+                top: tooltip.y - 60,
+              }}
+              data-testid="forecast-tooltip"
+            >
+              <div className="forecast-chart__tooltip-time">
+                {formatTimestamp(tooltip.timestamp)}
+              </div>
+              <div className="forecast-chart__tooltip-value">
+                {tooltip.isForecast ? (
+                  <TrendingUp size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
+                ) : (
+                  <Clock size={12} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 4 }} />
+                )}
+                {tooltip.isForecast ? 'Forecast' : 'Historical'}:{' '}
+                {formatValue(tooltip.value)}
+              </div>
+              <div className="forecast-chart__tooltip-range">
+                Range: {formatValue(tooltip.lower)} – {formatValue(tooltip.upper)}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className="forecast-chart__legend">
+          <span className="forecast-chart__legend-item">
+            <span className="forecast-chart__legend-swatch" style={{ background: HISTORICAL_COLOR }} />
+            Historical
+          </span>
+          <span className="forecast-chart__legend-item">
+            <span className="forecast-chart__legend-swatch" style={{ background: FORECAST_COLOR }} />
+            Forecast
+          </span>
+          <span className="forecast-chart__legend-item">
+            <span className="forecast-chart__legend-swatch" style={{ background: CONFIDENCE_COLOR }} />
+            Confidence Interval
+          </span>
+        </div>
       </div>
     </div>
   );

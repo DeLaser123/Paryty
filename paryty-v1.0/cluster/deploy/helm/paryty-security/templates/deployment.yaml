@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-security
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: security
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: security
+    spec:
+      serviceAccountName: {{ include "paryty.serviceAccountName" . }}
+      containers:
+        - name: security
+          image: "{{ .Values.global.imageRegistry | default "ghcr.io/paryty" }}/paryty-security:latest"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8443

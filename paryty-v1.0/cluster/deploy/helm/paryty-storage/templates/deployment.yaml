@@ -1,0 +1,181 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-postgresql
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: postgresql
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: postgresql
+    spec:
+      containers:
+        - name: postgresql
+          image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+          ports:
+            - name: postgres
+              containerPort: 5432
+          env:
+            - name: POSTGRES_DB
+              value: "paryty"
+            - name: POSTGRES_USER
+              value: "paryty"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: paryty-postgresql
+                  key: password
+          resources:
+            {{- toYaml .Values.postgresql.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "paryty.name" . }}-postgresql
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-dragonfly
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: dragonfly
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: dragonfly
+    spec:
+      containers:
+        - name: dragonfly
+          image: "{{ .Values.dragonfly.image.repository }}:{{ .Values.dragonfly.image.tag }}"
+          ports:
+            - name: redis
+              containerPort: 6379
+          resources:
+            {{- toYaml .Values.dragonfly.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "paryty.name" . }}-dragonfly
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-questdb
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: questdb
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: questdb
+    spec:
+      containers:
+        - name: questdb
+          image: "{{ .Values.questdb.image.repository }}:{{ .Values.questdb.image.tag }}"
+          ports:
+            - name: pgwire
+              containerPort: 8812
+            - name: http
+              containerPort: 9000
+          resources:
+            {{- toYaml .Values.questdb.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/questdb
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "paryty.name" . }}-questdb
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-redpanda
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: redpanda
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: redpanda
+    spec:
+      containers:
+        - name: redpanda
+          image: "{{ .Values.redpanda.image.repository }}:{{ .Values.redpanda.image.tag }}"
+          ports:
+            - name: kafka
+              containerPort: 9092
+          resources:
+            {{- toYaml .Values.redpanda.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/redpanda/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "paryty.name" . }}-redpanda
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-seaweedfs
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: seaweedfs
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: seaweedfs
+    spec:
+      containers:
+        - name: seaweedfs
+          image: "{{ .Values.seaweedfs.image.repository }}:{{ .Values.seaweedfs.image.tag }}"
+          ports:
+            - name: s3
+              containerPort: 8333
+          resources:
+            {{- toYaml .Values.seaweedfs.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "paryty.name" . }}-seaweedfs

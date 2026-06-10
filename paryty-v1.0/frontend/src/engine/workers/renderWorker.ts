@@ -88,6 +88,12 @@ function dispatch(command: RenderCommand): void {
       app?.destroy();
       app = null;
       return;
+    case 'budgetLevel':
+      // Main thread owns the MemoryBudget sensor (performance.memory is
+      // unavailable in workers). It broadcasts the derived level here so the
+      // renderer can apply degradation (particle culling, glow throttling).
+      app?.applyBudget(command.level);
+      return;
     // 'setTopology', 'positions', and 'viewport' belong to the streaming-layout
     // path wired in a later increment; ignore them until then.
     case 'setTopology':

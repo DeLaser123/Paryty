@@ -450,6 +450,12 @@ pub struct AgentRegistration {
     /// When the agent started.
     #[prost(message, optional, tag = "7")]
     pub started_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Assigned twin ID (empty if unassigned).
+    #[prost(string, tag = "8")]
+    pub twin_id: ::prost::alloc::string::String,
+    /// Client/tenant ID the agent reports under.
+    #[prost(string, tag = "9")]
+    pub client_id: ::prost::alloc::string::String,
 }
 /// AgentRegistrationResponse is returned by the cluster after registration.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -493,6 +499,15 @@ pub struct AgentConfig {
     /// Maximum batch age before forced flush (ms).
     #[prost(int32, tag = "8")]
     pub max_batch_age_ms: i32,
+    /// Whether agent has been assigned a twin identity.
+    #[prost(bool, tag = "9")]
+    pub identity_assigned: bool,
+    /// Assigned twin ID.
+    #[prost(string, tag = "10")]
+    pub twin_id: ::prost::alloc::string::String,
+    /// Assigned client ID.
+    #[prost(string, tag = "11")]
+    pub client_id: ::prost::alloc::string::String,
 }
 /// MetricBatch is the top-level message sent from agent to cluster.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1103,6 +1118,12 @@ pub struct HeartbeatRequest {
     /// Agent self-metrics.
     #[prost(message, optional, tag = "6")]
     pub self_metrics: ::core::option::Option<AgentSelfMetrics>,
+    /// Total backlog bytes pending upload (SQLite WAL + main DB).
+    #[prost(int64, tag = "7")]
+    pub backlog_bytes: i64,
+    /// Unix timestamp of oldest backlog entry (0 if no backlog).
+    #[prost(int64, tag = "8")]
+    pub backlog_since_epoch: i64,
 }
 /// HeartbeatResponse is returned by the cluster.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1145,6 +1166,12 @@ pub enum AgentCommandType {
     FlushBuffer = 3,
     /// Agent should enable/disable a specific layer.
     ToggleLayer = 4,
+    /// Agent should accept new twin/client identity.
+    AssignIdentity = 5,
+    /// Agent should start uploading historical backlog.
+    UploadBacklog = 6,
+    /// Agent should permanently delete local backlog.
+    DeleteBacklog = 7,
 }
 impl AgentCommandType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1158,6 +1185,9 @@ impl AgentCommandType {
             AgentCommandType::UpdateConfig => "AGENT_COMMAND_TYPE_UPDATE_CONFIG",
             AgentCommandType::FlushBuffer => "AGENT_COMMAND_TYPE_FLUSH_BUFFER",
             AgentCommandType::ToggleLayer => "AGENT_COMMAND_TYPE_TOGGLE_LAYER",
+            AgentCommandType::AssignIdentity => "AGENT_COMMAND_TYPE_ASSIGN_IDENTITY",
+            AgentCommandType::UploadBacklog => "AGENT_COMMAND_TYPE_UPLOAD_BACKLOG",
+            AgentCommandType::DeleteBacklog => "AGENT_COMMAND_TYPE_DELETE_BACKLOG",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1168,6 +1198,9 @@ impl AgentCommandType {
             "AGENT_COMMAND_TYPE_UPDATE_CONFIG" => Some(Self::UpdateConfig),
             "AGENT_COMMAND_TYPE_FLUSH_BUFFER" => Some(Self::FlushBuffer),
             "AGENT_COMMAND_TYPE_TOGGLE_LAYER" => Some(Self::ToggleLayer),
+            "AGENT_COMMAND_TYPE_ASSIGN_IDENTITY" => Some(Self::AssignIdentity),
+            "AGENT_COMMAND_TYPE_UPLOAD_BACKLOG" => Some(Self::UploadBacklog),
+            "AGENT_COMMAND_TYPE_DELETE_BACKLOG" => Some(Self::DeleteBacklog),
             _ => None,
         }
     }
@@ -2382,7 +2415,7 @@ pub struct GetForecastResponse {
     #[prost(string, tag = "2")]
     pub metric_name: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "3")]
-    pub forecast: ::prost::alloc::vec::Vec<ForecastPoint>,
+    pub forecast: ::prost::alloc::vec::Vec<QueryForecastPoint>,
     /// Model used for forecasting.
     #[prost(string, tag = "4")]
     pub model: ::prost::alloc::string::String,
@@ -2395,7 +2428,7 @@ pub struct GetForecastResponse {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ForecastPoint {
+pub struct QueryForecastPoint {
     #[prost(message, optional, tag = "1")]
     pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
     #[prost(double, tag = "2")]
@@ -2417,13 +2450,13 @@ pub struct GetSnapshotsRequest {
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetSnapshotsResponse {
     #[prost(message, repeated, tag = "1")]
-    pub snapshots: ::prost::alloc::vec::Vec<SnapshotSummary>,
+    pub snapshots: ::prost::alloc::vec::Vec<QuerySnapshotSummary>,
     #[prost(message, optional, tag = "2")]
     pub pagination: ::core::option::Option<PaginationResponse>,
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct SnapshotSummary {
+pub struct QuerySnapshotSummary {
     #[prost(string, tag = "1")]
     pub id: ::prost::alloc::string::String,
     #[prost(message, optional, tag = "2")]
@@ -2437,7 +2470,7 @@ pub struct SnapshotSummary {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetSnapshotRequest {
+pub struct QueryGetSnapshotRequest {
     #[prost(string, tag = "1")]
     pub snapshot_id: ::prost::alloc::string::String,
 }
@@ -2473,7 +2506,7 @@ pub struct GetReplayRequest {
 }
 #[allow(clippy::derive_partial_eq_without_eq)]
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct ReplayFrame {
+pub struct QueryReplayFrame {
     /// Frame timestamp.
     #[prost(message, optional, tag = "1")]
     pub timestamp: ::core::option::Option<::prost_types::Timestamp>,
@@ -3076,7 +3109,7 @@ pub mod query_service_client {
         }
         pub async fn get_snapshot(
             &mut self,
-            request: impl tonic::IntoRequest<super::GetSnapshotRequest>,
+            request: impl tonic::IntoRequest<super::QueryGetSnapshotRequest>,
         ) -> std::result::Result<tonic::Response<super::SnapshotDetail>, tonic::Status> {
             self.inner
                 .ready()
@@ -3100,7 +3133,7 @@ pub mod query_service_client {
             &mut self,
             request: impl tonic::IntoRequest<super::GetReplayRequest>,
         ) -> std::result::Result<
-            tonic::Response<tonic::codec::Streaming<super::ReplayFrame>>,
+            tonic::Response<tonic::codec::Streaming<super::QueryReplayFrame>>,
             tonic::Status,
         > {
             self.inner
@@ -3242,11 +3275,11 @@ pub mod query_service_server {
         >;
         async fn get_snapshot(
             &self,
-            request: tonic::Request<super::GetSnapshotRequest>,
+            request: tonic::Request<super::QueryGetSnapshotRequest>,
         ) -> std::result::Result<tonic::Response<super::SnapshotDetail>, tonic::Status>;
         /// Server streaming response type for the GetReplay method.
         type GetReplayStream: tonic::codegen::tokio_stream::Stream<
-                Item = std::result::Result<super::ReplayFrame, tonic::Status>,
+                Item = std::result::Result<super::QueryReplayFrame, tonic::Status>,
             >
             + Send
             + 'static;
@@ -4080,7 +4113,7 @@ pub mod query_service_server {
                     struct GetSnapshotSvc<T: QueryService>(pub Arc<T>);
                     impl<
                         T: QueryService,
-                    > tonic::server::UnaryService<super::GetSnapshotRequest>
+                    > tonic::server::UnaryService<super::QueryGetSnapshotRequest>
                     for GetSnapshotSvc<T> {
                         type Response = super::SnapshotDetail;
                         type Future = BoxFuture<
@@ -4089,7 +4122,7 @@ pub mod query_service_server {
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::GetSnapshotRequest>,
+                            request: tonic::Request<super::QueryGetSnapshotRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
@@ -4128,7 +4161,7 @@ pub mod query_service_server {
                         T: QueryService,
                     > tonic::server::ServerStreamingService<super::GetReplayRequest>
                     for GetReplaySvc<T> {
-                        type Response = super::ReplayFrame;
+                        type Response = super::QueryReplayFrame;
                         type ResponseStream = T::GetReplayStream;
                         type Future = BoxFuture<
                             tonic::Response<Self::ResponseStream>,
@@ -5188,5 +5221,3207 @@ pub mod sdk_service_server {
     }
     impl<T: SdkService> tonic::server::NamedService for SdkServiceServer<T> {
         const NAME: &'static str = "paryty.v1.SDKService";
+    }
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RegisterRequest {
+    #[prost(string, tag = "1")]
+    pub email: ::prost::alloc::string::String,
+    /// min 8 chars, must pass entropy check
+    #[prost(string, tag = "2")]
+    pub password: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub name: ::prost::alloc::string::String,
+    /// "basic", "pro", "pro_plus"
+    #[prost(string, tag = "4")]
+    pub plan_name: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RegisterResponse {
+    #[prost(string, tag = "1")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub refresh_token: ::prost::alloc::string::String,
+    /// seconds until access token expires
+    #[prost(int64, tag = "5")]
+    pub expires_in: i64,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct LoginRequest {
+    #[prost(string, tag = "1")]
+    pub email: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub password: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct LoginResponse {
+    #[prost(string, tag = "1")]
+    pub access_token: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub refresh_token: ::prost::alloc::string::String,
+    #[prost(int64, tag = "3")]
+    pub expires_in: i64,
+    #[prost(message, optional, tag = "4")]
+    pub user: ::core::option::Option<UserInfo>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RefreshTokenRequest {
+    #[prost(string, tag = "1")]
+    pub refresh_token: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct LogoutRequest {
+    #[prost(string, tag = "1")]
+    pub refresh_token: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ValidateTokenRequest {
+    #[prost(string, tag = "1")]
+    pub access_token: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ValidateTokenResponse {
+    #[prost(bool, tag = "1")]
+    pub valid: bool,
+    #[prost(string, tag = "2")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub role: ::prost::alloc::string::String,
+    #[prost(string, repeated, tag = "5")]
+    pub permissions: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    #[prost(message, optional, tag = "6")]
+    pub expires_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UserInfo {
+    #[prost(string, tag = "1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub email: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub role: ::prost::alloc::string::String,
+    #[prost(map = "string, bool", tag = "6")]
+    pub permissions: ::std::collections::HashMap<::prost::alloc::string::String, bool>,
+    #[prost(message, optional, tag = "7")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateSubUserRequest {
+    #[prost(string, tag = "1")]
+    pub email: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub password: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub name: ::prost::alloc::string::String,
+    /// "admin", "operator", or "viewer"
+    #[prost(string, tag = "4")]
+    pub role: ::prost::alloc::string::String,
+    #[prost(map = "string, bool", tag = "5")]
+    pub permissions: ::std::collections::HashMap<::prost::alloc::string::String, bool>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListUsersRequest {
+    #[prost(message, optional, tag = "1")]
+    pub pagination: ::core::option::Option<PaginationRequest>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListUsersResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub users: ::prost::alloc::vec::Vec<UserInfo>,
+    #[prost(message, optional, tag = "2")]
+    pub pagination: ::core::option::Option<PaginationResponse>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetUserRequest {
+    #[prost(string, tag = "1")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateUserRequest {
+    #[prost(string, tag = "1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub role: ::prost::alloc::string::String,
+    #[prost(bool, tag = "4")]
+    pub is_active: bool,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteUserRequest {
+    #[prost(string, tag = "1")]
+    pub user_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdatePermissionsRequest {
+    #[prost(string, tag = "1")]
+    pub user_id: ::prost::alloc::string::String,
+    #[prost(map = "string, bool", tag = "2")]
+    pub permissions: ::std::collections::HashMap<::prost::alloc::string::String, bool>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListPlansResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub plans: ::prost::alloc::vec::Vec<PlanInfo>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PlanInfo {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub display_name: ::prost::alloc::string::String,
+    #[prost(int32, tag = "3")]
+    pub max_twins: i32,
+    #[prost(bool, tag = "4")]
+    pub creatable: bool,
+    #[prost(map = "string, bool", tag = "5")]
+    pub features: ::std::collections::HashMap<::prost::alloc::string::String, bool>,
+    #[prost(message, optional, tag = "6")]
+    pub limits: ::core::option::Option<PlanLimits>,
+    #[prost(message, optional, tag = "7")]
+    pub quotas: ::core::option::Option<PlanQuotas>,
+    /// Current usage for the authenticated tenant (only in GetCurrentPlan).
+    #[prost(message, optional, tag = "8")]
+    pub usage: ::core::option::Option<PlanUsage>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PlanLimits {
+    #[prost(int32, tag = "1")]
+    pub agents_per_twin: i32,
+    #[prost(int32, tag = "2")]
+    pub data_retention_days: i32,
+    #[prost(string, tag = "3")]
+    pub metrics_resolution: ::prost::alloc::string::String,
+    #[prost(int32, tag = "4")]
+    pub alert_rules_per_tenant: i32,
+    #[prost(int32, tag = "5")]
+    pub sub_users: i32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PlanQuotas {
+    #[prost(int64, tag = "1")]
+    pub ingestion_bytes_per_day: i64,
+    #[prost(int32, tag = "2")]
+    pub query_requests_per_minute: i32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PlanUsage {
+    #[prost(int32, tag = "1")]
+    pub twins_used: i32,
+    #[prost(int32, tag = "2")]
+    pub twins_limit: i32,
+    #[prost(int32, tag = "3")]
+    pub agents_used: i32,
+    #[prost(int32, tag = "4")]
+    pub agents_limit: i32,
+    #[prost(int32, tag = "5")]
+    pub users_used: i32,
+    #[prost(int32, tag = "6")]
+    pub users_limit: i32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PlanFeaturesResponse {
+    #[prost(map = "string, bool", tag = "1")]
+    pub features: ::std::collections::HashMap<::prost::alloc::string::String, bool>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CreateTwinRequest {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "3")]
+    pub config: ::core::option::Option<TwinConfig>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TwinInfo {
+    #[prost(string, tag = "1")]
+    pub id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub tenant_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "4")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(string, tag = "5")]
+    pub status: ::prost::alloc::string::String,
+    #[prost(int32, tag = "6")]
+    pub agent_count: i32,
+    #[prost(message, optional, tag = "7")]
+    pub config: ::core::option::Option<TwinConfig>,
+    #[prost(message, optional, tag = "8")]
+    pub created_at: ::core::option::Option<::prost_types::Timestamp>,
+    #[prost(message, optional, tag = "9")]
+    pub updated_at: ::core::option::Option<::prost_types::Timestamp>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TwinConfig {
+    /// List of agent labels to auto-assign (e.g., {"env": "prod", "region": "us-east-1"}).
+    #[prost(map = "string, string", tag = "1")]
+    pub agent_labels: ::std::collections::HashMap<
+        ::prost::alloc::string::String,
+        ::prost::alloc::string::String,
+    >,
+    /// Enabled collectors (e.g., \["cpu", "memory", "disk", "network", "ebpf"\]).
+    #[prost(string, repeated, tag = "2")]
+    pub enabled_collectors: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// Collection interval in seconds.
+    #[prost(int32, tag = "3")]
+    pub collection_interval_seconds: i32,
+    /// Sampling rate (0.0 - 1.0).
+    #[prost(float, tag = "4")]
+    pub sampling_rate: f32,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListTwinsRequest {
+    #[prost(message, optional, tag = "1")]
+    pub pagination: ::core::option::Option<PaginationRequest>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListTwinsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub twins: ::prost::alloc::vec::Vec<TwinInfo>,
+    #[prost(message, optional, tag = "2")]
+    pub pagination: ::core::option::Option<PaginationResponse>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetTwinRequest {
+    #[prost(string, tag = "1")]
+    pub twin_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UpdateTwinRequest {
+    #[prost(string, tag = "1")]
+    pub twin_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(string, tag = "3")]
+    pub description: ::prost::alloc::string::String,
+    #[prost(message, optional, tag = "4")]
+    pub config: ::core::option::Option<TwinConfig>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct DeleteTwinRequest {
+    #[prost(string, tag = "1")]
+    pub twin_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetTwinConfigRequest {
+    #[prost(string, tag = "1")]
+    pub twin_id: ::prost::alloc::string::String,
+    #[prost(string, tag = "2")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ResolveIdentityRequest {
+    /// Agent ID requesting identity resolution.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ResolveIdentityResponse {
+    /// Whether the agent has an assigned twin.
+    #[prost(bool, tag = "1")]
+    pub assigned: bool,
+    /// Assigned twin ID.
+    #[prost(string, tag = "2")]
+    pub twin_id: ::prost::alloc::string::String,
+    /// Client/tenant ID.
+    #[prost(string, tag = "3")]
+    pub client_id: ::prost::alloc::string::String,
+    /// Topic prefix for Redpanda routing (e.g., "clients.acme.twin_7a3f").
+    #[prost(string, tag = "4")]
+    pub topic_prefix: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AssignAgentToTwinRequest {
+    /// Target twin ID.
+    #[prost(string, tag = "1")]
+    pub twin_id: ::prost::alloc::string::String,
+    /// Agent ID to assign.
+    #[prost(string, tag = "2")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AssignAgentToTwinResponse {
+    /// Whether the assignment was accepted by the agent.
+    #[prost(bool, tag = "1")]
+    pub accepted: bool,
+    /// Error message if assignment failed.
+    #[prost(string, tag = "2")]
+    pub error: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListTwinAgentsRequest {
+    /// Twin ID to list agents for.
+    #[prost(string, tag = "1")]
+    pub twin_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListTwinAgentsResponse {
+    /// Agents associated with this twin.
+    #[prost(message, repeated, tag = "1")]
+    pub agents: ::prost::alloc::vec::Vec<TwinAgentInfo>,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct TwinAgentInfo {
+    /// Agent identifier.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+    /// Agent hostname.
+    #[prost(string, tag = "2")]
+    pub hostname: ::prost::alloc::string::String,
+    /// Connection status: online, offline, connecting, error.
+    #[prost(string, tag = "3")]
+    pub status: ::prost::alloc::string::String,
+    /// Backlog size in bytes (0 if no backlog).
+    #[prost(int64, tag = "4")]
+    pub backlog_bytes: i64,
+    /// When the agent last sent a heartbeat.
+    #[prost(message, optional, tag = "5")]
+    pub last_heartbeat: ::core::option::Option<::prost_types::Timestamp>,
+    /// Whether this agent is assigned to this twin.
+    #[prost(bool, tag = "6")]
+    pub assigned: bool,
+    /// Agent operating system.
+    #[prost(string, tag = "7")]
+    pub os: ::prost::alloc::string::String,
+    /// Agent CPU architecture.
+    #[prost(string, tag = "8")]
+    pub arch: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AcceptBacklogRequest {
+    /// Twin ID.
+    #[prost(string, tag = "1")]
+    pub twin_id: ::prost::alloc::string::String,
+    /// Agent ID with backlog to accept.
+    #[prost(string, tag = "2")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AcceptBacklogResponse {
+    /// Whether the backlog upload command was dispatched.
+    #[prost(bool, tag = "1")]
+    pub accepted: bool,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RejectBacklogRequest {
+    /// Twin ID.
+    #[prost(string, tag = "1")]
+    pub twin_id: ::prost::alloc::string::String,
+    /// Agent ID with backlog to reject.
+    #[prost(string, tag = "2")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RejectBacklogResponse {
+    /// Whether the backlog deletion command was dispatched.
+    #[prost(bool, tag = "1")]
+    pub deleted: bool,
+}
+/// Generated client implementations.
+pub mod auth_service_client {
+    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
+    #[derive(Debug, Clone)]
+    pub struct AuthServiceClient<T> {
+        inner: tonic::client::Grpc<T>,
+    }
+    impl AuthServiceClient<tonic::transport::Channel> {
+        /// Attempt to create a new client by connecting to a given endpoint.
+        pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
+        where
+            D: TryInto<tonic::transport::Endpoint>,
+            D::Error: Into<StdError>,
+        {
+            let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
+            Ok(Self::new(conn))
+        }
+    }
+    impl<T> AuthServiceClient<T>
+    where
+        T: tonic::client::GrpcService<tonic::body::BoxBody>,
+        T::Error: Into<StdError>,
+        T::ResponseBody: Body<Data = Bytes> + Send + 'static,
+        <T::ResponseBody as Body>::Error: Into<StdError> + Send,
+    {
+        pub fn new(inner: T) -> Self {
+            let inner = tonic::client::Grpc::new(inner);
+            Self { inner }
+        }
+        pub fn with_origin(inner: T, origin: Uri) -> Self {
+            let inner = tonic::client::Grpc::with_origin(inner, origin);
+            Self { inner }
+        }
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> AuthServiceClient<InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T::ResponseBody: Default,
+            T: tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+                Response = http::Response<
+                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
+                >,
+            >,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
+        {
+            AuthServiceClient::new(InterceptedService::new(inner, interceptor))
+        }
+        /// Compress requests with the given encoding.
+        ///
+        /// This requires the server to support it otherwise it might respond with an
+        /// error.
+        #[must_use]
+        pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.inner = self.inner.send_compressed(encoding);
+            self
+        }
+        /// Enable decompressing responses.
+        #[must_use]
+        pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.inner = self.inner.accept_compressed(encoding);
+            self
+        }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_decoding_message_size(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_encoding_message_size(limit);
+            self
+        }
+        /// Register a new user account within a tenant.
+        pub async fn register(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RegisterRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RegisterResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.AuthService/Register",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.AuthService", "Register"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// Login with email + password, returns access token + refresh token.
+        pub async fn login(
+            &mut self,
+            request: impl tonic::IntoRequest<super::LoginRequest>,
+        ) -> std::result::Result<tonic::Response<super::LoginResponse>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.AuthService/Login",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.AuthService", "Login"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// RefreshToken exchanges a refresh token for a new token pair.
+        pub async fn refresh_token(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RefreshTokenRequest>,
+        ) -> std::result::Result<tonic::Response<super::LoginResponse>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.AuthService/RefreshToken",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.AuthService", "RefreshToken"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// Logout revokes the refresh token.
+        pub async fn logout(
+            &mut self,
+            request: impl tonic::IntoRequest<super::LogoutRequest>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.AuthService/Logout",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.AuthService", "Logout"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// ValidateToken validates an access token and returns the user/tenant claims.
+        pub async fn validate_token(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ValidateTokenRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ValidateTokenResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.AuthService/ValidateToken",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.AuthService", "ValidateToken"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+}
+/// Generated client implementations.
+pub mod user_service_client {
+    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
+    #[derive(Debug, Clone)]
+    pub struct UserServiceClient<T> {
+        inner: tonic::client::Grpc<T>,
+    }
+    impl UserServiceClient<tonic::transport::Channel> {
+        /// Attempt to create a new client by connecting to a given endpoint.
+        pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
+        where
+            D: TryInto<tonic::transport::Endpoint>,
+            D::Error: Into<StdError>,
+        {
+            let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
+            Ok(Self::new(conn))
+        }
+    }
+    impl<T> UserServiceClient<T>
+    where
+        T: tonic::client::GrpcService<tonic::body::BoxBody>,
+        T::Error: Into<StdError>,
+        T::ResponseBody: Body<Data = Bytes> + Send + 'static,
+        <T::ResponseBody as Body>::Error: Into<StdError> + Send,
+    {
+        pub fn new(inner: T) -> Self {
+            let inner = tonic::client::Grpc::new(inner);
+            Self { inner }
+        }
+        pub fn with_origin(inner: T, origin: Uri) -> Self {
+            let inner = tonic::client::Grpc::with_origin(inner, origin);
+            Self { inner }
+        }
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> UserServiceClient<InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T::ResponseBody: Default,
+            T: tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+                Response = http::Response<
+                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
+                >,
+            >,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
+        {
+            UserServiceClient::new(InterceptedService::new(inner, interceptor))
+        }
+        /// Compress requests with the given encoding.
+        ///
+        /// This requires the server to support it otherwise it might respond with an
+        /// error.
+        #[must_use]
+        pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.inner = self.inner.send_compressed(encoding);
+            self
+        }
+        /// Enable decompressing responses.
+        #[must_use]
+        pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.inner = self.inner.accept_compressed(encoding);
+            self
+        }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_decoding_message_size(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_encoding_message_size(limit);
+            self
+        }
+        pub async fn create_sub_user(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CreateSubUserRequest>,
+        ) -> std::result::Result<tonic::Response<super::UserInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.UserService/CreateSubUser",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.UserService", "CreateSubUser"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn list_users(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListUsersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListUsersResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.UserService/ListUsers",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.UserService", "ListUsers"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn get_user(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetUserRequest>,
+        ) -> std::result::Result<tonic::Response<super::UserInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.UserService/GetUser",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.UserService", "GetUser"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn update_user(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UpdateUserRequest>,
+        ) -> std::result::Result<tonic::Response<super::UserInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.UserService/UpdateUser",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.UserService", "UpdateUser"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn delete_user(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DeleteUserRequest>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.UserService/DeleteUser",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.UserService", "DeleteUser"));
+            self.inner.unary(req, path, codec).await
+        }
+        pub async fn update_permissions(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UpdatePermissionsRequest>,
+        ) -> std::result::Result<tonic::Response<super::UserInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.UserService/UpdatePermissions",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.UserService", "UpdatePermissions"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+}
+/// Generated client implementations.
+pub mod plan_service_client {
+    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
+    #[derive(Debug, Clone)]
+    pub struct PlanServiceClient<T> {
+        inner: tonic::client::Grpc<T>,
+    }
+    impl PlanServiceClient<tonic::transport::Channel> {
+        /// Attempt to create a new client by connecting to a given endpoint.
+        pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
+        where
+            D: TryInto<tonic::transport::Endpoint>,
+            D::Error: Into<StdError>,
+        {
+            let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
+            Ok(Self::new(conn))
+        }
+    }
+    impl<T> PlanServiceClient<T>
+    where
+        T: tonic::client::GrpcService<tonic::body::BoxBody>,
+        T::Error: Into<StdError>,
+        T::ResponseBody: Body<Data = Bytes> + Send + 'static,
+        <T::ResponseBody as Body>::Error: Into<StdError> + Send,
+    {
+        pub fn new(inner: T) -> Self {
+            let inner = tonic::client::Grpc::new(inner);
+            Self { inner }
+        }
+        pub fn with_origin(inner: T, origin: Uri) -> Self {
+            let inner = tonic::client::Grpc::with_origin(inner, origin);
+            Self { inner }
+        }
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> PlanServiceClient<InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T::ResponseBody: Default,
+            T: tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+                Response = http::Response<
+                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
+                >,
+            >,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
+        {
+            PlanServiceClient::new(InterceptedService::new(inner, interceptor))
+        }
+        /// Compress requests with the given encoding.
+        ///
+        /// This requires the server to support it otherwise it might respond with an
+        /// error.
+        #[must_use]
+        pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.inner = self.inner.send_compressed(encoding);
+            self
+        }
+        /// Enable decompressing responses.
+        #[must_use]
+        pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.inner = self.inner.accept_compressed(encoding);
+            self
+        }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_decoding_message_size(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_encoding_message_size(limit);
+            self
+        }
+        /// ListPlans returns all creatable plans (for signup page).
+        pub async fn list_plans(
+            &mut self,
+            request: impl tonic::IntoRequest<()>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListPlansResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.PlanService/ListPlans",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.PlanService", "ListPlans"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// GetCurrentPlan returns the authenticated tenant's active plan.
+        pub async fn get_current_plan(
+            &mut self,
+            request: impl tonic::IntoRequest<()>,
+        ) -> std::result::Result<tonic::Response<super::PlanInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.PlanService/GetCurrentPlan",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.PlanService", "GetCurrentPlan"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// GetPlanFeatures returns the effective features for the authenticated tenant.
+        pub async fn get_plan_features(
+            &mut self,
+            request: impl tonic::IntoRequest<()>,
+        ) -> std::result::Result<
+            tonic::Response<super::PlanFeaturesResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.PlanService/GetPlanFeatures",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.PlanService", "GetPlanFeatures"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+}
+/// Generated client implementations.
+pub mod twin_service_client {
+    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    use tonic::codegen::*;
+    use tonic::codegen::http::Uri;
+    #[derive(Debug, Clone)]
+    pub struct TwinServiceClient<T> {
+        inner: tonic::client::Grpc<T>,
+    }
+    impl TwinServiceClient<tonic::transport::Channel> {
+        /// Attempt to create a new client by connecting to a given endpoint.
+        pub async fn connect<D>(dst: D) -> Result<Self, tonic::transport::Error>
+        where
+            D: TryInto<tonic::transport::Endpoint>,
+            D::Error: Into<StdError>,
+        {
+            let conn = tonic::transport::Endpoint::new(dst)?.connect().await?;
+            Ok(Self::new(conn))
+        }
+    }
+    impl<T> TwinServiceClient<T>
+    where
+        T: tonic::client::GrpcService<tonic::body::BoxBody>,
+        T::Error: Into<StdError>,
+        T::ResponseBody: Body<Data = Bytes> + Send + 'static,
+        <T::ResponseBody as Body>::Error: Into<StdError> + Send,
+    {
+        pub fn new(inner: T) -> Self {
+            let inner = tonic::client::Grpc::new(inner);
+            Self { inner }
+        }
+        pub fn with_origin(inner: T, origin: Uri) -> Self {
+            let inner = tonic::client::Grpc::with_origin(inner, origin);
+            Self { inner }
+        }
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> TwinServiceClient<InterceptedService<T, F>>
+        where
+            F: tonic::service::Interceptor,
+            T::ResponseBody: Default,
+            T: tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+                Response = http::Response<
+                    <T as tonic::client::GrpcService<tonic::body::BoxBody>>::ResponseBody,
+                >,
+            >,
+            <T as tonic::codegen::Service<
+                http::Request<tonic::body::BoxBody>,
+            >>::Error: Into<StdError> + Send + Sync,
+        {
+            TwinServiceClient::new(InterceptedService::new(inner, interceptor))
+        }
+        /// Compress requests with the given encoding.
+        ///
+        /// This requires the server to support it otherwise it might respond with an
+        /// error.
+        #[must_use]
+        pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.inner = self.inner.send_compressed(encoding);
+            self
+        }
+        /// Enable decompressing responses.
+        #[must_use]
+        pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.inner = self.inner.accept_compressed(encoding);
+            self
+        }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_decoding_message_size(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.inner = self.inner.max_encoding_message_size(limit);
+            self
+        }
+        /// CreateTwin starts the twin creation wizard flow.
+        pub async fn create_twin(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CreateTwinRequest>,
+        ) -> std::result::Result<tonic::Response<super::TwinInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/CreateTwin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "CreateTwin"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// ListTwins returns all twins for the authenticated tenant.
+        pub async fn list_twins(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListTwinsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListTwinsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/ListTwins",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "ListTwins"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// GetTwin returns details for a specific twin.
+        pub async fn get_twin(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetTwinRequest>,
+        ) -> std::result::Result<tonic::Response<super::TwinInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/GetTwin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "GetTwin"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// UpdateTwin updates twin metadata.
+        pub async fn update_twin(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UpdateTwinRequest>,
+        ) -> std::result::Result<tonic::Response<super::TwinInfo>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/UpdateTwin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "UpdateTwin"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// DeleteTwin soft-deletes a twin and disassociates all agents.
+        pub async fn delete_twin(
+            &mut self,
+            request: impl tonic::IntoRequest<super::DeleteTwinRequest>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/DeleteTwin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "DeleteTwin"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// GetTwinConfig returns the agent configuration for a twin.
+        /// Called by agents during registration to discover their configuration.
+        pub async fn get_twin_config(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetTwinConfigRequest>,
+        ) -> std::result::Result<tonic::Response<super::TwinConfig>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/GetTwinConfig",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "GetTwinConfig"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// ResolveIdentity is called by agents at boot to discover their
+        /// assigned twin/client identity. Returns unassigned if no assignment exists.
+        pub async fn resolve_identity(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ResolveIdentityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ResolveIdentityResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/ResolveIdentity",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "ResolveIdentity"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// AssignAgentToTwin assigns an agent to a twin and pushes identity to the agent.
+        pub async fn assign_agent_to_twin(
+            &mut self,
+            request: impl tonic::IntoRequest<super::AssignAgentToTwinRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AssignAgentToTwinResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/AssignAgentToTwin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "AssignAgentToTwin"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// ListTwinAgents returns all agents associated with a twin.
+        pub async fn list_twin_agents(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListTwinAgentsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListTwinAgentsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/ListTwinAgents",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "ListTwinAgents"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// AcceptBacklog instructs the agent to begin uploading its historical backlog.
+        pub async fn accept_backlog(
+            &mut self,
+            request: impl tonic::IntoRequest<super::AcceptBacklogRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AcceptBacklogResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/AcceptBacklog",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "AcceptBacklog"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// RejectBacklog instructs the agent to permanently delete its local backlog.
+        pub async fn reject_backlog(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RejectBacklogRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RejectBacklogResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/RejectBacklog",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "RejectBacklog"));
+            self.inner.unary(req, path, codec).await
+        }
+    }
+}
+/// Generated server implementations.
+pub mod auth_service_server {
+    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    use tonic::codegen::*;
+    /// Generated trait containing gRPC methods that should be implemented for use with AuthServiceServer.
+    #[async_trait]
+    pub trait AuthService: Send + Sync + 'static {
+        /// Register a new user account within a tenant.
+        async fn register(
+            &self,
+            request: tonic::Request<super::RegisterRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RegisterResponse>,
+            tonic::Status,
+        >;
+        /// Login with email + password, returns access token + refresh token.
+        async fn login(
+            &self,
+            request: tonic::Request<super::LoginRequest>,
+        ) -> std::result::Result<tonic::Response<super::LoginResponse>, tonic::Status>;
+        /// RefreshToken exchanges a refresh token for a new token pair.
+        async fn refresh_token(
+            &self,
+            request: tonic::Request<super::RefreshTokenRequest>,
+        ) -> std::result::Result<tonic::Response<super::LoginResponse>, tonic::Status>;
+        /// Logout revokes the refresh token.
+        async fn logout(
+            &self,
+            request: tonic::Request<super::LogoutRequest>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status>;
+        /// ValidateToken validates an access token and returns the user/tenant claims.
+        async fn validate_token(
+            &self,
+            request: tonic::Request<super::ValidateTokenRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ValidateTokenResponse>,
+            tonic::Status,
+        >;
+    }
+    #[derive(Debug)]
+    pub struct AuthServiceServer<T: AuthService> {
+        inner: _Inner<T>,
+        accept_compression_encodings: EnabledCompressionEncodings,
+        send_compression_encodings: EnabledCompressionEncodings,
+        max_decoding_message_size: Option<usize>,
+        max_encoding_message_size: Option<usize>,
+    }
+    struct _Inner<T>(Arc<T>);
+    impl<T: AuthService> AuthServiceServer<T> {
+        pub fn new(inner: T) -> Self {
+            Self::from_arc(Arc::new(inner))
+        }
+        pub fn from_arc(inner: Arc<T>) -> Self {
+            let inner = _Inner(inner);
+            Self {
+                inner,
+                accept_compression_encodings: Default::default(),
+                send_compression_encodings: Default::default(),
+                max_decoding_message_size: None,
+                max_encoding_message_size: None,
+            }
+        }
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
+        where
+            F: tonic::service::Interceptor,
+        {
+            InterceptedService::new(Self::new(inner), interceptor)
+        }
+        /// Enable decompressing requests with the given encoding.
+        #[must_use]
+        pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.accept_compression_encodings.enable(encoding);
+            self
+        }
+        /// Compress responses with the given encoding, if the client supports it.
+        #[must_use]
+        pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.send_compression_encodings.enable(encoding);
+            self
+        }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.max_decoding_message_size = Some(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.max_encoding_message_size = Some(limit);
+            self
+        }
+    }
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for AuthServiceServer<T>
+    where
+        T: AuthService,
+        B: Body + Send + 'static,
+        B::Error: Into<StdError> + Send + 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = std::convert::Infallible;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+        fn poll_ready(
+            &mut self,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn call(&mut self, req: http::Request<B>) -> Self::Future {
+            let inner = self.inner.clone();
+            match req.uri().path() {
+                "/paryty.v1.AuthService/Register" => {
+                    #[allow(non_camel_case_types)]
+                    struct RegisterSvc<T: AuthService>(pub Arc<T>);
+                    impl<
+                        T: AuthService,
+                    > tonic::server::UnaryService<super::RegisterRequest>
+                    for RegisterSvc<T> {
+                        type Response = super::RegisterResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RegisterRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as AuthService>::register(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = RegisterSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.AuthService/Login" => {
+                    #[allow(non_camel_case_types)]
+                    struct LoginSvc<T: AuthService>(pub Arc<T>);
+                    impl<T: AuthService> tonic::server::UnaryService<super::LoginRequest>
+                    for LoginSvc<T> {
+                        type Response = super::LoginResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::LoginRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as AuthService>::login(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = LoginSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.AuthService/RefreshToken" => {
+                    #[allow(non_camel_case_types)]
+                    struct RefreshTokenSvc<T: AuthService>(pub Arc<T>);
+                    impl<
+                        T: AuthService,
+                    > tonic::server::UnaryService<super::RefreshTokenRequest>
+                    for RefreshTokenSvc<T> {
+                        type Response = super::LoginResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RefreshTokenRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as AuthService>::refresh_token(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = RefreshTokenSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.AuthService/Logout" => {
+                    #[allow(non_camel_case_types)]
+                    struct LogoutSvc<T: AuthService>(pub Arc<T>);
+                    impl<
+                        T: AuthService,
+                    > tonic::server::UnaryService<super::LogoutRequest>
+                    for LogoutSvc<T> {
+                        type Response = ();
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::LogoutRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as AuthService>::logout(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = LogoutSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.AuthService/ValidateToken" => {
+                    #[allow(non_camel_case_types)]
+                    struct ValidateTokenSvc<T: AuthService>(pub Arc<T>);
+                    impl<
+                        T: AuthService,
+                    > tonic::server::UnaryService<super::ValidateTokenRequest>
+                    for ValidateTokenSvc<T> {
+                        type Response = super::ValidateTokenResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ValidateTokenRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as AuthService>::validate_token(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ValidateTokenSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
+            }
+        }
+    }
+    impl<T: AuthService> Clone for AuthServiceServer<T> {
+        fn clone(&self) -> Self {
+            let inner = self.inner.clone();
+            Self {
+                inner,
+                accept_compression_encodings: self.accept_compression_encodings,
+                send_compression_encodings: self.send_compression_encodings,
+                max_decoding_message_size: self.max_decoding_message_size,
+                max_encoding_message_size: self.max_encoding_message_size,
+            }
+        }
+    }
+    impl<T: AuthService> Clone for _Inner<T> {
+        fn clone(&self) -> Self {
+            Self(Arc::clone(&self.0))
+        }
+    }
+    impl<T: std::fmt::Debug> std::fmt::Debug for _Inner<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self.0)
+        }
+    }
+    impl<T: AuthService> tonic::server::NamedService for AuthServiceServer<T> {
+        const NAME: &'static str = "paryty.v1.AuthService";
+    }
+}
+/// Generated server implementations.
+pub mod user_service_server {
+    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    use tonic::codegen::*;
+    /// Generated trait containing gRPC methods that should be implemented for use with UserServiceServer.
+    #[async_trait]
+    pub trait UserService: Send + Sync + 'static {
+        async fn create_sub_user(
+            &self,
+            request: tonic::Request<super::CreateSubUserRequest>,
+        ) -> std::result::Result<tonic::Response<super::UserInfo>, tonic::Status>;
+        async fn list_users(
+            &self,
+            request: tonic::Request<super::ListUsersRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListUsersResponse>,
+            tonic::Status,
+        >;
+        async fn get_user(
+            &self,
+            request: tonic::Request<super::GetUserRequest>,
+        ) -> std::result::Result<tonic::Response<super::UserInfo>, tonic::Status>;
+        async fn update_user(
+            &self,
+            request: tonic::Request<super::UpdateUserRequest>,
+        ) -> std::result::Result<tonic::Response<super::UserInfo>, tonic::Status>;
+        async fn delete_user(
+            &self,
+            request: tonic::Request<super::DeleteUserRequest>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status>;
+        async fn update_permissions(
+            &self,
+            request: tonic::Request<super::UpdatePermissionsRequest>,
+        ) -> std::result::Result<tonic::Response<super::UserInfo>, tonic::Status>;
+    }
+    #[derive(Debug)]
+    pub struct UserServiceServer<T: UserService> {
+        inner: _Inner<T>,
+        accept_compression_encodings: EnabledCompressionEncodings,
+        send_compression_encodings: EnabledCompressionEncodings,
+        max_decoding_message_size: Option<usize>,
+        max_encoding_message_size: Option<usize>,
+    }
+    struct _Inner<T>(Arc<T>);
+    impl<T: UserService> UserServiceServer<T> {
+        pub fn new(inner: T) -> Self {
+            Self::from_arc(Arc::new(inner))
+        }
+        pub fn from_arc(inner: Arc<T>) -> Self {
+            let inner = _Inner(inner);
+            Self {
+                inner,
+                accept_compression_encodings: Default::default(),
+                send_compression_encodings: Default::default(),
+                max_decoding_message_size: None,
+                max_encoding_message_size: None,
+            }
+        }
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
+        where
+            F: tonic::service::Interceptor,
+        {
+            InterceptedService::new(Self::new(inner), interceptor)
+        }
+        /// Enable decompressing requests with the given encoding.
+        #[must_use]
+        pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.accept_compression_encodings.enable(encoding);
+            self
+        }
+        /// Compress responses with the given encoding, if the client supports it.
+        #[must_use]
+        pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.send_compression_encodings.enable(encoding);
+            self
+        }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.max_decoding_message_size = Some(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.max_encoding_message_size = Some(limit);
+            self
+        }
+    }
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for UserServiceServer<T>
+    where
+        T: UserService,
+        B: Body + Send + 'static,
+        B::Error: Into<StdError> + Send + 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = std::convert::Infallible;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+        fn poll_ready(
+            &mut self,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn call(&mut self, req: http::Request<B>) -> Self::Future {
+            let inner = self.inner.clone();
+            match req.uri().path() {
+                "/paryty.v1.UserService/CreateSubUser" => {
+                    #[allow(non_camel_case_types)]
+                    struct CreateSubUserSvc<T: UserService>(pub Arc<T>);
+                    impl<
+                        T: UserService,
+                    > tonic::server::UnaryService<super::CreateSubUserRequest>
+                    for CreateSubUserSvc<T> {
+                        type Response = super::UserInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CreateSubUserRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UserService>::create_sub_user(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = CreateSubUserSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.UserService/ListUsers" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListUsersSvc<T: UserService>(pub Arc<T>);
+                    impl<
+                        T: UserService,
+                    > tonic::server::UnaryService<super::ListUsersRequest>
+                    for ListUsersSvc<T> {
+                        type Response = super::ListUsersResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListUsersRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UserService>::list_users(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ListUsersSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.UserService/GetUser" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetUserSvc<T: UserService>(pub Arc<T>);
+                    impl<
+                        T: UserService,
+                    > tonic::server::UnaryService<super::GetUserRequest>
+                    for GetUserSvc<T> {
+                        type Response = super::UserInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetUserRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UserService>::get_user(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetUserSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.UserService/UpdateUser" => {
+                    #[allow(non_camel_case_types)]
+                    struct UpdateUserSvc<T: UserService>(pub Arc<T>);
+                    impl<
+                        T: UserService,
+                    > tonic::server::UnaryService<super::UpdateUserRequest>
+                    for UpdateUserSvc<T> {
+                        type Response = super::UserInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UpdateUserRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UserService>::update_user(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = UpdateUserSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.UserService/DeleteUser" => {
+                    #[allow(non_camel_case_types)]
+                    struct DeleteUserSvc<T: UserService>(pub Arc<T>);
+                    impl<
+                        T: UserService,
+                    > tonic::server::UnaryService<super::DeleteUserRequest>
+                    for DeleteUserSvc<T> {
+                        type Response = ();
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DeleteUserRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UserService>::delete_user(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = DeleteUserSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.UserService/UpdatePermissions" => {
+                    #[allow(non_camel_case_types)]
+                    struct UpdatePermissionsSvc<T: UserService>(pub Arc<T>);
+                    impl<
+                        T: UserService,
+                    > tonic::server::UnaryService<super::UpdatePermissionsRequest>
+                    for UpdatePermissionsSvc<T> {
+                        type Response = super::UserInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UpdatePermissionsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as UserService>::update_permissions(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = UpdatePermissionsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
+            }
+        }
+    }
+    impl<T: UserService> Clone for UserServiceServer<T> {
+        fn clone(&self) -> Self {
+            let inner = self.inner.clone();
+            Self {
+                inner,
+                accept_compression_encodings: self.accept_compression_encodings,
+                send_compression_encodings: self.send_compression_encodings,
+                max_decoding_message_size: self.max_decoding_message_size,
+                max_encoding_message_size: self.max_encoding_message_size,
+            }
+        }
+    }
+    impl<T: UserService> Clone for _Inner<T> {
+        fn clone(&self) -> Self {
+            Self(Arc::clone(&self.0))
+        }
+    }
+    impl<T: std::fmt::Debug> std::fmt::Debug for _Inner<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self.0)
+        }
+    }
+    impl<T: UserService> tonic::server::NamedService for UserServiceServer<T> {
+        const NAME: &'static str = "paryty.v1.UserService";
+    }
+}
+/// Generated server implementations.
+pub mod plan_service_server {
+    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    use tonic::codegen::*;
+    /// Generated trait containing gRPC methods that should be implemented for use with PlanServiceServer.
+    #[async_trait]
+    pub trait PlanService: Send + Sync + 'static {
+        /// ListPlans returns all creatable plans (for signup page).
+        async fn list_plans(
+            &self,
+            request: tonic::Request<()>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListPlansResponse>,
+            tonic::Status,
+        >;
+        /// GetCurrentPlan returns the authenticated tenant's active plan.
+        async fn get_current_plan(
+            &self,
+            request: tonic::Request<()>,
+        ) -> std::result::Result<tonic::Response<super::PlanInfo>, tonic::Status>;
+        /// GetPlanFeatures returns the effective features for the authenticated tenant.
+        async fn get_plan_features(
+            &self,
+            request: tonic::Request<()>,
+        ) -> std::result::Result<
+            tonic::Response<super::PlanFeaturesResponse>,
+            tonic::Status,
+        >;
+    }
+    #[derive(Debug)]
+    pub struct PlanServiceServer<T: PlanService> {
+        inner: _Inner<T>,
+        accept_compression_encodings: EnabledCompressionEncodings,
+        send_compression_encodings: EnabledCompressionEncodings,
+        max_decoding_message_size: Option<usize>,
+        max_encoding_message_size: Option<usize>,
+    }
+    struct _Inner<T>(Arc<T>);
+    impl<T: PlanService> PlanServiceServer<T> {
+        pub fn new(inner: T) -> Self {
+            Self::from_arc(Arc::new(inner))
+        }
+        pub fn from_arc(inner: Arc<T>) -> Self {
+            let inner = _Inner(inner);
+            Self {
+                inner,
+                accept_compression_encodings: Default::default(),
+                send_compression_encodings: Default::default(),
+                max_decoding_message_size: None,
+                max_encoding_message_size: None,
+            }
+        }
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
+        where
+            F: tonic::service::Interceptor,
+        {
+            InterceptedService::new(Self::new(inner), interceptor)
+        }
+        /// Enable decompressing requests with the given encoding.
+        #[must_use]
+        pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.accept_compression_encodings.enable(encoding);
+            self
+        }
+        /// Compress responses with the given encoding, if the client supports it.
+        #[must_use]
+        pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.send_compression_encodings.enable(encoding);
+            self
+        }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.max_decoding_message_size = Some(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.max_encoding_message_size = Some(limit);
+            self
+        }
+    }
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for PlanServiceServer<T>
+    where
+        T: PlanService,
+        B: Body + Send + 'static,
+        B::Error: Into<StdError> + Send + 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = std::convert::Infallible;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+        fn poll_ready(
+            &mut self,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn call(&mut self, req: http::Request<B>) -> Self::Future {
+            let inner = self.inner.clone();
+            match req.uri().path() {
+                "/paryty.v1.PlanService/ListPlans" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListPlansSvc<T: PlanService>(pub Arc<T>);
+                    impl<T: PlanService> tonic::server::UnaryService<()>
+                    for ListPlansSvc<T> {
+                        type Response = super::ListPlansResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(&mut self, request: tonic::Request<()>) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as PlanService>::list_plans(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ListPlansSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.PlanService/GetCurrentPlan" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetCurrentPlanSvc<T: PlanService>(pub Arc<T>);
+                    impl<T: PlanService> tonic::server::UnaryService<()>
+                    for GetCurrentPlanSvc<T> {
+                        type Response = super::PlanInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(&mut self, request: tonic::Request<()>) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as PlanService>::get_current_plan(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetCurrentPlanSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.PlanService/GetPlanFeatures" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetPlanFeaturesSvc<T: PlanService>(pub Arc<T>);
+                    impl<T: PlanService> tonic::server::UnaryService<()>
+                    for GetPlanFeaturesSvc<T> {
+                        type Response = super::PlanFeaturesResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(&mut self, request: tonic::Request<()>) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as PlanService>::get_plan_features(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetPlanFeaturesSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
+            }
+        }
+    }
+    impl<T: PlanService> Clone for PlanServiceServer<T> {
+        fn clone(&self) -> Self {
+            let inner = self.inner.clone();
+            Self {
+                inner,
+                accept_compression_encodings: self.accept_compression_encodings,
+                send_compression_encodings: self.send_compression_encodings,
+                max_decoding_message_size: self.max_decoding_message_size,
+                max_encoding_message_size: self.max_encoding_message_size,
+            }
+        }
+    }
+    impl<T: PlanService> Clone for _Inner<T> {
+        fn clone(&self) -> Self {
+            Self(Arc::clone(&self.0))
+        }
+    }
+    impl<T: std::fmt::Debug> std::fmt::Debug for _Inner<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self.0)
+        }
+    }
+    impl<T: PlanService> tonic::server::NamedService for PlanServiceServer<T> {
+        const NAME: &'static str = "paryty.v1.PlanService";
+    }
+}
+/// Generated server implementations.
+pub mod twin_service_server {
+    #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
+    use tonic::codegen::*;
+    /// Generated trait containing gRPC methods that should be implemented for use with TwinServiceServer.
+    #[async_trait]
+    pub trait TwinService: Send + Sync + 'static {
+        /// CreateTwin starts the twin creation wizard flow.
+        async fn create_twin(
+            &self,
+            request: tonic::Request<super::CreateTwinRequest>,
+        ) -> std::result::Result<tonic::Response<super::TwinInfo>, tonic::Status>;
+        /// ListTwins returns all twins for the authenticated tenant.
+        async fn list_twins(
+            &self,
+            request: tonic::Request<super::ListTwinsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListTwinsResponse>,
+            tonic::Status,
+        >;
+        /// GetTwin returns details for a specific twin.
+        async fn get_twin(
+            &self,
+            request: tonic::Request<super::GetTwinRequest>,
+        ) -> std::result::Result<tonic::Response<super::TwinInfo>, tonic::Status>;
+        /// UpdateTwin updates twin metadata.
+        async fn update_twin(
+            &self,
+            request: tonic::Request<super::UpdateTwinRequest>,
+        ) -> std::result::Result<tonic::Response<super::TwinInfo>, tonic::Status>;
+        /// DeleteTwin soft-deletes a twin and disassociates all agents.
+        async fn delete_twin(
+            &self,
+            request: tonic::Request<super::DeleteTwinRequest>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status>;
+        /// GetTwinConfig returns the agent configuration for a twin.
+        /// Called by agents during registration to discover their configuration.
+        async fn get_twin_config(
+            &self,
+            request: tonic::Request<super::GetTwinConfigRequest>,
+        ) -> std::result::Result<tonic::Response<super::TwinConfig>, tonic::Status>;
+        /// ResolveIdentity is called by agents at boot to discover their
+        /// assigned twin/client identity. Returns unassigned if no assignment exists.
+        async fn resolve_identity(
+            &self,
+            request: tonic::Request<super::ResolveIdentityRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ResolveIdentityResponse>,
+            tonic::Status,
+        >;
+        /// AssignAgentToTwin assigns an agent to a twin and pushes identity to the agent.
+        async fn assign_agent_to_twin(
+            &self,
+            request: tonic::Request<super::AssignAgentToTwinRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AssignAgentToTwinResponse>,
+            tonic::Status,
+        >;
+        /// ListTwinAgents returns all agents associated with a twin.
+        async fn list_twin_agents(
+            &self,
+            request: tonic::Request<super::ListTwinAgentsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListTwinAgentsResponse>,
+            tonic::Status,
+        >;
+        /// AcceptBacklog instructs the agent to begin uploading its historical backlog.
+        async fn accept_backlog(
+            &self,
+            request: tonic::Request<super::AcceptBacklogRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AcceptBacklogResponse>,
+            tonic::Status,
+        >;
+        /// RejectBacklog instructs the agent to permanently delete its local backlog.
+        async fn reject_backlog(
+            &self,
+            request: tonic::Request<super::RejectBacklogRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RejectBacklogResponse>,
+            tonic::Status,
+        >;
+    }
+    #[derive(Debug)]
+    pub struct TwinServiceServer<T: TwinService> {
+        inner: _Inner<T>,
+        accept_compression_encodings: EnabledCompressionEncodings,
+        send_compression_encodings: EnabledCompressionEncodings,
+        max_decoding_message_size: Option<usize>,
+        max_encoding_message_size: Option<usize>,
+    }
+    struct _Inner<T>(Arc<T>);
+    impl<T: TwinService> TwinServiceServer<T> {
+        pub fn new(inner: T) -> Self {
+            Self::from_arc(Arc::new(inner))
+        }
+        pub fn from_arc(inner: Arc<T>) -> Self {
+            let inner = _Inner(inner);
+            Self {
+                inner,
+                accept_compression_encodings: Default::default(),
+                send_compression_encodings: Default::default(),
+                max_decoding_message_size: None,
+                max_encoding_message_size: None,
+            }
+        }
+        pub fn with_interceptor<F>(
+            inner: T,
+            interceptor: F,
+        ) -> InterceptedService<Self, F>
+        where
+            F: tonic::service::Interceptor,
+        {
+            InterceptedService::new(Self::new(inner), interceptor)
+        }
+        /// Enable decompressing requests with the given encoding.
+        #[must_use]
+        pub fn accept_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.accept_compression_encodings.enable(encoding);
+            self
+        }
+        /// Compress responses with the given encoding, if the client supports it.
+        #[must_use]
+        pub fn send_compressed(mut self, encoding: CompressionEncoding) -> Self {
+            self.send_compression_encodings.enable(encoding);
+            self
+        }
+        /// Limits the maximum size of a decoded message.
+        ///
+        /// Default: `4MB`
+        #[must_use]
+        pub fn max_decoding_message_size(mut self, limit: usize) -> Self {
+            self.max_decoding_message_size = Some(limit);
+            self
+        }
+        /// Limits the maximum size of an encoded message.
+        ///
+        /// Default: `usize::MAX`
+        #[must_use]
+        pub fn max_encoding_message_size(mut self, limit: usize) -> Self {
+            self.max_encoding_message_size = Some(limit);
+            self
+        }
+    }
+    impl<T, B> tonic::codegen::Service<http::Request<B>> for TwinServiceServer<T>
+    where
+        T: TwinService,
+        B: Body + Send + 'static,
+        B::Error: Into<StdError> + Send + 'static,
+    {
+        type Response = http::Response<tonic::body::BoxBody>;
+        type Error = std::convert::Infallible;
+        type Future = BoxFuture<Self::Response, Self::Error>;
+        fn poll_ready(
+            &mut self,
+            _cx: &mut Context<'_>,
+        ) -> Poll<std::result::Result<(), Self::Error>> {
+            Poll::Ready(Ok(()))
+        }
+        fn call(&mut self, req: http::Request<B>) -> Self::Future {
+            let inner = self.inner.clone();
+            match req.uri().path() {
+                "/paryty.v1.TwinService/CreateTwin" => {
+                    #[allow(non_camel_case_types)]
+                    struct CreateTwinSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::CreateTwinRequest>
+                    for CreateTwinSvc<T> {
+                        type Response = super::TwinInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CreateTwinRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::create_twin(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = CreateTwinSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/ListTwins" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListTwinsSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::ListTwinsRequest>
+                    for ListTwinsSvc<T> {
+                        type Response = super::ListTwinsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListTwinsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::list_twins(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ListTwinsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/GetTwin" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetTwinSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::GetTwinRequest>
+                    for GetTwinSvc<T> {
+                        type Response = super::TwinInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetTwinRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::get_twin(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetTwinSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/UpdateTwin" => {
+                    #[allow(non_camel_case_types)]
+                    struct UpdateTwinSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::UpdateTwinRequest>
+                    for UpdateTwinSvc<T> {
+                        type Response = super::TwinInfo;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UpdateTwinRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::update_twin(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = UpdateTwinSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/DeleteTwin" => {
+                    #[allow(non_camel_case_types)]
+                    struct DeleteTwinSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::DeleteTwinRequest>
+                    for DeleteTwinSvc<T> {
+                        type Response = ();
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::DeleteTwinRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::delete_twin(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = DeleteTwinSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/GetTwinConfig" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetTwinConfigSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::GetTwinConfigRequest>
+                    for GetTwinConfigSvc<T> {
+                        type Response = super::TwinConfig;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetTwinConfigRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::get_twin_config(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetTwinConfigSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/ResolveIdentity" => {
+                    #[allow(non_camel_case_types)]
+                    struct ResolveIdentitySvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::ResolveIdentityRequest>
+                    for ResolveIdentitySvc<T> {
+                        type Response = super::ResolveIdentityResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ResolveIdentityRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::resolve_identity(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ResolveIdentitySvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/AssignAgentToTwin" => {
+                    #[allow(non_camel_case_types)]
+                    struct AssignAgentToTwinSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::AssignAgentToTwinRequest>
+                    for AssignAgentToTwinSvc<T> {
+                        type Response = super::AssignAgentToTwinResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::AssignAgentToTwinRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::assign_agent_to_twin(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = AssignAgentToTwinSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/ListTwinAgents" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListTwinAgentsSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::ListTwinAgentsRequest>
+                    for ListTwinAgentsSvc<T> {
+                        type Response = super::ListTwinAgentsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListTwinAgentsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::list_twin_agents(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = ListTwinAgentsSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/AcceptBacklog" => {
+                    #[allow(non_camel_case_types)]
+                    struct AcceptBacklogSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::AcceptBacklogRequest>
+                    for AcceptBacklogSvc<T> {
+                        type Response = super::AcceptBacklogResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::AcceptBacklogRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::accept_backlog(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = AcceptBacklogSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/RejectBacklog" => {
+                    #[allow(non_camel_case_types)]
+                    struct RejectBacklogSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::RejectBacklogRequest>
+                    for RejectBacklogSvc<T> {
+                        type Response = super::RejectBacklogResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RejectBacklogRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::reject_backlog(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = RejectBacklogSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                _ => {
+                    Box::pin(async move {
+                        Ok(
+                            http::Response::builder()
+                                .status(200)
+                                .header("grpc-status", "12")
+                                .header("content-type", "application/grpc")
+                                .body(empty_body())
+                                .unwrap(),
+                        )
+                    })
+                }
+            }
+        }
+    }
+    impl<T: TwinService> Clone for TwinServiceServer<T> {
+        fn clone(&self) -> Self {
+            let inner = self.inner.clone();
+            Self {
+                inner,
+                accept_compression_encodings: self.accept_compression_encodings,
+                send_compression_encodings: self.send_compression_encodings,
+                max_decoding_message_size: self.max_decoding_message_size,
+                max_encoding_message_size: self.max_encoding_message_size,
+            }
+        }
+    }
+    impl<T: TwinService> Clone for _Inner<T> {
+        fn clone(&self) -> Self {
+            Self(Arc::clone(&self.0))
+        }
+    }
+    impl<T: std::fmt::Debug> std::fmt::Debug for _Inner<T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{:?}", self.0)
+        }
+    }
+    impl<T: TwinService> tonic::server::NamedService for TwinServiceServer<T> {
+        const NAME: &'static str = "paryty.v1.TwinService";
     }
 }

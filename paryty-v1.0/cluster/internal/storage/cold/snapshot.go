@@ -1,4 +1,4 @@
-﻿package cold
+package cold
 
 import (
 	"bytes"
@@ -6,14 +6,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/klauspost/compress/zstd"
 	"github.com/minio/minio-go/v7"
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
+	"github.com/paryty/paryty-v1.0/cluster/internal/pool"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
@@ -21,6 +23,29 @@ import (
 const bucketSnapshots = "paryty-snapshots"
 
 var ErrSnapshotNotFound = fmt.Errorf("snapshot not found")
+
+// Phase D: Snapshot assembly batch processing constants.
+//
+// snapshotBatchSize controls how many agents are processed per iteration
+// during snapshot assembly. At 10,000 agents, building all MetricSummary
+// structs simultaneously can consume 50-100 MB. Batch processing limits
+// peak allocation to ~batch-size worth of temporary objects.
+//
+// maxSnapshotMemoryBytes is the memory threshold above which snapshot
+// assembly is rejected. This prevents OOM conditions when the system is
+// already under memory pressure.
+const (
+	snapshotBatchSize      = 100
+	maxSnapshotMemoryBytes = 500 * 1024 * 1024 // 500 MB
+)
+
+// Phase D: snapshotBufPool reuses bytes.Buffer instances for streaming JSON
+// encoding. This avoids per-call buffer allocation when writing large snapshots.
+var snapshotBufPool = sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
 
 type SnapshotConfig struct {
 	Interval        time.Duration `yaml:"interval" json:"interval"`
@@ -302,6 +327,22 @@ func extractSnapshotIDFromKey(key string) string {
 
 // ---- Assembly ----
 
+// snapshotHeader is a lightweight struct for streaming JSON encoding.
+// Only the top-level snapshot metadata is written first, followed by
+// agents in batches, to limit peak memory usage.
+type snapshotHeader struct {
+	ID        string    `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// assembleSnapshot builds a complete snapshot from the hot store.
+//
+// Phase D: Agents are processed in batches of snapshotBatchSize to limit
+// peak memory usage. At 10,000 agents, building all MetricSummary structs
+// simultaneously can consume 50-100 MB. Batch processing limits peak
+// allocation to ~batch-size worth of temporary objects, with GC between
+// batches reclaiming intermediate allocations.
 func (m *SnapshotManager) assembleSnapshot(ctx context.Context, tenant, id string, now time.Time) (*Snapshot, error) {
 	topology, err := m.hotStore.GetTopology(ctx, tenant)
 	if err != nil {
@@ -313,12 +354,33 @@ func (m *SnapshotManager) assembleSnapshot(ctx context.Context, tenant, id strin
 		m.logger.Debug("agents not available", zap.String("tenant", tenant), zap.Error(err))
 		agents = []models.AgentInfo{}
 	}
+
+	// Phase D: Process agents in batches to limit peak memory usage.
+	// At 10,000 agents, building all MetricSummary structs simultaneously
+	// can consume 50-100 MB. Batch processing limits this to ~5 MB per batch.
+	// GC between batches reclaims temporary allocations from buildMetricSummary.
 	metrics := make(map[string]MetricSummary, len(agents))
-	for _, agent := range agents {
-		if summary, err := m.buildMetricSummary(ctx, tenant, agent.ID); err == nil {
-			metrics[agent.ID] = summary
+	for i := 0; i < len(agents); i += snapshotBatchSize {
+		end := i + snapshotBatchSize
+		if end > len(agents) {
+			end = len(agents)
+		}
+		batch := agents[i:end]
+
+		for _, agent := range batch {
+			if summary, err := m.buildMetricSummary(ctx, tenant, agent.ID); err == nil {
+				metrics[agent.ID] = summary
+			}
+		}
+
+		// Allow GC to collect batch processing intermediate allocations.
+		// Only triggered when processing large agent counts to avoid
+		// unnecessary GC overhead for small deployments.
+		if len(agents) > snapshotBatchSize {
+			runtime.GC()
 		}
 	}
+
 	alerts, err := m.hotStore.GetActiveAlerts(ctx, tenant)
 	if err != nil {
 		alerts = []models.Alert{}
@@ -334,6 +396,117 @@ func (m *SnapshotManager) assembleSnapshot(ctx context.Context, tenant, id strin
 		Alerts: alerts, Graph: graph,
 		Metadata: SnapshotMetadata{PipelineVersion: "1.0.0", AgentCount: len(agents), MetricCount: len(metrics), AlertCount: len(alerts), CreatedAt: now},
 	}, nil
+}
+
+// assembleSnapshotWithMemoryLimit wraps assembleSnapshot with a memory
+// pressure check. If current heap allocation exceeds maxSnapshotMemoryBytes,
+// the snapshot is rejected to prevent OOM conditions.
+func (m *SnapshotManager) assembleSnapshotWithMemoryLimit(ctx context.Context, tenant, id string, now time.Time) (*Snapshot, error) {
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	// Check memory pressure before starting. If the heap is already near
+	// the limit, reject the snapshot to prevent OOM.
+	if memStats.Alloc > maxSnapshotMemoryBytes {
+		return nil, fmt.Errorf("snapshot: insufficient memory for snapshot assembly: current=%d MB, limit=%d MB",
+			memStats.Alloc/1024/1024, maxSnapshotMemoryBytes/1024/1024)
+	}
+
+	return m.assembleSnapshot(ctx, tenant, id, now)
+}
+
+// writeSnapshotStreaming encodes a snapshot to JSON in batches, flushing
+// the buffer periodically to limit peak memory usage. This is an alternative
+// to json.Marshal for large snapshots where the full JSON representation
+// would consume excessive memory.
+//
+// Phase D: At 10,000 agents, json.Marshal can allocate 50-100 MB for the
+// JSON byte slice. Streaming encoding with periodic buffer flushing limits
+// peak memory to ~1 MB per flush cycle.
+func (m *SnapshotManager) writeSnapshotStreaming(ctx context.Context, key string, snapshot *Snapshot) error {
+	buf := snapshotBufPool.Get().(*bytes.Buffer)
+	defer snapshotBufPool.Put(buf)
+	buf.Reset()
+
+	// Accumulator buffer for the final upload. SeaweedFS (S3-compatible)
+	// requires the complete object for upload, so we accumulate all chunks
+	// here. The benefit is that the encoding buffer is reused via the pool,
+	// reducing per-call allocation.
+	accumulator := snapshotBufPool.Get().(*bytes.Buffer)
+	defer snapshotBufPool.Put(accumulator)
+	accumulator.Reset()
+
+	enc := json.NewEncoder(buf)
+
+	// Write snapshot header (metadata only) — this is a small, fixed-size
+	// JSON object that establishes the structure.
+	if err := enc.Encode(snapshotHeader{
+		ID:        snapshot.ID,
+		TenantID:  snapshot.TenantID,
+		Timestamp: snapshot.Timestamp,
+	}); err != nil {
+		return fmt.Errorf("snapshot: stream header: %w", err)
+	}
+
+	// Flush header to accumulator.
+	if err := m.flushToStorage(accumulator, buf); err != nil {
+		return fmt.Errorf("snapshot: flush header: %w", err)
+	}
+
+	// Write agents in batches to limit per-iteration memory.
+	for i := 0; i < len(snapshot.Agents); i += snapshotBatchSize {
+		end := i + snapshotBatchSize
+		if end > len(snapshot.Agents) {
+			end = len(snapshot.Agents)
+		}
+		batch := snapshot.Agents[i:end]
+
+		if err := enc.Encode(batch); err != nil {
+			return fmt.Errorf("snapshot: stream agents batch %d-%d: %w", i, end, err)
+		}
+
+		// Flush buffer to accumulator when it exceeds 1 MB.
+		// This limits the encoding buffer's peak size.
+		if buf.Len() > 1024*1024 {
+			if err := m.flushToStorage(accumulator, buf); err != nil {
+				return fmt.Errorf("snapshot: flush agents batch: %w", err)
+			}
+			buf.Reset()
+		}
+	}
+
+	// Flush remaining encoding buffer data.
+	if buf.Len() > 0 {
+		if err := m.flushToStorage(accumulator, buf); err != nil {
+			return fmt.Errorf("snapshot: flush remaining: %w", err)
+		}
+	}
+
+	// Upload accumulated data to SeaweedFS.
+	uploadData := accumulator.Bytes()
+	contentType := "application/json"
+
+	if m.config.Compression {
+		compressed, err := compressData(uploadData)
+		if err != nil {
+			return fmt.Errorf("snapshot: compress streaming: %w", err)
+		}
+		uploadData = compressed
+		contentType = "application/octet-stream"
+	}
+
+	if err := m.uploadSnapshot(ctx, key, uploadData, contentType); err != nil {
+		return fmt.Errorf("snapshot: upload streaming: %w", err)
+	}
+
+	return nil
+}
+
+// flushToStorage writes the contents of src into dst. This is the streaming
+// flush point where encoded JSON chunks are accumulated for final upload.
+func (m *SnapshotManager) flushToStorage(dst *bytes.Buffer, src *bytes.Buffer) error {
+	_, err := io.Copy(dst, src)
+	return err
 }
 
 func (m *SnapshotManager) buildMetricSummary(ctx context.Context, tenant, agentID string) (MetricSummary, error) {
@@ -548,35 +721,18 @@ func (m *SnapshotManager) replayAlertFromEvent(snap *Snapshot, ev models.Event) 
 	snap.Metadata.AlertCount = len(snap.Alerts)
 }
 
-// ---- Compression ----
+// ---- Compression (delegated to shared pool) ----
 
+// compressData compresses data using a pooled Zstd encoder.
+// Delegates to pool.PooledCompress to avoid ~1.2MB per-call allocation.
 func compressData(data []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	enc, err := zstd.NewWriter(&buf)
-	if err != nil {
-		return nil, fmt.Errorf("zstd encoder: %w", err)
-	}
-	if _, err := enc.Write(data); err != nil {
-		enc.Close()
-		return nil, fmt.Errorf("zstd write: %w", err)
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("zstd close: %w", err)
-	}
-	return buf.Bytes(), nil
+	return pool.PooledCompress(data)
 }
 
+// decompressData decompresses Zstd-compressed data using a pooled decoder.
+// Delegates to pool.PooledDecompress to avoid per-call allocation.
 func decompressData(data []byte) ([]byte, error) {
-	dec, err := zstd.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("zstd decoder: %w", err)
-	}
-	defer dec.Close()
-	out, err := io.ReadAll(dec)
-	if err != nil {
-		return nil, fmt.Errorf("zstd read: %w", err)
-	}
-	return out, nil
+	return pool.PooledDecompress(data)
 }
 
 // ---- Deep copy ----

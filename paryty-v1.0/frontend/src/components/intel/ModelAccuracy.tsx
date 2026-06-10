@@ -8,7 +8,7 @@
  */
 
 import { memo, useCallback } from 'react';
-import { RefreshCw, CheckCircle, AlertCircle, XCircle } from 'lucide-react';
+import { RefreshCw, CheckCircle, AlertCircle, XCircle, Target } from 'lucide-react';
 import type { ModelInfo } from '../../types/intel';
 
 // ─── Status Indicator ────────────────────────────────────────────
@@ -100,9 +100,10 @@ export const ModelAccuracy = memo(function ModelAccuracy({
 
   if (!modelAccuracy) {
     return (
-      <div className="model-accuracy" data-testid="model-accuracy">
-        <div className="model-accuracy__header">
-          <h3 className="model-accuracy__title">Model Accuracy</h3>
+      <div className="aef-table-card" data-testid="model-accuracy">
+        <div className="aef-table-card__header">
+          <Target size={14} />
+          Model Accuracy
         </div>
         <div className="model-accuracy__empty">
           <span>Loading model data…</span>
@@ -160,54 +161,54 @@ export const ModelAccuracy = memo(function ModelAccuracy({
   }
 
   return (
-    <div className="model-accuracy" data-testid="model-accuracy">
-      <div className="model-accuracy__header">
-        <h3 className="model-accuracy__title">Model Accuracy</h3>
+    <div className="aef-table-card" data-testid="model-accuracy">
+      <div className="aef-table-card__header">
+        <Target size={14} />
+        Model Accuracy
         <button
-          className="model-accuracy__retrain"
+          className="aef-btn aef-btn-inactive model-accuracy__retrain"
           onClick={handleRetrain}
           disabled={isRetraining}
           data-testid="model-retrain-button"
+          style={{ marginLeft: 'auto' }}
         >
           <RefreshCw size={12} className={isRetraining ? 'spin' : ''} />
           {isRetraining ? 'Retraining…' : 'Retrain'}
         </button>
       </div>
 
-      <div className="model-accuracy__table-wrap">
-        <table className="model-accuracy__table">
-          <thead>
-            <tr>
-              <th>Model</th>
-              <th>Weight</th>
-              <th>MAPE</th>
-              <th>Last Trained</th>
-              <th>Status</th>
+      <table className="aef-table">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Weight</th>
+            <th>MAPE</th>
+            <th>Last Trained</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {allModels.map((model) => (
+            <tr key={model.name} data-testid={`model-row-${model.name.replace(/\s+/g, '-').toLowerCase()}`}>
+              <td className="model-accuracy__model-name">{model.name}</td>
+              <td>
+                <WeightBar weight={model.weight} />
+              </td>
+              <td className="model-accuracy__mape">
+                {model.accuracy > 0 ? `${model.accuracy.toFixed(1)}%` : '—'}
+              </td>
+              <td className="model-accuracy__date">
+                {model.lastTrained
+                  ? new Date(model.lastTrained).toLocaleDateString()
+                  : '—'}
+              </td>
+              <td>
+                <StatusIndicator status={model.status} />
+              </td>
             </tr>
-          </thead>
-          <tbody>
-            {allModels.map((model) => (
-              <tr key={model.name} data-testid={`model-row-${model.name.replace(/\s+/g, '-').toLowerCase()}`}>
-                <td className="model-accuracy__model-name">{model.name}</td>
-                <td>
-                  <WeightBar weight={model.weight} />
-                </td>
-                <td className="model-accuracy__mape">
-                  {model.accuracy > 0 ? `${model.accuracy.toFixed(1)}%` : '—'}
-                </td>
-                <td className="model-accuracy__date">
-                  {model.lastTrained
-                    ? new Date(model.lastTrained).toLocaleDateString()
-                    : '—'}
-                </td>
-                <td>
-                  <StatusIndicator status={model.status} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+          ))}
+        </tbody>
+      </table>
 
       {/* Best model callout */}
       {entries.length > 0 && entries[0] && (

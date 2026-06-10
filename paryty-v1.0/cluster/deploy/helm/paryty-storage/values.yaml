@@ -1,0 +1,79 @@
+postgresql:
+  enabled: true
+  image:
+    repository: postgres
+    tag: "16-alpine"
+  persistence:
+    enabled: true
+    size: 10Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+dragonfly:
+  enabled: true
+  image:
+    repository: docker.dragonflydb.io/dragonflydb/dragonfly
+    tag: latest
+  persistence:
+    enabled: true
+    size: 5Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+
+questdb:
+  enabled: true
+  image:
+    repository: questdb/questdb
+    tag: latest
+  persistence:
+    enabled: true
+    size: 20Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+redpanda:
+  enabled: true
+  image:
+    repository: docker.redpanda.com/redpandadata/redpanda
+    tag: latest
+  persistence:
+    enabled: true
+    size: 50Gi
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+
+seaweedfs:
+  enabled: true
+  image:
+    repository: chrislusf/seaweedfs
+    tag: latest
+  persistence:
+    enabled: true
+    size: 100Gi
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 2Gi

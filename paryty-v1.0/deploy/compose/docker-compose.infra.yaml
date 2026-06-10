@@ -35,17 +35,17 @@ services:
       - --kafka-addr
       - PLAINTEXT://0.0.0.0:9092
       - --advertise-kafka-addr
-      - PLAINTEXT://redpanda:9092
+      - PLAINTEXT://localhost:9092
       - --pandaproxy-addr
       - PLAINTEXT://0.0.0.0:8082
       - --advertise-pandaproxy-addr
-      - PLAINTEXT://redpanda:8082
+      - PLAINTEXT://localhost:8082
       - --schema-registry-addr
       - PLAINTEXT://0.0.0.0:8081
       - --rpc-addr
       - 0.0.0.0:33145
       - --advertise-rpc-addr
-      - redpanda:33145
+      - localhost:33145
     volumes:
       - redpanda-data:/var/lib/redpanda/data
     healthcheck:

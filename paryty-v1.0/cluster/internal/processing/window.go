@@ -3,17 +3,15 @@
 package processing
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/klauspost/compress/zstd"
+	"github.com/paryty/paryty-v1.0/cluster/internal/pool"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -30,7 +28,12 @@ var defaultWindowSizes = []time.Duration{Window1Min, Window5Min, Window1Hr, Wind
 
 // maxWindowBufferCapacity is the maximum number of values stored per window.
 // When exceeded, oldest values are evicted to maintain bounded memory.
-const maxWindowBufferCapacity = 10000
+// 256 values per window is sufficient for percentile calculations: at typical
+// agent reporting rates (1 report/10s = 6 values/min), even 1-minute windows
+// have ample data. For 1-day windows, 256 values still provide statistically
+// representative samples. This reduces per-window memory from 80 KB (10K×8B)
+// to 2 KB — saving ~24 GB theoretical peak at 320K active windows.
+const maxWindowBufferCapacity = 256
 
 // snapshotKey is the Dragonfly key for persisted window state.
 const snapshotKey = "paryty:pipeline:window:snapshot"
@@ -650,36 +653,16 @@ func (wm *WindowStateManager) Stop() {
 	<-wm.doneCh
 }
 
-// ---- Zstd compression helpers ----
+// ---- Zstd compression helpers (delegated to shared pool) ----
 
-// zstdCompress compresses data using Zstd.
+// zstdCompress compresses data using a pooled Zstd encoder.
+// Delegates to pool.PooledCompress to avoid ~1.2MB per-call allocation.
 func zstdCompress(data []byte) ([]byte, error) {
-	var buf bytes.Buffer
-	enc, err := zstd.NewWriter(&buf)
-	if err != nil {
-		return nil, fmt.Errorf("create zstd encoder: %w", err)
-	}
-	if _, err := enc.Write(data); err != nil {
-		enc.Close()
-		return nil, fmt.Errorf("zstd write: %w", err)
-	}
-	if err := enc.Close(); err != nil {
-		return nil, fmt.Errorf("zstd close: %w", err)
-	}
-	return buf.Bytes(), nil
+	return pool.PooledCompress(data)
 }
 
-// zstdDecompress decompresses Zstd-compressed data.
+// zstdDecompress decompresses Zstd-compressed data using a pooled decoder.
+// Delegates to pool.PooledDecompress to avoid per-call allocation.
 func zstdDecompress(data []byte) ([]byte, error) {
-	dec, err := zstd.NewReader(bytes.NewReader(data))
-	if err != nil {
-		return nil, fmt.Errorf("create zstd decoder: %w", err)
-	}
-	defer dec.Close()
-
-	result, err := io.ReadAll(dec)
-	if err != nil {
-		return nil, fmt.Errorf("zstd read: %w", err)
-	}
-	return result, nil
+	return pool.PooledDecompress(data)
 }

@@ -1,42 +1,46 @@
 # Buf code generation configuration for Paryty
 # Generates code for Rust (prost/tonic), Go (protobuf-go), TypeScript (protobuf-es)
+# NOTE: Remote plugins require buf registry auth. Local plugins used as fallback.
 
 version: v2
 plugins:
-  # Rust - prost for message types
-  - remote: buf.build/prost/prost
-    out: agent/src/proto
-    opt:
-      - bytes=.
-      - compile_well_known_types
-      - extern_path=.google.protobuf=::prost_types
+  # Rust - prost for message types (requires remote plugin)
+  # - remote: buf.build/prost/prost
+  #   out: agent/src/proto
+  #   opt:
+  #     - bytes=.
+  #     - compile_well_known_types
+  #     - extern_path=.google.protobuf=::prost_types
 
-  # Rust - tonic for gRPC services
-  - remote: buf.build/prost/tonic
-    out: agent/src/proto
-    opt:
-      - compile_well_known_types
+  # Rust - tonic for gRPC services (requires remote plugin)
+  # - remote: buf.build/prost/tonic
+  #   out: agent/src/proto
+  #   opt:
+  #     - compile_well_known_types
 
-  # Go - protobuf-go for message types
-  - remote: buf.build/protocolbuffers/go
-    out: cluster/internal/proto
+  # Go - protobuf-go for message types (local)
+  # Uses module= to strip the Go module path prefix from go_package,
+  # placing .pb.go files at cluster/internal/proto/ matching the
+  # go_package import path defined in each .proto file.
+  - local: protoc-gen-go
+    out: cluster
     opt:
-      - paths=source_relative
+      - module=github.com/paryty/paryty-v1.0/cluster
 
-  # Go - grpc-go for gRPC services
-  - remote: buf.build/grpc/go
-    out: cluster/internal/proto
+  # Go - grpc-go for gRPC services (local)
+  - local: protoc-gen-go-grpc
+    out: cluster
     opt:
-      - paths=source_relative
+      - module=github.com/paryty/paryty-v1.0/cluster
 
-  # TypeScript - protobuf-es for message types
-  - remote: buf.build/bufbuild/es
-    out: frontend/src/proto
-    opt:
-      - target=ts
+  # TypeScript - protobuf-es for message types (requires remote plugin)
+  # - remote: buf.build/bufbuild/es
+  #   out: frontend/src/proto
+  #   opt:
+  #     - target=ts
 
-  # TypeScript - connect-es for gRPC-web
-  - remote: buf.build/bufbuild/connect-es
-    out: frontend/src/proto
-    opt:
-      - target=ts
+  # TypeScript - connect-es for gRPC-web (requires remote plugin)
+  # - remote: buf.build/bufbuild/connect-es
+  #   out: frontend/src/proto
+  #   opt:
+  #     - target=ts

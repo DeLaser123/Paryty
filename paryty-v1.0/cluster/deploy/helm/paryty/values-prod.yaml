@@ -1,0 +1,63 @@
+# =============================================================================
+# Paryty Umbrella Chart — Production Overrides
+# =============================================================================
+
+global:
+  environment: "prod"
+
+paryty-agent:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+paryty-cluster:
+  query:
+    replicaCount: 3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 512Mi
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+  ingestion:
+    replicaCount: 3
+    resources:
+      requests:
+        cpu: 1000m
+        memory: 1Gi
+      limits:
+        cpu: 4000m
+        memory: 4Gi
+
+paryty-frontend:
+  replicaCount: 3
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+paryty-storage:
+  postgresql:
+    persistence:
+      size: 100Gi
+  dragonfly:
+    persistence:
+      size: 50Gi
+  questdb:
+    persistence:
+      size: 500Gi
+  redpanda:
+    persistence:
+      size: 200Gi
+  seaweedfs:
+    persistence:
+      size: 1Ti

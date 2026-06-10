@@ -1,5 +1,6 @@
 // Type-safe REST API client for the Paryty Cluster Query API
-// Enhanced with request cancellation, LRU caching, and new endpoints
+// Enhanced with request cancellation, LRU caching, auth token injection,
+// and automatic token refresh on 401 responses.
 
 import type { ApiError } from '../types/common';
 import type { MetricQuery, MetricSeries } from '../types/metric';
@@ -32,6 +33,8 @@ export interface RequestOptions {
   signal?: AbortSignal;
   /** Override default timeout for this request */
   timeout?: number;
+  /** Whether this request should skip auth token injection. */
+  skipAuth?: boolean;
 }
 
 // ─── LRU Cache ─────────────────────────────────────────────────
@@ -152,6 +155,10 @@ export class RestClient {
   private timeout: number;
   private retries: number;
   private cache: LRUCache;
+  /** Returns the current access token, or null if not authenticated. */
+  private tokenGetter: (() => string | null) | null = null;
+  /** Called on 401 — attempts token refresh, returns true on success. */
+  private authRefreshCallback: (() => Promise<boolean>) | null = null;
 
   constructor(config: RestConfig) {
     this.baseUrl = config.baseUrl || '';
@@ -160,6 +167,20 @@ export class RestClient {
     this.cache = new LRUCache();
   }
 
+  /** Set a function that returns the current access token. */
+  setTokenGetter(fn: (() => string | null) | null): void {
+    this.tokenGetter = fn;
+  }
+
+  /** Set a callback that attempts to refresh the auth token. Returns true on success. */
+  setAuthRefreshCallback(fn: (() => Promise<boolean>) | null): void {
+    this.authRefreshCallback = fn;
+  }
+
+  /**
+   * Core request method with auth injection, 401 retry, and exponential backoff.
+   * @internal
+   */
   private async request<T>(
     method: string,
     path: string,
@@ -174,7 +195,6 @@ export class RestClient {
       });
     }
 
-    // Create or merge AbortController
     const externalSignal = options?.signal;
     const requestTimeout = options?.timeout ?? this.timeout;
 
@@ -184,21 +204,28 @@ export class RestClient {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), requestTimeout);
 
-        // If external signal already aborted, propagate immediately
         if (externalSignal?.aborted) {
           throw new DOMException('Aborted', 'AbortError');
         }
 
-        // Link external signal to internal controller
         const onExternalAbort = (): void => controller.abort();
         externalSignal?.addEventListener('abort', onExternalAbort);
 
+        // Build headers with optional auth token
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        };
+        if (!options?.skipAuth && this.tokenGetter) {
+          const token = this.tokenGetter();
+          if (token) {
+            headers['Authorization'] = `Bearer ${token}`;
+          }
+        }
+
         const response = await fetch(url.toString(), {
           method,
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
+          headers,
           body: body ? JSON.stringify(body) : undefined,
           signal: controller.signal,
         });
@@ -208,6 +235,16 @@ export class RestClient {
 
         if (!response.ok) {
           const errorBody = await response.json().catch(() => ({})) as Partial<ApiError>;
+
+          // 401 handling: attempt token refresh and retry
+          if (response.status === 401 && this.authRefreshCallback && !options?.skipAuth) {
+            const refreshed = await this.authRefreshCallback();
+            if (refreshed) {
+              // Retry the request once with the new token — do not count as an attempt
+              continue;
+            }
+          }
+
           throw new ApiClientError(
             errorBody.message || `HTTP ${response.status}`,
             response.status,
@@ -219,7 +256,7 @@ export class RestClient {
       } catch (error) {
         lastError = error as Error;
         if (error instanceof ApiClientError && error.status < 500) {
-          throw error; // Don't retry client errors
+          throw error; // Don't retry client errors (except 401 handled above)
         }
         if (error instanceof DOMException && error.name === 'AbortError') {
           throw error; // Don't retry aborted requests
@@ -230,6 +267,46 @@ export class RestClient {
       }
     }
     throw lastError;
+  }
+
+  // ─── Generic HTTP Methods ────────────────────────────────────
+
+  /**
+   * Perform a generic GET request to an arbitrary API path.
+   * @param path - API path (e.g. '/api/v1/me')
+   * @param options - Optional request options
+   */
+  async get<T>(path: string, options?: RequestOptions): Promise<T> {
+    return this.request<T>('GET', path, undefined, undefined, options);
+  }
+
+  /**
+   * Perform a generic POST request to an arbitrary API path.
+   * @param path - API path (e.g. '/api/v1/auth/login')
+   * @param body - Request body
+   * @param options - Optional request options
+   */
+  async post<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    return this.request<T>('POST', path, body, undefined, options);
+  }
+
+  /**
+   * Perform a generic PUT request to an arbitrary API path.
+   * @param path - API path
+   * @param body - Request body
+   * @param options - Optional request options
+   */
+  async put<T>(path: string, body?: unknown, options?: RequestOptions): Promise<T> {
+    return this.request<T>('PUT', path, body, undefined, options);
+  }
+
+  /**
+   * Perform a generic DELETE request to an arbitrary API path.
+   * @param path - API path
+   * @param options - Optional request options
+   */
+  async delete<T>(path: string, options?: RequestOptions): Promise<T> {
+    return this.request<T>('DELETE', path, undefined, undefined, options);
   }
 
   // ─── Topology (cached, 5s TTL) ─────────────────────────────

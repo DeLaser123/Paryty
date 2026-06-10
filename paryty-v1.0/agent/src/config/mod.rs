@@ -31,6 +31,14 @@ pub struct AgentConfig {
     /// Can also be set via `PARYTY_TENANT_ID` environment variable.
     #[serde(default)]
     pub tenant_id: Option<String>,
+    /// Assigned twin ID (set by cluster after registration).
+    /// Fallback env var: `PARYTY_TWIN_ID` — gRPC assignment is primary.
+    #[serde(default)]
+    pub twin_id: Option<String>,
+    /// Assigned client ID (set by cluster after registration).
+    /// Fallback env var: `PARYTY_CLIENT_ID` — gRPC assignment is primary.
+    #[serde(default)]
+    pub client_id: Option<String>,
     pub self_metrics: SelfMetricsConfig,
 }
 
@@ -299,6 +307,16 @@ pub fn load_from_str(yaml: &str) -> Result<Config> {
         config.agent.tenant_id = Some(tenant_id);
     }
 
+    // Override twin ID from env var (fallback only; gRPC assignment is primary).
+    if let Ok(twin_id) = std::env::var("PARYTY_TWIN_ID") {
+        config.agent.twin_id = Some(twin_id);
+    }
+
+    // Override client ID from env var (fallback only; gRPC assignment is primary).
+    if let Ok(client_id) = std::env::var("PARYTY_CLIENT_ID") {
+        config.agent.client_id = Some(client_id);
+    }
+
     // Generate agent ID if set to "auto"
     if config.agent.id == "auto" {
         config.agent.id = uuid::Uuid::new_v4().to_string();
@@ -403,6 +421,37 @@ logging:
 
         // Cleanup
         std::env::remove_var(endpoint_key);
+    }
+
+    #[test]
+    fn test_env_override_twin_client_id() {
+        // Ensure clean environment for this test
+        std::env::remove_var("PARYTY_TWIN_ID");
+        std::env::remove_var("PARYTY_CLIENT_ID");
+
+        let twin_key = "PARYTY_TWIN_ID";
+        let client_key = "PARYTY_CLIENT_ID";
+        let test_twin = "twin-abc-123";
+        let test_client = "client-xyz-789";
+
+        std::env::set_var(twin_key, test_twin);
+        std::env::set_var(client_key, test_client);
+
+        let config = load_from_str(VALID_YAML).expect("should load with env override");
+
+        assert_eq!(config.agent.twin_id.as_deref(), Some(test_twin));
+        assert_eq!(config.agent.client_id.as_deref(), Some(test_client));
+
+        // Cleanup
+        std::env::remove_var(twin_key);
+        std::env::remove_var(client_key);
+    }
+
+    #[test]
+    fn test_twin_client_id_default_none() {
+        let config = try_parse(VALID_YAML).expect("valid YAML should parse");
+        assert!(config.agent.twin_id.is_none(), "twin_id should default to None");
+        assert!(config.agent.client_id.is_none(), "client_id should default to None");
     }
 
     #[test]

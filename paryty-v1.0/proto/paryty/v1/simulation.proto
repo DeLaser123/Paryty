@@ -7,6 +7,7 @@ option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;paryty
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/duration.proto";
 import "paryty/v1/common.proto";
+import "paryty/v1/anomaly.proto";
 
 // SimulationService provides what-if analysis and chaos engineering.
 service SimulationService {

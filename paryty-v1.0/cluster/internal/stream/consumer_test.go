@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -142,7 +143,6 @@ func TestNewConsumerWithDLQ_EmptyDLQTopicMeansDisabled(t *testing.T) {
 	}
 	defer consumer.Close()
 
-	// DLQ producer is set but topic is empty — publishToDLQ checks dlqProducer != nil.
 	if consumer.dlqProducer != dlqProducer {
 		t.Error("dlqProducer should still be stored even if topic is empty")
 	}
@@ -179,14 +179,10 @@ func TestPublishToDLQ_NilProducer_DoesNotPanic(t *testing.T) {
 		Value: []byte(`{"x":1}`),
 	}
 
-	// Should not panic even with nil producer.
 	c.publishToDLQ(context.Background(), record, errors.New("handler failed"))
 }
 
 func TestPublishToDLQ_ConstructsCorrectHeaders(t *testing.T) {
-	// Verify that publishToDLQ builds the DLQ record with correct headers.
-	// Since we can't produce to a real broker, we test the record construction
-	// logic directly.
 	originalTopic := "paryty.acme.metrics.raw"
 	handlerErr := errors.New("corrupt data")
 	key := []byte("tenant-1:agent-1")
@@ -198,7 +194,6 @@ func TestPublishToDLQ_ConstructsCorrectHeaders(t *testing.T) {
 		Value: value,
 	}
 
-	// Simulate what publishToDLQ builds.
 	dlqRecord := &kgo.Record{
 		Topic: "paryty.acme.dead-letter",
 		Key:   record.Key,
@@ -219,7 +214,6 @@ func TestPublishToDLQ_ConstructsCorrectHeaders(t *testing.T) {
 		t.Errorf("DLQ value = %q, want %q", string(dlqRecord.Value), string(value))
 	}
 
-	// Verify headers exist.
 	if len(dlqRecord.Headers) != 2 {
 		t.Fatalf("DLQ headers count = %d, want 2", len(dlqRecord.Headers))
 	}
@@ -242,12 +236,10 @@ func TestConsumer_Lag_WithoutBroker(t *testing.T) {
 	defer consumer.Close()
 
 	ctx := context.Background()
-	// Lag will error because broker is unreachable.
 	_, err = consumer.Lag(ctx)
 	if err == nil {
 		t.Log("Lag() succeeded (broker is reachable)")
 	}
-	// Just verify it doesn't panic.
 }
 
 func TestNewConsumer_EmptyBrokers(t *testing.T) {
@@ -290,7 +282,6 @@ func TestConsumerClose_MultipleCallsSafe(t *testing.T) {
 		t.Fatalf("NewConsumer() error: %v", err)
 	}
 
-	// Close should be safe to call multiple times.
 	consumer.Close()
 	consumer.Close()
 }
@@ -300,7 +291,7 @@ func TestRetryBackoff_ExponentialGrowth(t *testing.T) {
 
 	tests := []struct {
 		attempt int
-		want    int64 // in milliseconds
+		want    int64
 	}{
 		{0, 100},
 		{1, 400},
@@ -316,7 +307,6 @@ func TestRetryBackoff_ExponentialGrowth(t *testing.T) {
 }
 
 func TestConsumer_ImplementsCloseInterface(t *testing.T) {
-	// Verify Consumer can be used with defer Close pattern.
 	cfg := testConfig()
 	handler := func(ctx context.Context, key string, value []byte) error { return nil }
 
@@ -326,7 +316,6 @@ func TestConsumer_ImplementsCloseInterface(t *testing.T) {
 	}
 	defer consumer.Close()
 
-	// Verify adminClient is initialized.
 	if consumer.adminClient == nil {
 		t.Fatal("adminClient should be initialized")
 	}
@@ -358,7 +347,6 @@ func TestConsumer_ConcurrentCloseSafety(t *testing.T) {
 		t.Fatalf("NewConsumer() error: %v", err)
 	}
 
-	// Concurrent Close calls should not race.
 	var wg sync.WaitGroup
 	for i := 0; i < 5; i++ {
 		wg.Add(1)
@@ -386,7 +374,7 @@ func TestConsumer_DrainingFlagInitiallyFalse(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// processRecord — retry, backoff, and DLQ integration tests
+// processRecord â€” retry, backoff, and DLQ integration tests
 // ---------------------------------------------------------------------------
 
 func TestProcessRecord_SuccessOnFirstAttempt(t *testing.T) {
@@ -444,7 +432,6 @@ func TestProcessRecord_RetriesUntilSuccess(t *testing.T) {
 		t.Errorf("handler called %d times, want 3", handlerCalls.Load())
 	}
 
-	// Two backoffs: 100ms + 400ms = 500ms minimum.
 	if elapsed < 450*time.Millisecond {
 		t.Errorf("elapsed %v, expected at least 450ms (two backoffs)", elapsed)
 	}
@@ -480,7 +467,6 @@ func TestProcessRecord_ExhaustsRetriesThenDLQ(t *testing.T) {
 
 	c.processRecord(context.Background(), record)
 
-	// Handler called maxRetries+1 = 3 times.
 	if handlerCalls.Load() != 3 {
 		t.Errorf("handler called %d times, want 3 (maxRetries+1)", handlerCalls.Load())
 	}
@@ -536,7 +522,6 @@ func TestProcessRecord_ContextCancelled_SkipsToDLQ(t *testing.T) {
 
 	c.processRecord(ctx, record)
 
-	// First attempt runs; backoff detects cancelled context → DLQ.
 	if handlerCalls.Load() != 1 {
 		t.Errorf("handler called %d times, want 1 (context cancelled during backoff)", handlerCalls.Load())
 	}
@@ -564,7 +549,6 @@ func TestProcessRecord_DrainingSkipsRetries(t *testing.T) {
 
 	c.processRecord(context.Background(), record)
 
-	// First attempt fails, draining flag sends to DLQ immediately.
 	if handlerCalls.Load() != 1 {
 		t.Errorf("handler called %d times, want 1 (draining skips retries)", handlerCalls.Load())
 	}
@@ -678,5 +662,115 @@ func TestClose_DrainCompletesBeforeTimeout(t *testing.T) {
 
 	if elapsed > 2*time.Second {
 		t.Errorf("Close took %v, expected fast completion", elapsed)
+	}
+}
+
+// =============================================================================
+// WithWorkerPool bounds tests
+// =============================================================================
+
+func TestWithWorkerPool_BoundsClamped(t *testing.T) {
+	cfg := testConfig()
+	handler := func(ctx context.Context, key string, value []byte) error { return nil }
+
+	consumer, err := NewConsumer(cfg, "test-group", []string{"test-topic"}, handler, testLogger(),
+		WithWorkerPool(100),
+	)
+	if err != nil {
+		t.Fatalf("NewConsumer() error: %v", err)
+	}
+	defer consumer.Close()
+
+	if consumer.workerCount != maxWorkerPoolSize {
+		t.Errorf("workerCount = %d, want %d (clamped from 100)", consumer.workerCount, maxWorkerPoolSize)
+	}
+}
+
+func TestWithWorkerPool_NegativeDefaultsToGOMAXPROCS(t *testing.T) {
+	cfg := testConfig()
+	handler := func(ctx context.Context, key string, value []byte) error { return nil }
+
+	consumer, err := NewConsumer(cfg, "test-group", []string{"test-topic"}, handler, testLogger(),
+		WithWorkerPool(-1),
+	)
+	if err != nil {
+		t.Fatalf("NewConsumer() error: %v", err)
+	}
+	defer consumer.Close()
+
+	expected := runtime.GOMAXPROCS(0) * defaultWorkerPoolMultiplier
+	if expected > maxWorkerPoolSize {
+		expected = maxWorkerPoolSize
+	}
+	if consumer.workerCount != expected {
+		t.Errorf("workerCount = %d, want %d (GOMAXPROCS*2 clamped)", consumer.workerCount, expected)
+	}
+}
+
+func TestWithWorkerPool_ZeroDefaultsToGOMAXPROCS(t *testing.T) {
+	cfg := testConfig()
+	handler := func(ctx context.Context, key string, value []byte) error { return nil }
+
+	consumer, err := NewConsumer(cfg, "test-group", []string{"test-topic"}, handler, testLogger(),
+		WithWorkerPool(0),
+	)
+	if err != nil {
+		t.Fatalf("NewConsumer() error: %v", err)
+	}
+	defer consumer.Close()
+
+	expected := runtime.GOMAXPROCS(0) * defaultWorkerPoolMultiplier
+	if expected > maxWorkerPoolSize {
+		expected = maxWorkerPoolSize
+	}
+	if consumer.workerCount != expected {
+		t.Errorf("workerCount = %d, want %d (zero defaults to GOMAXPROCS*2 clamped)", consumer.workerCount, expected)
+	}
+}
+
+func TestWithWorkerPool_ValidSmallValue(t *testing.T) {
+	cfg := testConfig()
+	handler := func(ctx context.Context, key string, value []byte) error { return nil }
+
+	consumer, err := NewConsumer(cfg, "test-group", []string{"test-topic"}, handler, testLogger(),
+		WithWorkerPool(4),
+	)
+	if err != nil {
+		t.Fatalf("NewConsumer() error: %v", err)
+	}
+	defer consumer.Close()
+
+	if consumer.workerCount != 4 {
+		t.Errorf("workerCount = %d, want 4", consumer.workerCount)
+	}
+}
+
+func TestWithWorkerPool_ExactlyMaxValue(t *testing.T) {
+	cfg := testConfig()
+	handler := func(ctx context.Context, key string, value []byte) error { return nil }
+
+	consumer, err := NewConsumer(cfg, "test-group", []string{"test-topic"}, handler, testLogger(),
+		WithWorkerPool(maxWorkerPoolSize),
+	)
+	if err != nil {
+		t.Fatalf("NewConsumer() error: %v", err)
+	}
+	defer consumer.Close()
+
+	if consumer.workerCount != maxWorkerPoolSize {
+		t.Errorf("workerCount = %d, want %d", consumer.workerCount, maxWorkerPoolSize)
+	}
+}
+
+func TestWithWorkerPool_WorkChannelCapacityFormula(t *testing.T) {
+	// Verify the channel capacity formula: workerCount * workerChannelBuffer.
+	// The actual channel is created in Start(), so we verify the formula here.
+	const workerCount = 4
+	expectedCap := workerCount * workerChannelBuffer // 4 * 10 = 40
+	if expectedCap != 40 {
+		t.Errorf("expectedCap = %d, want 40", expectedCap)
+	}
+	if workerChannelBuffer != 10 {
+		t.Errorf("workerChannelBuffer = %d, want 10", workerChannelBuffer)
 	}
 }

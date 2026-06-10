@@ -20,9 +20,11 @@ use tracing::{debug, info, warn};
 
 use crate::config::Config;
 use crate::proto::paryty::v1::ingestion_service_client::IngestionServiceClient;
+use crate::proto::paryty::v1::twin_service_client::TwinServiceClient;
 use crate::proto::paryty::v1::{
     AgentRegistration, AgentRegistrationResponse, AgentToCluster, ClusterToAgent, HeartbeatRequest,
-    HeartbeatResponse, MetricBatch, NetworkEventBatch, NetworkEventResponse, SendBatchResponse,
+    HeartbeatResponse, MetricBatch, NetworkEventBatch, NetworkEventResponse,
+    ResolveIdentityRequest, SendBatchResponse,
 };
 
 use super::tenant::TenantCache;
@@ -83,7 +85,7 @@ pub struct GrpcClient {
     /// Optional API key for authenticating with the cluster.
     ///
     /// When set, the API key is attached as `x-api-key` gRPC metadata
-    /// on registration requests. The server uses this to resolve the
+    /// on all requests. The server uses this to resolve the
     /// tenant for this agent.
     api_key: Option<String>,
     /// Optional tenant ID for multi-tenant routing.
@@ -93,6 +95,18 @@ pub struct GrpcClient {
     tenant_id: Option<String>,
     /// Local cache for the tenant ID assigned after registration.
     tenant_cache: Option<TenantCache>,
+
+    // ── Identity Metadata ──────────────────────────────────────────────
+    /// Assigned twin ID for identity-aware routing.
+    ///
+    /// When set, attached as `x-twin-id` gRPC metadata on ALL requests.
+    /// Set via `update_identity()` after registration/identity resolution.
+    twin_id: Arc<RwLock<Option<String>>>,
+    /// Assigned client ID for identity-aware routing.
+    ///
+    /// When set, attached as `x-client-id` gRPC metadata on ALL requests.
+    /// Set via `update_identity()` after registration/identity resolution.
+    client_id: Arc<RwLock<Option<String>>>,
 }
 
 impl GrpcClient {
@@ -123,6 +137,8 @@ impl GrpcClient {
             api_key,
             tenant_id,
             tenant_cache: None,
+            twin_id: Arc::new(RwLock::new(None)),
+            client_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -146,6 +162,8 @@ impl GrpcClient {
             api_key: None,
             tenant_id: None,
             tenant_cache: None,
+            twin_id: Arc::new(RwLock::new(None)),
+            client_id: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -154,6 +172,125 @@ impl GrpcClient {
     /// Must be called before `register_agent()` if tenant caching is desired.
     pub fn set_tenant_cache(&mut self, cache: TenantCache) {
         self.tenant_cache = Some(cache);
+    }
+
+    // ── Identity ───────────────────────────────────────────────────────
+
+    /// Update the identity metadata attached to all outgoing gRPC requests.
+    ///
+    /// Called by the `Client` layer after identity is resolved or assigned.
+    /// When set, `x-twin-id` and `x-client-id` are attached as gRPC metadata
+    /// on all subsequent requests (RegisterAgent, SendBatch, Heartbeat,
+    /// StreamMetrics, ReportNetworkEvents).
+    pub fn update_identity(&self, twin_id: Option<String>, client_id: Option<String>) {
+        // We use block_in_place + block_on because this may be called from
+        // async context but RwLock::write is synchronous.
+        let tid_guard = self.twin_id.try_write();
+        let cid_guard = self.client_id.try_write();
+
+        if let Ok(mut tid) = tid_guard {
+            *tid = twin_id.clone();
+        }
+        if let Ok(mut cid) = cid_guard {
+            *cid = client_id.clone();
+        }
+
+        if twin_id.is_some() && client_id.is_some() {
+            info!(
+                twin_id = %twin_id.as_deref().unwrap_or(""),
+                client_id = %client_id.as_deref().unwrap_or(""),
+                "gRPC identity metadata updated"
+            );
+        } else {
+            info!("gRPC identity metadata cleared");
+        }
+    }
+
+    /// Get the current twin ID.
+    pub async fn twin_id(&self) -> Option<String> {
+        self.twin_id.read().await.clone()
+    }
+
+    /// Get the current client ID.
+    pub async fn client_id(&self) -> Option<String> {
+        self.client_id.read().await.clone()
+    }
+
+    /// Attach identity metadata (x-twin-id, x-client-id) to a tonic request.
+    ///
+    /// Called internally before every RPC. If identity is not assigned,
+    /// this is a no-op.
+    fn attach_identity_metadata<T>(&self, request: &mut tonic::Request<T>) {
+        // We read synchronously; at this point the lock should not be contended.
+        // Using try_read to avoid blocking in hot path.
+        if let Ok(tid_guard) = self.twin_id.try_read() {
+            if let Some(ref twin_id) = *tid_guard {
+                match MetadataValue::try_from(twin_id.as_str()) {
+                    Ok(value) => {
+                        request.metadata_mut().insert("x-twin-id", value);
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "Invalid twin ID format — skipping x-twin-id metadata"
+                        );
+                    }
+                }
+            }
+        }
+
+        if let Ok(cid_guard) = self.client_id.try_read() {
+            if let Some(ref client_id) = *cid_guard {
+                match MetadataValue::try_from(client_id.as_str()) {
+                    Ok(value) => {
+                        request.metadata_mut().insert("x-client-id", value);
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "Invalid client ID format — skipping x-client-id metadata"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// Resolve identity via the TwinService gRPC call.
+    ///
+    /// Called after registration to discover the assigned twin/client ID.
+    /// Creates a `TwinServiceClient` on the same channel used by the
+    /// `IngestionServiceClient`. The `Client` layer treats this as
+    /// best-effort and falls back to env-var identity on failure.
+    pub async fn resolve_identity(&self, agent_id: &str) -> Result<(String, String)> {
+        // Acquire the channel to create a TwinServiceClient on the same connection.
+        let channel_guard = self.channel.lock().await;
+        let channel = match channel_guard.as_ref() {
+            Some(ch) => ch.clone(),
+            None => {
+                anyhow::bail!("Cannot resolve identity: not connected");
+            }
+        };
+        drop(channel_guard);
+
+        let mut twin_client = TwinServiceClient::new(channel);
+
+        let request = tonic::Request::new(ResolveIdentityRequest {
+            agent_id: agent_id.to_string(),
+        });
+
+        let response = twin_client
+            .resolve_identity(request)
+            .await
+            .context("ResolveIdentity RPC failed")?;
+
+        let resp = response.into_inner();
+
+        if !resp.assigned {
+            anyhow::bail!("Agent not yet assigned to a twin");
+        }
+
+        Ok((resp.twin_id, resp.client_id))
     }
 
     /// Connect to the cluster and create the typed proto client.
@@ -292,6 +429,9 @@ impl GrpcClient {
             }
         }
 
+        // Attach identity metadata (x-twin-id, x-client-id).
+        self.attach_identity_metadata(&mut request);
+
         let response = client
             .register_agent(request)
             .await
@@ -332,12 +472,27 @@ impl GrpcClient {
         // Build the tonic Request so we can attach metadata.
         let mut request = tonic::Request::new(batch);
 
+        // Attach API key as gRPC metadata if configured.
+        if let Some(ref api_key) = self.api_key {
+            match MetadataValue::try_from(api_key.as_str()) {
+                Ok(value) => {
+                    request.metadata_mut().insert("x-api-key", value);
+                    debug!("Attached x-api-key metadata to send_batch request");
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "Invalid API key format — skipping x-api-key metadata for send_batch"
+                    );
+                }
+            }
+        }
+
         // Attach tenant ID as gRPC metadata if configured.
         if let Some(ref tenant_id) = self.tenant_id {
             match MetadataValue::try_from(tenant_id.as_str()) {
                 Ok(value) => {
                     request.metadata_mut().insert("x-tenant-id", value);
-                    debug!(tenant_id = %tenant_id, "Attached x-tenant-id metadata to send_batch request");
                 }
                 Err(e) => {
                     warn!(
@@ -347,6 +502,9 @@ impl GrpcClient {
                 }
             }
         }
+
+        // Attach identity metadata (x-twin-id, x-client-id).
+        self.attach_identity_metadata(&mut request);
 
         let response = client
             .send_batch(request)
@@ -367,8 +525,36 @@ impl GrpcClient {
         let mut guard = self.client.lock().await;
         let client = guard.as_mut().context("Not connected: proto client unavailable")?;
 
+        let mut tonic_request = tonic::Request::new(request);
+
+        // Attach API key as gRPC metadata if configured.
+        if let Some(ref api_key) = self.api_key {
+            match MetadataValue::try_from(api_key.as_str()) {
+                Ok(value) => {
+                    tonic_request.metadata_mut().insert("x-api-key", value);
+                    debug!("Attached x-api-key metadata to heartbeat request");
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "Invalid API key format — skipping x-api-key metadata for heartbeat"
+                    );
+                }
+            }
+        }
+
+        // Attach tenant ID as gRPC metadata if configured.
+        if let Some(ref tenant_id) = self.tenant_id {
+            if let Ok(value) = MetadataValue::try_from(tenant_id.as_str()) {
+                tonic_request.metadata_mut().insert("x-tenant-id", value);
+            }
+        }
+
+        // Attach identity metadata (x-twin-id, x-client-id).
+        self.attach_identity_metadata(&mut tonic_request);
+
         let response = client
-            .heartbeat(request)
+            .heartbeat(tonic_request)
             .await
             .map_err(|status| anyhow::anyhow!("Heartbeat RPC failed: {}", status))?;
 
@@ -406,8 +592,37 @@ impl GrpcClient {
         // Convert the receiver into a stream that tonic can consume.
         let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
 
+        // Build request with API key, tenant, and identity metadata.
+        let mut request = tonic::Request::new(stream);
+
+        // Attach API key as gRPC metadata if configured.
+        if let Some(ref api_key) = self.api_key {
+            match MetadataValue::try_from(api_key.as_str()) {
+                Ok(value) => {
+                    request.metadata_mut().insert("x-api-key", value);
+                    debug!("Attached x-api-key metadata to report_network_events request");
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "Invalid API key format — skipping x-api-key metadata for report_network_events"
+                    );
+                }
+            }
+        }
+
+        // Attach tenant ID as gRPC metadata if configured.
+        if let Some(ref tenant_id) = self.tenant_id {
+            if let Ok(value) = MetadataValue::try_from(tenant_id.as_str()) {
+                request.metadata_mut().insert("x-tenant-id", value);
+            }
+        }
+
+        // Attach identity metadata (x-twin-id, x-client-id).
+        self.attach_identity_metadata(&mut request);
+
         let response = client
-            .report_network_events(stream)
+            .report_network_events(request)
             .await
             .map_err(|status| anyhow::anyhow!("ReportNetworkEvents RPC failed: {}", status))?;
 
@@ -446,8 +661,24 @@ impl GrpcClient {
         // Convert the tokio mpsc receiver into a stream for tonic.
         let outbound = tokio_stream::wrappers::ReceiverStream::new(rx);
 
-        // Build request with tenant metadata if configured.
+        // Build request with API key, tenant, and identity metadata.
         let mut request = tonic::Request::new(outbound);
+
+        // Attach API key as gRPC metadata if configured.
+        if let Some(ref api_key) = self.api_key {
+            match MetadataValue::try_from(api_key.as_str()) {
+                Ok(value) => {
+                    request.metadata_mut().insert("x-api-key", value);
+                    debug!("Attached x-api-key metadata to stream request");
+                }
+                Err(e) => {
+                    warn!(
+                        error = %e,
+                        "Invalid API key format — skipping x-api-key metadata for stream"
+                    );
+                }
+            }
+        }
 
         // Attach tenant ID as gRPC metadata if configured.
         if let Some(ref tenant_id) = self.tenant_id {
@@ -464,6 +695,9 @@ impl GrpcClient {
                 }
             }
         }
+
+        // Attach identity metadata (x-twin-id, x-client-id).
+        self.attach_identity_metadata(&mut request);
 
         let response = stream_client
             .stream_metrics(request)
@@ -520,6 +754,8 @@ impl Clone for GrpcClient {
             api_key: self.api_key.clone(),
             tenant_id: self.tenant_id.clone(),
             tenant_cache: None, // Cache is not cloned — set explicitly on the clone if needed.
+            twin_id: Arc::clone(&self.twin_id),
+            client_id: Arc::clone(&self.client_id),
         }
     }
 }
@@ -585,6 +821,28 @@ mod tests {
         assert_eq!(cloned.endpoint(), client.endpoint());
     }
 
+    /// Verify identity defaults to None.
+    #[tokio::test]
+    async fn test_identity_defaults_to_none() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+        assert!(client.twin_id().await.is_none());
+        assert!(client.client_id().await.is_none());
+    }
+
+    /// Verify update_identity sets and clears identity.
+    #[tokio::test]
+    async fn test_update_identity() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+
+        client.update_identity(Some("twin-001".to_string()), Some("client-001".to_string()));
+        assert_eq!(client.twin_id().await.as_deref(), Some("twin-001"));
+        assert_eq!(client.client_id().await.as_deref(), Some("client-001"));
+
+        client.update_identity(None, None);
+        assert!(client.twin_id().await.is_none());
+        assert!(client.client_id().await.is_none());
+    }
+
     /// Verify proto methods return an error when not connected.
     #[tokio::test]
     async fn test_rpc_fails_when_disconnected() {
@@ -598,6 +856,8 @@ mod tests {
             capabilities: None,
             labels: None,
             started_at: None,
+            twin_id: String::new(),
+            client_id: String::new(),
         };
 
         let result = client.register_agent(registration).await;
@@ -638,6 +898,9 @@ mod tests {
                 id: "test-agent".to_string(),
                 cluster_endpoint: "http://localhost:50051".to_string(),
                 api_key: "secret-api-key".to_string(),
+                tenant_id: None,
+                twin_id: None,
+                client_id: None,
                 self_metrics: crate::config::SelfMetricsConfig { enabled: false, port: 9090 },
             },
             layers: crate::config::LayersConfig {
@@ -697,14 +960,28 @@ mod tests {
         assert_eq!(client.api_key.as_deref(), Some("secret-api-key"));
     }
 
-    /// Verify that clone does not carry tenant_cache.
+    /// Verify that clone does not carry tenant_cache but shares identity.
     #[test]
-    fn test_clone_does_not_carry_tenant_cache() {
+    fn test_clone_shares_identity_not_cache() {
         let mut client = GrpcClient::with_endpoint("http://localhost:50051");
         let dir = tempfile::tempdir().expect("failed to create temp dir");
         client.set_tenant_cache(TenantCache::new(dir.path()));
+        client.update_identity(Some("twin-001".to_string()), Some("client-001".to_string()));
 
         let cloned = client.clone();
         assert!(cloned.tenant_cache.is_none());
+        // Identity IS shared via Arc.
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        assert_eq!(rt.block_on(cloned.twin_id()).as_deref(), Some("twin-001"));
+        assert_eq!(rt.block_on(cloned.client_id()).as_deref(), Some("client-001"));
+    }
+
+    /// Verify resolve_identity returns an error when not connected.
+    #[tokio::test]
+    async fn test_resolve_identity_not_connected() {
+        let client = GrpcClient::with_endpoint("http://localhost:50051");
+        let result = client.resolve_identity("test-agent").await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("not connected"));
     }
 }

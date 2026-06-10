@@ -74,7 +74,7 @@ export const AlertPanel = memo(function AlertPanel({ alert, onClose }: AlertPane
         </div>
 
         {/* Body */}
-        <div className="aef-container-card__body aef-scroll">
+        <div className="aef-container-card__body aef-scroll-thin">
           {/* Alert details */}
           <div className="aef-stat-module">
             <span className="aef-stat-module__label">State</span>

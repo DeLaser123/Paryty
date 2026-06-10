@@ -1,0 +1,57 @@
+# =============================================================================
+# Paryty Umbrella Chart — Dev Overrides
+# =============================================================================
+
+global:
+  environment: "dev"
+
+paryty-agent:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+paryty-cluster:
+  query:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  ingestion:
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+paryty-frontend:
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+paryty-storage:
+  postgresql:
+    persistence:
+      size: 1Gi
+  dragonfly:
+    persistence:
+      size: 1Gi
+  questdb:
+    persistence:
+      size: 5Gi

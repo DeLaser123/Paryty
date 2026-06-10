@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "paryty.name" . }}-security
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - port: 8443
+      targetPort: http
+      protocol: TCP
+      name: https
+  selector:
+    {{- include "paryty.selectorLabels" . | nindent 4 }}
+    component: security

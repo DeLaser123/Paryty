@@ -5,6 +5,7 @@ package paryty.v1;
 option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
 
 import "google/protobuf/timestamp.proto";
+import "paryty/v1/common.proto";
 
 // AnomalyDetectionService provides ML-powered anomaly detection.
 service AnomalyDetectionService {

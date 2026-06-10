@@ -26,7 +26,7 @@ services:
       - --kafka-addr
       - PLAINTEXT://0.0.0.0:9092
       - --advertise-kafka-addr
-      - PLAINTEXT://localhost:9092
+      - PLAINTEXT://redpanda:9092
       - --pandaproxy-addr
       - PLAINTEXT://0.0.0.0:8082
       - --advertise-pandaproxy-addr
@@ -38,14 +38,14 @@ services:
       - --advertise-rpc-addr
       - redpanda:33145
     volumes:
-      - D:/ParytyData/redpanda:/var/lib/redpanda/data
+      - /mnt/d/ParytyData/redpanda:/var/lib/redpanda/data
 
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
     ports:
       - "6379:6379"
     volumes:
-      - D:/ParytyData/dragonfly:/data
+      - /mnt/d/ParytyData/dragonfly:/data
 
   questdb:
     image: questdb/questdb:latest
@@ -54,14 +54,14 @@ services:
       - "9009:9009"  # Web console
       - "8812:8812"  # InfluxDB line protocol
     volumes:
-      - D:/ParytyData/questdb:/var/lib/questdb
+      - questdb_data:/var/lib/questdb
 
   postgres:
     image: postgres:16-alpine
     ports:
       - "5432:5432"
     volumes:
-      - D:/ParytyData/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: paryty
       POSTGRES_USER: paryty
@@ -74,7 +74,7 @@ services:
       - "19333:19333"  # Master gRPC
     command: master -ip=seaweedfs-master -port=9333 -volumePreallocate=false
     volumes:
-      - D:/ParytyData/seaweedfs-master:/data
+      - /mnt/d/ParytyData/seaweedfs-master:/data
 
   seaweedfs-volume:
     image: chrislusf/seaweedfs:latest
@@ -83,7 +83,7 @@ services:
       - "18080:18080"  # Volume gRPC
     command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:8080
     volumes:
-      - D:/ParytyData/seaweedfs-volume:/data
+      - /mnt/d/ParytyData/seaweedfs-volume:/data
     depends_on:
       - seaweedfs-master
 
@@ -94,7 +94,7 @@ services:
       - "18888:18888"  # Filer gRPC
     command: filer -master=seaweedfs-master:9333 -port=8888
     volumes:
-      - D:/ParytyData/seaweedfs-filer:/data
+      - /mnt/d/ParytyData/seaweedfs-filer:/data
     depends_on:
       - seaweedfs-master
       - seaweedfs-volume
@@ -110,88 +110,94 @@ services:
   # --- Paryty Services ---
 
   paryty-agent:
-    build:
-      context: ../../
-      dockerfile: deploy/docker/Dockerfile.agent
+    image: paryty/agent:latest
     ports:
       - "9090:9090"  # gRPC
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
+      - ../../configs/agent/agent.yaml:/app/configs/agent/agent.yaml:ro
     environment:
-      PARYTY_CLUSTER_ADDR: paryty-ingestion:8080
+      PARYTY_CLUSTER_ENDPOINT: paryty-ingestion:8080
       PARYTY_LOG_LEVEL: info
+      PARYTY_API_KEY: "pk_live_6a89eaf0d573619d927dc19895039dc78897cfba8d1d5c39b079c828d552cbeb"
     privileged: true
     pid: host
     depends_on:
       - paryty-ingestion
 
   paryty-ingestion:
-    build:
-      context: ../../cluster
-      dockerfile: ../deploy/docker/Dockerfile.cluster
-      args:
-        SERVICE: ingestion
+    image: paryty/ingestion:latest
     ports:
-      - "8080:8080"  # gRPC ingestion
-      - "8081:8081"  # Health
+      - "50052:8080"  # gRPC ingestion (host:50052 -> container:8080)
     environment:
+      DATABASE_URL: postgres://paryty:paryty@postgres:5432/paryty?sslmode=disable
+      PARYTY_INGESTION_PORT: "8080"
       PARYTY_REDPANDA_BROKERS: redpanda:9092
       PARYTY_DRAGONFLY_ADDR: dragonfly:6379
       PARYTY_QUESTDB_ADDR: questdb:8812
-    depends_on:
-      - redpanda
-      - dragonfly
-      - questdb
-
-  paryty-query:
-    build:
-      context: ../../cluster
-      dockerfile: ../deploy/docker/Dockerfile.cluster
-      args:
-        SERVICE: query
-    ports:
-      - "8082:8080"  # REST/WS/SSE API
-    environment:
-      PARYTY_REDPANDA_BROKERS: redpanda:9092
-      PARYTY_DRAGONFLY_ADDR: dragonfly:6379
-      PARYTY_QUESTDB_ADDR: questdb:8812
-    depends_on:
-      - redpanda
-      - dragonfly
-      - questdb
-
-  paryty-pipeline:
-    build:
-      context: ../../cluster
-      dockerfile: ../deploy/docker/Dockerfile.cluster
-      args:
-        SERVICE: pipeline
-    environment:
-      PARYTY_REDPANDA_BROKERS: redpanda:9092
-      PARYTY_DRAGONFLY_ADDR: dragonfly:6379
-      PARYTY_QUESTDB_ADDR: questdb:8812
+      PARYTY_QUESTDB_ILP_ADDR: questdb:9009
       PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
-      PARYTY_SEAWEEDFS_ACCESS_KEY: ""
-      PARYTY_SEAWEEDFS_SECRET_KEY: ""
-      PARYTY_SEAWEEDFS_BUCKET: paryty
-      PARYTY_SEAWEEDFS_USE_SSL: "false"
+    volumes:
+      - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
     depends_on:
       - redpanda
       - dragonfly
       - questdb
       - seaweedfs-s3
+    restart: on-failure
+
+  paryty-query:
+    image: paryty/query:latest
+    ports:
+      - "8082:8080"  # REST/WS/SSE API
+    environment:
+      DATABASE_URL: postgres://paryty:paryty@postgres:5432/paryty?sslmode=disable
+      PARYTY_JWT_SECRET: "61a61ee4dce5c4e8c6378b71bfefbfb7c94cfc54351ff6db8d93b2b4687b605d"
+      PARYTY_REDPANDA_BROKERS: redpanda:9092
+      PARYTY_DRAGONFLY_ADDR: dragonfly:6379
+      PARYTY_QUESTDB_ADDR: questdb:8812
+      PARYTY_QUESTDB_ILP_ADDR: questdb:9009
+      PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
+    volumes:
+      - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
+      - ../../configs/cluster/plans.yaml:/app/configs/cluster/plans.yaml:ro
+    depends_on:
+      - redpanda
+      - dragonfly
+      - questdb
+      - seaweedfs-s3
+    restart: on-failure
+
+  paryty-pipeline:
+    image: paryty/pipeline:latest
+    environment:
+      PARYTY_REDPANDA_BROKERS: redpanda:9092
+      PARYTY_DRAGONFLY_ADDR: dragonfly:6379
+      PARYTY_QUESTDB_ADDR: questdb:8812
+      PARYTY_QUESTDB_ILP_ADDR: questdb:9009
+      PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
+      PARYTY_SEAWEEDFS_ACCESS_KEY: "paryty-dev"
+      PARYTY_SEAWEEDFS_SECRET_KEY: "paryty-dev-secret"
+      PARYTY_SEAWEEDFS_BUCKET: paryty
+      PARYTY_SEAWEEDFS_USE_SSL: "false"
+    volumes:
+      - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
+    depends_on:
+      - redpanda
+      - dragonfly
+      - questdb
+      - seaweedfs-s3
+    restart: on-failure
     healthcheck:
-      test: ["CMD", "/app/service", "--healthcheck"]
+      test: ["CMD-SHELL", "pgrep -f /app/service"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
 
   paryty-frontend:
-    build:
-      context: ../../frontend
-      dockerfile: ../deploy/docker/Dockerfile.frontend
+    image: paryty/frontend:latest
     ports:
       - "3000:3000"
     depends_on:
@@ -200,9 +206,7 @@ services:
   # --- Phase 6: Intelligence Layer ---
 
   paryty-intelligence:
-    build:
-      context: ../../intelligence
-      dockerfile: Dockerfile
+    image: paryty-intelligence:latest
     ports:
       - "50051:50051"  # gRPC intelligence service
     environment:
@@ -214,7 +218,7 @@ services:
       DRAGONFLY_PORT: "6379"
       LOG_LEVEL: info
     volumes:
-      - D:/ParytyData/intelligence/models:/data/models
+      - /mnt/d/ParytyData/intelligence/models:/data/models
       - ../../configs/intelligence/intelligence.yaml:/app/config/intelligence.yaml:ro
     depends_on:
       - questdb
@@ -229,15 +233,13 @@ services:
 
   # Gai-Tech Linux Agent (Phase 6 validation tenant)
   paryty-agent-gai-tech:
-    build:
-      context: ../../
-      dockerfile: deploy/docker/Dockerfile.agent
+    image: paryty/agent:latest
     volumes:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
-      - ../../configs/agent/agent-gai-tech-linux.yaml:/app/config/agent.yaml:ro
+      - ../../configs/agent/agent-gai-tech-linux.yaml:/app/configs/agent/agent.yaml:ro
     environment:
-      PARYTY_CLUSTER_ADDR: paryty-ingestion:50052
+      PARYTY_CLUSTER_ENDPOINT: paryty-ingestion:8080
       PARYTY_LOG_LEVEL: info
       PARYTY_TENANT_ID: gai-tech
     privileged: true
@@ -246,6 +248,5 @@ services:
       - paryty-ingestion
 
 volumes:
-  # Named volumes kept for services that don't need D: drive persistence
-  # All data volumes now use D:/ParytyData/ bind mounts above
-  placeholder:
+  questdb_data:
+  postgres_data:

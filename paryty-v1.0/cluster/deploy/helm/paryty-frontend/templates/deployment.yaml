@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-frontend
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: frontend
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: frontend
+    spec:
+      containers:
+        - name: frontend
+          image: "{{ .Values.global.imageRegistry | default "ghcr.io/paryty" }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
+          env:
+            - name: API_ENDPOINT
+              value: {{ .Values.config.apiEndpoint | quote }}
+            - name: WS_ENDPOINT
+              value: {{ .Values.config.wsEndpoint | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

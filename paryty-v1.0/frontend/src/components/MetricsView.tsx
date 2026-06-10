@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import { useMetrics } from '../hooks/useMetrics';
 import { useMetricsStore } from '../stores/metricsStore';
 import { getProcessingClient } from '../engine/processing/processingClient';
+import { ParytySelect } from './common/ParytySelect';
 import type { MetricSample } from '../engine/processing/metrics';
 import type { AggregatedMetric } from '../types/metric';
 
@@ -52,16 +53,18 @@ export default function MetricsView() {
       <div className="view-header">
         <h2>Metrics</h2>
         <div className="view-controls">
-          <select
+          <ParytySelect
+            options={[
+              { label: 'Select metric...', value: '' },
+              { label: 'CPU Usage', value: 'cpu_usage' },
+              { label: 'Memory Usage', value: 'memory_usage' },
+              { label: 'Disk I/O', value: 'disk_io' },
+              { label: 'Network I/O', value: 'network_io' },
+            ]}
             value={selectedMetric ?? ''}
-            onChange={(e) => selectMetric(e.target.value || null)}
-          >
-            <option value="">Select metric...</option>
-            <option value="cpu_usage">CPU Usage</option>
-            <option value="memory_usage">Memory Usage</option>
-            <option value="disk_io">Disk I/O</option>
-            <option value="network_io">Network I/O</option>
-          </select>
+            onChange={(val) => selectMetric(val || null)}
+            placeholder="Select metric..."
+          />
           <input
             type="datetime-local"
             value={timeRange.start.slice(0, 16)}

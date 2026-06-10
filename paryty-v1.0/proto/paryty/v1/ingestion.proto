@@ -128,6 +128,12 @@ enum AgentCommandType {
   AGENT_COMMAND_TYPE_FLUSH_BUFFER = 3;
   // Agent should enable/disable a specific layer.
   AGENT_COMMAND_TYPE_TOGGLE_LAYER = 4;
+  // Agent should accept new twin/client identity.
+  AGENT_COMMAND_TYPE_ASSIGN_IDENTITY = 5;
+  // Agent should start uploading historical backlog.
+  AGENT_COMMAND_TYPE_UPLOAD_BACKLOG = 6;
+  // Agent should permanently delete local backlog.
+  AGENT_COMMAND_TYPE_DELETE_BACKLOG = 7;
 }
 
 // HeartbeatRequest is sent by the agent periodically.
@@ -144,6 +150,10 @@ message HeartbeatRequest {
   int64 edge_buffer_count = 5;
   // Agent self-metrics.
   AgentSelfMetrics self_metrics = 6;
+  // Total backlog bytes pending upload (SQLite WAL + main DB).
+  int64 backlog_bytes = 7;
+  // Unix timestamp of oldest backlog entry (0 if no backlog).
+  int64 backlog_since_epoch = 8;
 }
 
 // HeartbeatResponse is returned by the cluster.

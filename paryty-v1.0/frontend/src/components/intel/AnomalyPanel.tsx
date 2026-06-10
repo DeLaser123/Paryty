@@ -198,59 +198,59 @@ export const AnomalyPanel = memo(function AnomalyPanel({
   const severities: AnomalySeverity[] = ['critical', 'high', 'medium', 'low', 'info'];
 
   return (
-    <div className="anomaly-panel" data-testid="anomaly-panel">
-      <div className="anomaly-panel__header">
-        <h3 className="anomaly-panel__title">
-          <AlertTriangle size={16} />
-          Anomalies
-          {anomalies.length > 0 && (
-            <span className="anomaly-panel__count">{anomalies.length}</span>
-          )}
-        </h3>
+    <div className="aef-container-card" data-testid="anomaly-panel">
+      <div className="aef-container-card__header">
+        <div className="aef-container-card__icon"><AlertTriangle size={16} /></div>
+        <h3 className="aef-container-card__title">Anomalies</h3>
+        {anomalies.length > 0 && (
+          <span className="anomaly-panel__count">{anomalies.length}</span>
+        )}
       </div>
 
-      {/* Severity filter chips */}
-      <div className="anomaly-panel__filters" data-testid="anomaly-filters">
-        <Filter size={12} />
-        {severities.map((sev) => {
-          const config = SEVERITY_CONFIG[sev];
-          const isActive = severityFilter === sev;
-          return (
+      <div className="aef-container-card__body">
+        {/* Severity filter chips */}
+        <div className="anomaly-panel__filters" data-testid="anomaly-filters">
+          <Filter size={12} />
+          {severities.map((sev) => {
+            const config = SEVERITY_CONFIG[sev];
+            const isActive = severityFilter === sev;
+            return (
+              <button
+                key={sev}
+                className={`anomaly-filter-chip ${isActive ? 'anomaly-filter-chip--active' : ''} ${config.className}`}
+                onClick={() => handleFilterClick(sev)}
+                data-testid={`anomaly-filter-${sev}`}
+              >
+                {config.label}
+              </button>
+            );
+          })}
+          {severityFilter && (
             <button
-              key={sev}
-              className={`anomaly-filter-chip ${isActive ? 'anomaly-filter-chip--active' : ''} ${config.className}`}
-              onClick={() => handleFilterClick(sev)}
-              data-testid={`anomaly-filter-${sev}`}
+              className="anomaly-filter-chip anomaly-filter-chip--clear"
+              onClick={() => onSeverityFilterChange(null)}
+              data-testid="anomaly-filter-clear"
             >
-              {config.label}
+              Clear
             </button>
-          );
-        })}
-        {severityFilter && (
-          <button
-            className="anomaly-filter-chip anomaly-filter-chip--clear"
-            onClick={() => onSeverityFilterChange(null)}
-            data-testid="anomaly-filter-clear"
-          >
-            Clear
-          </button>
-        )}
-      </div>
+          )}
+        </div>
 
-      {/* Anomaly list */}
-      <div className="anomaly-panel__list aef-scroll-thin">
-        {anomalies.length === 0 && (
-          <div className="anomaly-panel__empty" data-testid="anomaly-empty">
-            <ShieldCheck size={32} />
-            <span>No anomalies detected</span>
-            <span className="anomaly-panel__empty-sub">
-              All metrics within expected bounds
-            </span>
-          </div>
-        )}
-        {anomalies.map((anomaly) => (
-          <AnomalyCard key={anomaly.id} anomaly={anomaly} />
-        ))}
+        {/* Anomaly list */}
+        <div className="anomaly-panel__list aef-scroll-thin">
+          {anomalies.length === 0 && (
+            <div className="anomaly-panel__empty" data-testid="anomaly-empty">
+              <ShieldCheck size={32} />
+              <span>No anomalies detected</span>
+              <span className="anomaly-panel__empty-sub">
+                All metrics within expected bounds
+              </span>
+            </div>
+          )}
+          {anomalies.map((anomaly) => (
+            <AnomalyCard key={anomaly.id} anomaly={anomaly} />
+          ))}
+        </div>
       </div>
     </div>
   );

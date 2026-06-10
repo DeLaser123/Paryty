@@ -15,6 +15,7 @@ import { ForecastCards } from './ForecastCards';
 import { ForecastChart } from './ForecastChart';
 import { AnomalyPanel } from './AnomalyPanel';
 import { ModelAccuracy } from './ModelAccuracy';
+import { ParytySelect } from '../common/ParytySelect';
 import { HORIZON_PRESETS } from '../../types/intel';
 import type { AnomalySeverity } from '../../types/intel';
 
@@ -53,8 +54,8 @@ export default function IntelView() {
   }, [fetchForecasts, fetchDetectionStatus, fetchModelAccuracy]);
 
   const handleHorizonChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      setHorizon(Number(e.target.value));
+    (val: string) => {
+      setHorizon(Number(val));
     },
     [setHorizon],
   );
@@ -85,24 +86,19 @@ export default function IntelView() {
       {/* ─── Header ─────────────────────────────────────────────── */}
       <div className="intel-view__header">
         <div className="intel-view__title-row">
-          <Brain size={20} />
+          <Brain size={20} className="intel-view__brain-icon" />
           <h2 className="intel-view__title">Paryty Intelligence</h2>
         </div>
 
         <div className="intel-view__controls">
           {/* Horizon selector */}
-          <select
-            className="intel-view__horizon-select"
-            value={intel.horizonSeconds}
+          <ParytySelect
+            options={HORIZON_PRESETS.map((p) => ({ label: p.label, value: String(p.seconds) }))}
+            value={String(intel.horizonSeconds)}
             onChange={handleHorizonChange}
-            data-testid="intel-horizon-select"
-          >
-            {HORIZON_PRESETS.map((preset) => (
-              <option key={preset.seconds} value={preset.seconds}>
-                {preset.label}
-              </option>
-            ))}
-          </select>
+            placeholder="Horizon"
+            testId="intel-horizon-select"
+          />
 
           {/* Refresh button */}
           <button

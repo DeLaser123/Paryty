@@ -143,9 +143,10 @@ export function generateTextureAtlas(
       drawStatusDot(g, statusColor);
 
       // Convert Graphics to texture
-      const texture = renderer.generateTexture(g, {
+      const texture = renderer.generateTexture({
+        target: g,
         resolution: 2,
-        region: new PIXI.Rectangle(0, 0, TEXTURE_SIZE, TEXTURE_SIZE),
+        frame: new PIXI.Rectangle(0, 0, TEXTURE_SIZE, TEXTURE_SIZE),
       });
       atlas.set(`${nodeType}:${status}`, texture);
 
@@ -174,9 +175,10 @@ export function generateParticleTexture(
   g.drawCircle(size / 2, size / 2, size / 2);
   g.endFill();
 
-  const texture = renderer.generateTexture(g, {
+  const texture = renderer.generateTexture({
+    target: g,
     resolution: 2,
-    region: new PIXI.Rectangle(0, 0, size, size),
+    frame: new PIXI.Rectangle(0, 0, size, size),
   });
   g.destroy();
 

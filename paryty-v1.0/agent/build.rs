@@ -44,6 +44,7 @@ fn compile_protos() -> Result<(), Box<dyn std::error::Error>> {
         format!("{}/paryty/v1/ingestion.proto", proto_dir),
         format!("{}/paryty/v1/query.proto", proto_dir),
         format!("{}/paryty/v1/sdk.proto", proto_dir),
+        format!("{}/paryty/v1/auth.proto", proto_dir),
     ];
 
     // Include paths for proto imports

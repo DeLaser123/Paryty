@@ -21,10 +21,18 @@ import (
 // apiMetadataKey is the gRPC metadata key that carries the raw API key.
 const apiMetadataKey = "x-api-key"
 
+// twinMetadataKeyAuth is the gRPC metadata key that carries the twin ID
+// for agent-driven twin discovery. Mirrors twinMetadataKey in grpc_adapter.go.
+const twinMetadataKeyAuth = "x-twin-id"
+
 // TenantIDKey is the exported context key for tenant identification.
 // It is identical to the internal ctxKeyTenant used by the gRPC adapter
 // and TenantFromContext.
 var TenantIDKey = ctxKeyTenant
+
+// TwinIDKey is the exported context key for twin identification.
+// It is identical to the internal ctxKeyTwinID used by the gRPC adapter.
+var TwinIDKey = ctxKeyTwinID
 
 // AuthInterceptor returns a gRPC unary server interceptor that validates
 // the "x-api-key" metadata header. On success the resolved tenant ID is
@@ -43,6 +51,12 @@ func AuthInterceptor(apiKeyManager *controlplane.APIKeyManager) grpc.UnaryServer
 		}
 
 		ctx = context.WithValue(ctx, ctxKeyTenant, tenantID)
+
+		// Phase 8: Extract twin_id from metadata for agent-driven twin discovery.
+		if twinID := extractTwinID(ctx); twinID != "" {
+			ctx = context.WithValue(ctx, ctxKeyTwinID, twinID)
+		}
+
 		return handler(ctx, req)
 	}
 }
@@ -62,9 +76,16 @@ func StreamAuthInterceptor(apiKeyManager *controlplane.APIKeyManager) grpc.Strea
 			return err
 		}
 
+		streamCtx := context.WithValue(ss.Context(), ctxKeyTenant, tenantID)
+
+		// Phase 8: Extract twin_id from metadata for agent-driven twin discovery.
+		if twinID := extractTwinID(ss.Context()); twinID != "" {
+			streamCtx = context.WithValue(streamCtx, ctxKeyTwinID, twinID)
+		}
+
 		wrapped := &tenantServerStream{
 			ServerStream: ss,
-			ctx:          context.WithValue(ss.Context(), ctxKeyTenant, tenantID),
+			ctx:          streamCtx,
 		}
 		return handler(srv, wrapped)
 	}
@@ -100,4 +121,18 @@ type tenantServerStream struct {
 
 func (w *tenantServerStream) Context() context.Context {
 	return w.ctx
+}
+
+// extractTwinID reads the x-twin-id header from incoming gRPC metadata.
+// Returns empty string if not present or empty.
+func extractTwinID(ctx context.Context) string {
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		return ""
+	}
+	vals := md.Get(twinMetadataKeyAuth)
+	if len(vals) == 0 || vals[0] == "" {
+		return ""
+	}
+	return vals[0]
 }

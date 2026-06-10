@@ -1,9 +1,9 @@
-﻿# Paryty Agent Configuration — Default (local development)
+# Paryty Agent Configuration — Default (local development)
 
 agent:
   id: "auto"
   cluster_endpoint: "localhost:50052"
-  api_key: ""
+  api_key: "pk_live_6a89eaf0d573619d927dc19895039dc78897cfba8d1d5c39b079c828d552cbeb"
   self_metrics:
     enabled: true
     port: 9100

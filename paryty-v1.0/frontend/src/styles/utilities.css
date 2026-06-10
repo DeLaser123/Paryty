@@ -1,5 +1,5 @@
 /**
- * Utilities — Phase 5 T20.0
+ * Utilities â€” Phase 5 T20.0
  *
  * Composable utility classes using --aef-* tokens exclusively.
  * All spacing, radii, colors, and transitions reference design tokens.
@@ -39,11 +39,11 @@
   border-width: 0;
 }
 
-.aef-text-xs { font-size: 10px; }
+.aef-text-xs { font-size: 9px; }
 .aef-text-sm { font-size: 11px; }
-.aef-text-base { font-size: 13px; }
-.aef-text-lg { font-size: 15px; }
-.aef-text-xl { font-size: 18px; }
+.aef-text-base { font-size: 12px; }
+.aef-text-lg { font-size: 14px; }
+.aef-text-xl { font-size: 15px; }
 
 .aef-text-secondary { color: var(--aef-text-secondary); }
 .aef-text-primary { color: var(--aef-text-primary); }

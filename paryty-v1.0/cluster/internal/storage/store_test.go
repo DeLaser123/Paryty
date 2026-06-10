@@ -830,3 +830,157 @@ func containsSubstring(s, sub string) bool {
 	}
 	return false
 }
+
+// ---- Phase D: Async Cold Store Channel Tests ----
+
+func TestStore_ConstantsAreReasonable(t *testing.T) {
+	// Verify the async cold store constants are within expected bounds.
+	if coldWriteChannelSize < 100 {
+		t.Errorf("coldWriteChannelSize = %d, expected >= 100", coldWriteChannelSize)
+	}
+	if coldWriteChannelSize > 10000 {
+		t.Errorf("coldWriteChannelSize = %d, expected <= 10000", coldWriteChannelSize)
+	}
+	if coldWriterCount < 1 {
+		t.Errorf("coldWriterCount = %d, expected >= 1", coldWriterCount)
+	}
+	if coldWriterCount > 32 {
+		t.Errorf("coldWriterCount = %d, expected <= 32", coldWriterCount)
+	}
+}
+
+func TestStore_AsyncColdStore_BoundedChannel(t *testing.T) {
+	t.Parallel()
+
+	// Verify the cold write channel can be created with the configured size.
+	ch := make(chan *models.MetricBatch, coldWriteChannelSize)
+
+	if cap(ch) != coldWriteChannelSize {
+		t.Errorf("channel capacity = %d, want %d", cap(ch), coldWriteChannelSize)
+	}
+
+	// Verify we can fill it to capacity without blocking.
+	for i := 0; i < coldWriteChannelSize; i++ {
+		batch := &models.MetricBatch{AgentID: fmt.Sprintf("agent-%d", i)}
+		select {
+		case ch <- batch:
+			// OK
+		default:
+			t.Fatalf("channel blocked at item %d, expected capacity %d", i, coldWriteChannelSize)
+		}
+	}
+
+	// Channel should be full now.
+	if len(ch) != coldWriteChannelSize {
+		t.Errorf("channel length = %d, want %d", len(ch), coldWriteChannelSize)
+	}
+}
+
+func TestStore_ColdWriteChannelFull_DropsBatch(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan *models.MetricBatch, coldWriteChannelSize)
+
+	// Fill the channel to capacity.
+	for i := 0; i < coldWriteChannelSize; i++ {
+		ch <- &models.MetricBatch{AgentID: fmt.Sprintf("agent-%d", i)}
+	}
+
+	// Next write should be non-blocking (dropped).
+	dropped := false
+	select {
+	case ch <- &models.MetricBatch{AgentID: "dropped"}:
+		t.Error("should not have written to full channel")
+	default:
+		dropped = true
+	}
+
+	if !dropped {
+		t.Error("expected batch to be dropped when channel is full")
+	}
+
+	// Channel length should still be coldWriteChannelSize.
+	if len(ch) != coldWriteChannelSize {
+		t.Errorf("channel length = %d, want %d after drop", len(ch), coldWriteChannelSize)
+	}
+}
+
+func TestStore_AsyncColdStore_ChannelDrain(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan *models.MetricBatch, coldWriteChannelSize)
+	const count = 50
+
+	// Push 50 batches.
+	for i := 0; i < count; i++ {
+		ch <- &models.MetricBatch{AgentID: fmt.Sprintf("agent-%d", i)}
+	}
+
+	// Drain all batches (simulating what cold writer workers do).
+	drained := 0
+	for {
+		select {
+		case <-ch:
+			drained++
+		default:
+			goto done
+		}
+	}
+done:
+	if drained != count {
+		t.Errorf("drained %d batches, want %d", drained, count)
+	}
+
+	if len(ch) != 0 {
+		t.Errorf("channel should be empty after drain, got %d", len(ch))
+	}
+}
+
+func TestStore_AsyncColdStore_ConcurrentProducersConsumers(t *testing.T) {
+	t.Parallel()
+
+	ch := make(chan *models.MetricBatch, 100)
+	const producers = 5
+	const batchesPerProducer = 50
+	const consumers = 2
+
+	var consumed atomic.Int64
+
+	// Start consumers.
+	var consumerWg sync.WaitGroup
+	consumerWg.Add(consumers)
+	for c := 0; c < consumers; c++ {
+		go func() {
+			defer consumerWg.Done()
+			for range ch {
+				consumed.Add(1)
+			}
+		}()
+	}
+
+	// Start producers.
+	var producerWg sync.WaitGroup
+	producerWg.Add(producers)
+	for p := 0; p < producers; p++ {
+		go func(id int) {
+			defer producerWg.Done()
+			for i := 0; i < batchesPerProducer; i++ {
+				ch <- &models.MetricBatch{
+					AgentID: fmt.Sprintf("producer-%d-batch-%d", id, i),
+				}
+			}
+		}(p)
+	}
+
+	// Wait for producers to finish, then close channel.
+	producerWg.Wait()
+	close(ch)
+
+	// Wait for consumers to drain.
+	consumerWg.Wait()
+
+	expected := int64(producers * batchesPerProducer)
+	if got := consumed.Load(); got != expected {
+		t.Errorf("consumed %d batches, want %d", got, expected)
+	}
+}

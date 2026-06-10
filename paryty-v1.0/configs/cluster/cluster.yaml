@@ -115,7 +115,9 @@ cluster:
       # Runtime config
       stale_node_timeout: "5m"
       graph_snapshot_interval: "60s"
-      event_buffer_size: 10000
+      # Reduced from 10000 — the 30s correlation window only needs ~1K events
+      # for temporal correlation. Saves up to 45 MB under load.
+      event_buffer_size: 1000
       correlation_window: "30s"
 
     enricher:
@@ -146,6 +148,29 @@ cluster:
           target_window: "1d"
           retention_days: 90
       run_interval: "1h"
+
+    # Memory budget configuration for Phase E.
+    # Controls bounded resource usage and circuit breaker behavior.
+    # These settings prevent OOM conditions under high-throughput scenarios.
+    memory:
+      # Maximum process memory in bytes (1 GB).
+      # Circuit breaker opens at 95% of this limit.
+      max_ram_bytes: 1073741824  # 1 GB
+      # Worker goroutine pool size: runtime.NumCPU() * 2, capped at 64.
+      # Balances parallelism with context-switching overhead.
+      goroutine_pool_size: 16
+      # Values per aggregation window buffer (256 x ~16 bytes = ~4KB per window).
+      window_buffer_capacity: 256
+      # Ring buffer for correlator events (sized for 30s correlation window).
+      event_buffer_size: 1000
+      # Producer buffer cap (prevents unbounded memory growth).
+      max_buffered_records: 1000
+      # Graph changes channel capacity (caps topology change events).
+      graph_changes_cap: 5000
+      # Enable memory circuit breaker (rejects messages at 95% memory).
+      circuit_breaker_enabled: true
+      # How often to check process memory (10 seconds).
+      check_interval: "10s"
 
   # Storage layer
   storage:

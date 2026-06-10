@@ -108,7 +108,7 @@ export const NodeDetailPanel = memo(function NodeDetailPanel({
         </div>
 
         {/* Body */}
-        <div className="aef-container-card__body aef-scroll">
+        <div className="aef-container-card__body aef-scroll-thin">
           {/* Node info */}
           <div className="aef-stat-module">
             <span className="aef-stat-module__label">Type</span>

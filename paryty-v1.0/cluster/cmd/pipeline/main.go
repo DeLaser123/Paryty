@@ -26,7 +26,6 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage/hot"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage/warm"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
-	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 )
 
@@ -148,16 +147,11 @@ func main() {
 	logger.Info("Stream engine initialized")
 
 	// ── Create Dragonfly adapter for enricher agent cache ─────────────────
-	hotCfg := cfg.Cluster.Storage.Hot
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     hotCfg.Addr,
-		Password: hotCfg.Password,
-		DB:       hotCfg.DB,
-		PoolSize: hotCfg.PoolSize,
-	})
-	defer rdb.Close()
-
-	dragonflyAdapter := processing.NewRedisAdapter(rdb)
+	// Phase B optimization: reuse the existing hot store Redis client instead
+	// of creating a second connection pool. This eliminates one full Redis
+	// connection pool (default PoolSize=10 connections with internal buffers),
+	// saving an estimated 5-15 MB of memory.
+	dragonflyAdapter := processing.NewRedisAdapter(hotClient.RDB())
 
 	// ── Create processing stages ──────────────────────────────────────────
 
@@ -248,6 +242,15 @@ func main() {
 		logger.Fatal("Failed to create consumer", zap.Error(err))
 	}
 
+	// ── Phase E: Memory budget configuration ──────────────────────────────
+	memConfig := cfg.Cluster.Processing.Memory
+	logger.Info("Memory budget configured",
+		zap.Int64("max_ram_bytes", memConfig.MaxRAMBytes),
+		zap.Int("goroutine_pool_size", memConfig.GoroutinePoolSize),
+		zap.Int("window_buffer_capacity", memConfig.WindowBufferCapacity),
+		zap.Bool("circuit_breaker_enabled", memConfig.CircuitBreakerEnabled),
+	)
+
 	// ── Create and start pipeline ─────────────────────────────────────────
 	pipeline := processing.NewPipeline(
 		processing.PipelineConfig{
@@ -266,6 +269,7 @@ func main() {
 		dragonflyAdapter,
 		logger,
 		tenant,
+		memConfig,
 	)
 
 	if err := pipeline.Start(ctx); err != nil {

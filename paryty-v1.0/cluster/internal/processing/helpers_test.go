@@ -448,3 +448,260 @@ func TestRingBuffer_SingleCapacity(t *testing.T) {
 		t.Errorf("GetAll() = %v, want [second]", result)
 	}
 }
+
+// =============================================================================
+// TestCalcPercentile_With256Values
+// Verify percentile accuracy with the max window buffer capacity (256 values).
+// =============================================================================
+
+func TestCalcPercentile_With256Values(t *testing.T) {
+	t.Parallel()
+
+	// Build a sorted sequence [0, 1, 2, ..., 255].
+	values := make([]float64, 256)
+	for i := range values {
+		values[i] = float64(i)
+	}
+
+	tests := []struct {
+		name     string
+		p        float64
+		expected float64
+	}{
+		{"p50", 50, 127.5},
+		{"p90", 90, 229.5},
+		{"p95", 95, 242.25},
+		{"p99", 99, 252.45},
+		{"p0", 0, 0},
+		{"p100", 100, 255},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := calcPercentile(values, tt.p)
+			if math.Abs(got-tt.expected) > 0.01 {
+				t.Errorf("calcPercentile(0..255, %f) = %f, want %f", tt.p, got, tt.expected)
+			}
+		})
+	}
+}
+
+// =============================================================================
+// TestCalcPercentileSorted
+// Verify in-place percentile calculation on pre-sorted data.
+// =============================================================================
+
+func TestCalcPercentileSorted(t *testing.T) {
+	t.Parallel()
+
+	sorted := []float64{1, 2, 3, 4, 5, 6, 7, 8, 9, 10}
+
+	tests := []struct {
+		name     string
+		p        float64
+		expected float64
+	}{
+		{"p0 returns minimum", 0, 1.0},
+		{"p50 median", 50, 5.5},
+		{"p90", 90, 9.1},
+		{"p100 returns maximum", 100, 10.0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got := calcPercentileSorted(sorted, tt.p)
+			if math.Abs(got-tt.expected) > 0.0001 {
+				t.Errorf("calcPercentileSorted(sorted, %f) = %f, want %f", tt.p, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestCalcPercentileSorted_Empty(t *testing.T) {
+	t.Parallel()
+
+	got := calcPercentileSorted(nil, 50)
+	if got != 0 {
+		t.Errorf("calcPercentileSorted(nil, 50) = %f, want 0", got)
+	}
+
+	got = calcPercentileSorted([]float64{}, 50)
+	if got != 0 {
+		t.Errorf("calcPercentileSorted(empty, 50) = %f, want 0", got)
+	}
+}
+
+func TestCalcPercentileSorted_MatchesCalcPercentile(t *testing.T) {
+	t.Parallel()
+
+	// Both functions should produce identical results for sorted input.
+	sorted := []float64{10, 20, 30, 40, 50, 60, 70, 80, 90, 100}
+	percentiles := []float64{0, 10, 25, 50, 75, 90, 95, 99, 100}
+
+	for _, p := range percentiles {
+		fromUnsorted := calcPercentile(sorted, p)
+		fromSorted := calcPercentileSorted(sorted, p)
+		if math.Abs(fromUnsorted-fromSorted) > 0.0001 {
+			t.Errorf("p=%f: calcPercentile=%f, calcPercentileSorted=%f", p, fromUnsorted, fromSorted)
+		}
+	}
+}
+
+// =============================================================================
+// TestRingBuffer_DrainAll
+// Verify atomic drain-and-clear behavior.
+// =============================================================================
+
+func TestRingBuffer_DrainAll(t *testing.T) {
+	t.Parallel()
+
+	rb := NewRingBuffer(5)
+
+	rb.Push("a")
+	rb.Push("b")
+	rb.Push("c")
+
+	result := rb.DrainAll()
+	if len(result) != 3 {
+		t.Fatalf("DrainAll() returned %d items, want 3", len(result))
+	}
+	expected := []interface{}{"a", "b", "c"}
+	for i, want := range expected {
+		if result[i] != want {
+			t.Errorf("DrainAll()[%d] = %v, want %v", i, result[i], want)
+		}
+	}
+
+	// After drain, buffer should be empty.
+	if got := rb.Len(); got != 0 {
+		t.Errorf("Len() after DrainAll = %d, want 0", got)
+	}
+	if rb.GetAll() != nil {
+		t.Error("GetAll() after DrainAll should return nil")
+	}
+
+	// Verify we can push again after drain.
+	rb.Push("new")
+	if got := rb.Len(); got != 1 {
+		t.Errorf("Len() after re-push = %d, want 1", got)
+	}
+}
+
+func TestRingBuffer_DrainAll_Empty(t *testing.T) {
+	t.Parallel()
+
+	rb := NewRingBuffer(5)
+
+	result := rb.DrainAll()
+	if result != nil {
+		t.Errorf("DrainAll() on empty buffer = %v, want nil", result)
+	}
+}
+
+func TestRingBuffer_DrainAll_WithOverflow(t *testing.T) {
+	t.Parallel()
+
+	rb := NewRingBuffer(3)
+
+	rb.Push("a")
+	rb.Push("b")
+	rb.Push("c")
+	rb.Push("d") // overwrites "a"
+	rb.Push("e") // overwrites "b"
+
+	result := rb.DrainAll()
+	if len(result) != 3 {
+		t.Fatalf("DrainAll() returned %d items, want 3", len(result))
+	}
+
+	// Should contain the 3 most recent items.
+	expected := []interface{}{"c", "d", "e"}
+	for i, want := range expected {
+		if result[i] != want {
+			t.Errorf("DrainAll()[%d] = %v, want %v", i, result[i], want)
+		}
+	}
+
+	// Buffer should be empty.
+	if got := rb.Len(); got != 0 {
+		t.Errorf("Len() after DrainAll = %d, want 0", got)
+	}
+}
+
+func TestRingBuffer_DrainAll_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	rb := NewRingBuffer(100)
+
+	// Fill the buffer.
+	for i := 0; i < 100; i++ {
+		rb.Push(i)
+	}
+
+	// Concurrent DrainAll from multiple goroutines — only one should get items.
+	const goroutines = 10
+	results := make(chan []interface{}, goroutines)
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines)
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			results <- rb.DrainAll()
+		}()
+	}
+	wg.Wait()
+	close(results)
+
+	// Exactly one goroutine should have received 100 items; the rest get nil.
+	nonNilCount := 0
+	for r := range results {
+		if r != nil {
+			nonNilCount++
+			if len(r) != 100 {
+				t.Errorf("DrainAll() returned %d items, want 100", len(r))
+			}
+		}
+	}
+	if nonNilCount != 1 {
+		t.Errorf("expected exactly 1 non-nil DrainAll result, got %d", nonNilCount)
+	}
+}
+
+// =============================================================================
+// TestRingBuffer_AtDefaultEventBufferSize
+// Verify RingBuffer works correctly at the defaultEventBufferSize (1000).
+// =============================================================================
+
+func TestRingBuffer_AtDefaultEventBufferSize(t *testing.T) {
+	t.Parallel()
+
+	const capacity = 1000 // defaultEventBufferSize
+	rb := NewRingBuffer(capacity)
+
+	// Push 1500 items — 500 should be evicted.
+	for i := 0; i < 1500; i++ {
+		rb.Push(i)
+	}
+
+	if got := rb.Len(); got != capacity {
+		t.Fatalf("Len() = %d, want %d", got, capacity)
+	}
+
+	result := rb.GetAll()
+	if len(result) != capacity {
+		t.Fatalf("GetAll() returned %d items, want %d", len(result), capacity)
+	}
+
+	// First item should be 500 (oldest 0-499 evicted).
+	if result[0] != 500 {
+		t.Errorf("GetAll()[0] = %v, want 500", result[0])
+	}
+	// Last item should be 1499.
+	if result[capacity-1] != 1499 {
+		t.Errorf("GetAll()[%d] = %v, want 1499", capacity-1, result[capacity-1])
+	}
+}
+

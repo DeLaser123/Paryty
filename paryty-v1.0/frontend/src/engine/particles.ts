@@ -59,8 +59,8 @@ const SYSTEM_DEFAULTS = {
  * ```
  */
 export class SemanticParticleSystem {
-  /** Container to add particle sprites to. */
-  private container: PIXI.Container;
+  /** Container to add particle sprites to (ParticleContainer for batched rendering). */
+  private container: PIXI.ParticleContainer;
   /** Base texture for particle sprites. */
   private particleTexture: PIXI.Texture;
   /** Configuration (immutable reference, budget may override limits). */
@@ -83,8 +83,22 @@ export class SemanticParticleSystem {
   /** Transport degradation alpha multiplier (1.0 = full, synced with CSS). */
   private degradationMultiplier: number = SYSTEM_DEFAULTS.BASE_ALPHA;
 
+  /**
+   * Incrementally-maintained viewport-visible particle count.
+   *
+   * Updated inside moveParticles() as each particle's position changes,
+   * using the last-set viewport bounds. This replaces the original O(n)
+   * per-call scan in countInViewport(), which at 10K particles and 60fps
+   * executed 600K iterations per second for a single StatusBar number.
+   */
+  private viewportVisibleCount = 0;
+  private vpMinX = -Infinity;
+  private vpMinY = -Infinity;
+  private vpMaxX = Infinity;
+  private vpMaxY = Infinity;
+
   constructor(
-    container: PIXI.Container,
+    container: PIXI.ParticleContainer,
     particleTexture: PIXI.Texture,
     config: Partial<SemanticParticleConfig> = {},
   ) {
@@ -171,8 +185,38 @@ export class SemanticParticleSystem {
   }
 
   /**
+   * Sets the viewport bounds used for incremental visible-particle counting.
+   *
+   * Call this whenever the viewport changes (pan/zoom). The count is then
+   * maintained automatically inside moveParticles() at zero additional cost
+   * per frame. Replaces the old O(n) countInViewport() scan.
+   */
+  setViewportBounds(minX: number, minY: number, maxX: number, maxY: number): void {
+    this.vpMinX = minX;
+    this.vpMinY = minY;
+    this.vpMaxX = maxX;
+    this.vpMaxY = maxY;
+    // Recount immediately after a bounds change so the first frame after a
+    // pan/zoom is accurate rather than stale.
+    this.recountVisible();
+  }
+
+  /**
+   * Returns the current count of viewport-visible particles.
+   *
+   * O(1) — updated incrementally inside moveParticles().
+   */
+  get visibleParticleCount(): number {
+    return this.viewportVisibleCount;
+  }
+
+  /**
+   * @deprecated Use setViewportBounds() + visibleParticleCount instead.
+   *
    * Counts particles whose sprite positions fall within the given
-   * world-space bounding box. Used for viewport-culled StatusBar display.
+   * world-space bounding box. This O(n) scan is kept for backward
+   * compatibility with callers that cannot be updated in the same
+   * change, but should not be called at 60fps.
    */
   countInViewport(
     minX: number,
@@ -180,19 +224,8 @@ export class SemanticParticleSystem {
     maxX: number,
     maxY: number,
   ): number {
-    let count = 0;
-    for (let i = 0; i < this.particles.length; i++) {
-      const s = this.particles[i].sprite;
-      if (
-        s.x >= minX &&
-        s.x <= maxX &&
-        s.y >= minY &&
-        s.y <= maxY
-      ) {
-        count++;
-      }
-    }
-    return count;
+    this.setViewportBounds(minX, minY, maxX, maxY);
+    return this.viewportVisibleCount;
   }
 
   /**
@@ -205,6 +238,7 @@ export class SemanticParticleSystem {
       }
     }
     this.particles = [];
+    this.viewportVisibleCount = 0;
 
     for (const sprite of this.spritePool) {
       if (!sprite.destroyed) {
@@ -213,6 +247,30 @@ export class SemanticParticleSystem {
     }
     this.spritePool = [];
     this.totalSpritesCreated = 0;
+  }
+
+  // ─── Incremental viewport count ────────────────────────────────
+
+  /** Tests whether a sprite's current position is inside the stored viewport. */
+  private isInViewport(sprite: PIXI.Sprite): boolean {
+    return (
+      sprite.x >= this.vpMinX &&
+      sprite.x <= this.vpMaxX &&
+      sprite.y >= this.vpMinY &&
+      sprite.y <= this.vpMaxY
+    );
+  }
+
+  /**
+   * Full recount — O(n) but called only on viewport bound changes,
+   * not every frame.
+   */
+  private recountVisible(): void {
+    let count = 0;
+    for (let i = 0; i < this.particles.length; i++) {
+      if (this.isInViewport(this.particles[i].sprite)) count++;
+    }
+    this.viewportVisibleCount = count;
   }
 
   // ─── Pool Management ──────────────────────────────────────────
@@ -358,11 +416,14 @@ export class SemanticParticleSystem {
   /**
    * Advances all active particles along their multi-hop paths.
    * Updates position, alpha (fade), and handles segment transitions.
+   * Also maintains the incremental viewportVisibleCount.
    */
   private moveParticles(): void {
     const baseSpeed = this.config.baseSpeed;
     const fadeLen = this.config.fadeLength;
     const maxLifetime = this.config.lifetime;
+
+    let visibleCount = 0;
 
     for (const particle of this.particles) {
       const seg = particle.path[particle.currentPathIndex];
@@ -414,7 +475,12 @@ export class SemanticParticleSystem {
       }
 
       particle.sprite.alpha = alpha * this.degradationMultiplier;
+
+      // Incremental viewport count — checked after position update.
+      if (this.isInViewport(particle.sprite)) visibleCount++;
     }
+
+    this.viewportVisibleCount = visibleCount;
   }
 
   // ─── Culling ──────────────────────────────────────────────────

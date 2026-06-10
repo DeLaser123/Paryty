@@ -132,6 +132,19 @@ export interface DestroyCommand {
   readonly type: 'destroy';
 }
 
+/**
+ * Notify the render worker of the current memory budget level.
+ *
+ * MemoryBudget relies on `performance.memory` which Chrome disables inside
+ * dedicated workers. The main thread runs the monitor and broadcasts the
+ * derived level here so the worker can apply degradation (particle culling,
+ * glow throttling) without any sensor access of its own.
+ */
+export interface BudgetLevelCommand {
+  readonly type: 'budgetLevel';
+  readonly level: 'normal' | 'soft' | 'hard';
+}
+
 /** Union of all UI → render-worker commands. */
 export type RenderCommand =
   | InitCommand
@@ -144,6 +157,7 @@ export type RenderCommand =
   | PositionsCommand
   | ViewportCommand
   | PointerCommand
+  | BudgetLevelCommand
   | DestroyCommand;
 
 // ─── Render → Main events ───────────────────────────────────────────────────

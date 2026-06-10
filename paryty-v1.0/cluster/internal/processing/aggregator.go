@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sort"
 	"sync/atomic"
 	"time"
 
@@ -225,6 +226,10 @@ func (a *Aggregator) Process(ctx context.Context, batch *models.MetricBatch, tim
 // For each closed window it produces one AggregatedMetric per aggregation type:
 // avg, min, max, p50, p90, p99, count, and sum.
 //
+// Values are sorted once in-place, and all three percentiles (p50, p90, p99)
+// are computed from the pre-sorted data. This eliminates 3 redundant
+// copy-and-sort operations per window close.
+//
 // Returns nil if the window contains no values.
 func (a *Aggregator) aggregateWindow(window *ClosedWindow) []models.AggregatedMetric {
 	if len(window.Values) == 0 {
@@ -236,13 +241,17 @@ func (a *Aggregator) aggregateWindow(window *ClosedWindow) []models.AggregatedMe
 		value   float64
 	}
 
+	// Sort values once in-place for all percentile calculations.
+	// This avoids 3 separate copy+sort operations (one per percentile).
+	sort.Float64s(window.Values)
+
 	entries := []aggEntry{
 		{models.AggregationAvg, calcAvg(window.Values)},
 		{models.AggregationMin, calcMin(window.Values)},
 		{models.AggregationMax, calcMax(window.Values)},
-		{models.AggregationP50, calcPercentile(window.Values, 50)},
-		{models.AggregationP90, calcPercentile(window.Values, 90)},
-		{models.AggregationP99, calcPercentile(window.Values, 99)},
+		{models.AggregationP50, calcPercentileSorted(window.Values, 50)},
+		{models.AggregationP90, calcPercentileSorted(window.Values, 90)},
+		{models.AggregationP99, calcPercentileSorted(window.Values, 99)},
 		{models.AggregationCount, float64(len(window.Values))},
 		{models.AggregationSum, calcSum(window.Values)},
 	}

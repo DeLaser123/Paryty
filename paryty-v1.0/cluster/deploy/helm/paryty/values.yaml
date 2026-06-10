@@ -1,0 +1,30 @@
+# =============================================================================
+# Paryty Umbrella Chart — Global Values
+# =============================================================================
+
+global:
+  imageRegistry: "ghcr.io/paryty"
+  imagePullSecrets: []
+  storageClass: ""
+  environment: "dev"
+
+# ---------------------------------------------------------------------------
+# Subchart Toggles
+# ---------------------------------------------------------------------------
+paryty-agent:
+  enabled: true
+
+paryty-cluster:
+  enabled: true
+
+paryty-frontend:
+  enabled: true
+
+paryty-security:
+  enabled: true
+
+paryty-monitoring:
+  enabled: true
+
+paryty-storage:
+  enabled: true

@@ -15,17 +15,35 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	api "github.com/paryty/paryty-v1.0/cluster/internal/api/ingestion"
 	"github.com/paryty/paryty-v1.0/cluster/internal/config"
+	"github.com/paryty/paryty-v1.0/cluster/internal/controlplane"
 	pb "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
+	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	_ "google.golang.org/grpc/encoding/gzip" // Register Gzip decompressor for incoming agent requests.
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
+
+// noOpCommandDispatcher is a CommandDispatcher that always returns false,
+// causing commands to be queued in the database for heartbeat delivery.
+// Real-time command dispatch via active gRPC streams will be implemented
+// when the StreamMetrics bidirectional stream tracks connected agents.
+type noOpCommandDispatcher struct{}
+
+func (n *noOpCommandDispatcher) DispatchCommand(ctx context.Context, agentID string, commandType int32, payload string) bool {
+	// Always return false: commands are queued in agent_commands and
+	// delivered on the next heartbeat via CommandManager.DequeueCommands.
+	return false
+}
+
+// Compile-time interface check.
+var _ twin.CommandDispatcher = (*noOpCommandDispatcher)(nil)
 
 func main() {
 	// Determine config path: flag > env > default
@@ -93,8 +111,50 @@ func main() {
 		zap.Int("max_batches_per_minute", cfg.Cluster.RateLimit.MaxBatchesPerMinute),
 	)
 
-	// Create gRPC server (Gzip decompression registered via blank import above).
-	grpcServer := grpc.NewServer()
+	// Phase 8: Initialize control plane PostgreSQL pool for API key validation
+	// and agent registration tracking.
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = os.Getenv("PARYTY_CP_DSN")
+	}
+	var apiKeyManager *controlplane.APIKeyManager
+	var agentAssigner *twin.AgentAssigner
+	var backlogManager *twin.BacklogManager
+	var commandManager *twin.CommandManager
+
+	if dbURL != "" {
+		cpPool, err := pgxpool.New(ctx, dbURL)
+		if err != nil {
+			logger.Fatal("Failed to create control plane pool", zap.Error(err))
+		}
+		defer cpPool.Close()
+
+		if err := controlplane.EnsureTables(ctx, cpPool); err != nil {
+			logger.Fatal("Failed to ensure control plane tables", zap.Error(err))
+		}
+		if err := controlplane.EnsurePhase8Tables(ctx, cpPool); err != nil {
+			logger.Fatal("Failed to ensure phase 8 control plane tables", zap.Error(err))
+		}
+
+		apiKeyManager = controlplane.NewAPIKeyManager(cpPool, logger)
+		agentAssigner = twin.NewAgentAssigner(cpPool)
+		backlogManager = twin.NewBacklogManager(cpPool)
+		commandManager = twin.NewCommandManager(cpPool, &noOpCommandDispatcher{})
+		logger.Info("Control plane PostgreSQL pool initialized for API key auth + agent tracking + command dispatch")
+	} else {
+		logger.Warn("DATABASE_URL not set — API key auth and agent tracking disabled")
+	}
+
+	// Create gRPC server with auth interceptors (Phase 8).
+	var grpcOpts []grpc.ServerOption
+	if apiKeyManager != nil {
+		grpcOpts = append(grpcOpts,
+			grpc.UnaryInterceptor(api.AuthInterceptor(apiKeyManager)),
+			grpc.StreamInterceptor(api.StreamAuthInterceptor(apiKeyManager)),
+		)
+		logger.Info("API key auth interceptors enabled")
+	}
+	grpcServer := grpc.NewServer(grpcOpts...)
 
 	// Register health check service with periodic readiness updates
 	healthServer := health.NewServer()
@@ -105,7 +165,7 @@ func main() {
 	logger.Info("Health checker started (periodic readiness every 10s)")
 
 	// Create gRPC adapter and register the IngestionService
-	ingestionGRPC := api.NewIngestionGRPCAdapter(ingestionSvc, logger, rateLimiter)
+	ingestionGRPC := api.NewIngestionGRPCAdapter(ingestionSvc, logger, rateLimiter, agentAssigner, backlogManager, commandManager)
 	pb.RegisterIngestionServiceServer(grpcServer, ingestionGRPC)
 	logger.Info("Ingestion gRPC service registered")
 

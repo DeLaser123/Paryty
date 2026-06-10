@@ -1,0 +1,6 @@
+apiVersion: v2
+name: paryty-monitoring
+description: Paryty Monitoring — self-monitoring, SLO tracking, and alerting
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

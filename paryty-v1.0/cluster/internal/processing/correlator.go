@@ -17,8 +17,12 @@ import (
 const (
 	defaultStaleNodeTimeout      = 5 * time.Minute
 	defaultGraphSnapshotInterval = 60 * time.Second
-	defaultEventBufferSize       = 10000
-	defaultCorrelationWindow     = 30 * time.Second
+	// defaultEventBufferSize is the maximum network events retained in the ring
+	// buffer. Reduced from 10,000 to 1,000 — the correlation window is 30s, so
+	// even at high event rates 1,000 events provide ample coverage for temporal
+	// correlation. Saves up to 45 MB under load (10K events × ~4.5 KB each).
+	defaultEventBufferSize   = 1000
+	defaultCorrelationWindow = 30 * time.Second
 )
 
 // CorrelatorConfig holds tunable parameters for the Correlator.
@@ -32,7 +36,7 @@ type CorrelatorConfig struct {
 	GraphSnapshotInterval time.Duration
 
 	// EventBufferSize is the maximum number of network events retained in
-	// the ring buffer. Default: 10000.
+	// the ring buffer. Default: 1000.
 	EventBufferSize int
 
 	// CorrelationWindow is the time window for correlating events. Default: 30s.

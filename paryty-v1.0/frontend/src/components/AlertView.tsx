@@ -1,4 +1,5 @@
 import { useAlerts } from '../hooks/useAlerts';
+import { ParytySelect } from './common/ParytySelect';
 
 export default function AlertView() {
   const alerts = useAlerts();
@@ -8,25 +9,29 @@ export default function AlertView() {
       <div className="view-header">
         <h2>Alerts ({alerts.firingCount()} firing)</h2>
         <div className="view-controls">
-          <select
+          <ParytySelect
+            options={[
+              { label: 'All states', value: '' },
+              { label: 'Firing', value: 'firing' },
+              { label: 'Pending', value: 'pending' },
+              { label: 'Resolved', value: 'resolved' },
+              { label: 'Silenced', value: 'silenced' },
+            ]}
             value={alerts.filterState ?? ''}
-            onChange={(e) => alerts.setFilterState(e.target.value as 'firing' | 'resolved' | 'pending' | null || null)}
-          >
-            <option value="">All states</option>
-            <option value="firing">Firing</option>
-            <option value="pending">Pending</option>
-            <option value="resolved">Resolved</option>
-            <option value="silenced">Silenced</option>
-          </select>
-          <select
+            onChange={(val) => alerts.setFilterState(val as 'firing' | 'resolved' | 'pending' | null || null)}
+            placeholder="All states"
+          />
+          <ParytySelect
+            options={[
+              { label: 'All severities', value: '' },
+              { label: 'Critical', value: 'critical' },
+              { label: 'Warning', value: 'warning' },
+              { label: 'Info', value: 'info' },
+            ]}
             value={alerts.filterSeverity ?? ''}
-            onChange={(e) => alerts.setFilterSeverity(e.target.value || null)}
-          >
-            <option value="">All severities</option>
-            <option value="critical">Critical</option>
-            <option value="warning">Warning</option>
-            <option value="info">Info</option>
-          </select>
+            onChange={(val) => alerts.setFilterSeverity(val || null)}
+            placeholder="All severities"
+          />
         </div>
       </div>
       <div className="alerts-content">
@@ -55,6 +60,7 @@ export default function AlertView() {
               </div>
               {alert.state === 'firing' && (
                 <button
+                  className="aef-btn aef-btn-inactive"
                   onClick={(e) => {
                     e.stopPropagation();
                     alerts.selectAlert(alert);

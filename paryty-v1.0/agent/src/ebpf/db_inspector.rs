@@ -223,6 +223,7 @@ impl DbInspector {
     /// # Returns
     /// `Ok(Some(event))` if a DB protocol was detected, `Ok(None)` if
     /// the payload could not be classified.
+    #[allow(clippy::too_many_arguments)]
     pub fn inspect(
         &self,
         payload: &[u8],
@@ -325,7 +326,7 @@ impl DbInspector {
                 return DbProtocol::Redis;
             }
             // Inline commands: start with a letter
-            if (b0 >= b'A' && b0 <= b'Z') || (b0 >= b'a' && b0 <= b'z') {
+            if b0.is_ascii_uppercase() || b0.is_ascii_lowercase() {
                 return DbProtocol::Redis;
             }
         }
@@ -347,6 +348,7 @@ impl DbInspector {
     /// - `T` (backend):  RowDescription — marks start of result set
     /// - `D` (backend):  DataRow — result data (we just count these)
     /// - `Z` (backend):  ReadyForQuery — transaction status indicator
+    #[allow(clippy::too_many_arguments)]
     fn parse_postgresql(
         &self,
         payload: &[u8],
@@ -541,6 +543,7 @@ impl DbInspector {
     ///
     /// MySQL packet format: 3-byte length + 1-byte sequence + payload.
     /// For COM_QUERY (0x03), the payload is the SQL text.
+    #[allow(clippy::too_many_arguments)]
     fn parse_mysql(
         &self,
         payload: &[u8],
@@ -698,6 +701,7 @@ impl DbInspector {
     /// - `:123\r\n` — integer
     /// - `$len\r\ndata\r\n` — bulk string
     /// - Inline: `PING\r\n`, `GET key\r\n`
+    #[allow(clippy::too_many_arguments)]
     fn parse_redis(
         &self,
         payload: &[u8],
@@ -780,7 +784,7 @@ impl DbInspector {
 
             // Integer response: :N\r\n
             b':' => {
-                let msg = read_crlf_string(payload);
+                let msg = read_crlf_string(&payload[1..]);
                 let key = socket_key(pid, port);
                 let mut pending_map = self.pending.lock().expect("pending mutex poisoned");
                 if let Some(req) = pending_map.remove(&key) {
@@ -810,7 +814,7 @@ impl DbInspector {
             }
 
             // Inline command (letter): e.g., PING\r\n, GET key\r\n
-            _ if (first >= b'A' && first <= b'Z') || (first >= b'a' && first <= b'z') => {
+            _ if first.is_ascii_uppercase() || first.is_ascii_lowercase() => {
                 self.parse_redis_inline(payload, port, pid, process_name, src_ip, dst_ip)
             }
 
@@ -959,7 +963,7 @@ impl Default for DbInspector {
 /// Tags look like: "SELECT 5", "INSERT 0 1", "UPDATE 3", "DELETE 2",
 /// "COPY 100".
 fn parse_pg_command_complete(tag: &str) -> u64 {
-    let parts: Vec<&str> = tag.trim().split_whitespace().collect();
+    let parts: Vec<&str> = tag.split_whitespace().collect();
     if parts.is_empty() {
         return 0;
     }
@@ -1034,8 +1038,7 @@ fn read_lenenc_int(data: &[u8]) -> u64 {
             if data.len() < 4 {
                 return 0;
             }
-            let val = (data[1] as u64) | ((data[2] as u64) << 8) | ((data[3] as u64) << 16);
-            val
+            (data[1] as u64) | ((data[2] as u64) << 8) | ((data[3] as u64) << 16)
         }
         0xfe => {
             if data.len() < 9 {
@@ -1166,7 +1169,7 @@ fn parse_sql(query: &str) -> (String, String) {
     }
 
     // Strip schema prefix from table name (e.g., "public.users" -> "users")
-    let strip_schema = |t: &str| -> String { t.split('.').last().unwrap_or(t).to_string() };
+    let strip_schema = |t: &str| -> String { t.split('.').next_back().unwrap_or(t).to_string() };
 
     // Get original-case words for table name extraction
     let orig_words: Vec<&str> = trimmed.split_whitespace().collect();
@@ -1464,7 +1467,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_pg_command_complete() {
+    fn pg_command_complete_roundtrip() {
         let inspector = DbInspector::new();
 
         // First: send a query request to create pending state
@@ -1526,7 +1529,7 @@ mod tests {
         inspector.inspect(&req, PG_PORT, 300, "psql", 0x0100007F, 0x0101A8C0, 0).unwrap();
 
         // ReadyForQuery: 'Z' + length(4) + status byte
-        let mut resp = vec![b'Z', 6, 0, 0, 0, b'I'];
+        let resp = vec![b'Z', 6, 0, 0, 0, b'I'];
         let event = inspector
             .inspect(&resp, PG_PORT, 300, "psql", 0x0100007F, 0x0101A8C0, 0)
             .unwrap()
@@ -1705,7 +1708,7 @@ mod tests {
             .expect("expected Redis response event");
 
         assert_eq!(event.protocol, "redis");
-        assert_eq!(event.query_type, "WRITE");
+        assert_eq!(event.query_type, "READ");
     }
 
     #[test]

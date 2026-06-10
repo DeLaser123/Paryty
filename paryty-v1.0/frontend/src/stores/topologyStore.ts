@@ -65,6 +65,14 @@ interface TopologyState {
   setError: (error: string | null) => void;
   zoomToNode: (nodeId: string) => void;
 
+  // Topology UI overlay state
+  timelineDrawerOpen: boolean;
+  toggleTimelineDrawer: () => void;
+  metricsAnimationsEnabled: boolean;
+  toggleMetricsAnimations: () => void;
+  nodeLabelsVisible: boolean;
+  toggleNodeLabels: () => void;
+
   // Computed
   filteredNodes: () => TopologyNode[];
   filteredEdges: () => TopologyEdge[];
@@ -127,6 +135,14 @@ export const useTopologyStore = create<TopologyState>()(
     layoutRunning: false,
     setLayoutMode: (mode) => set({ layoutMode: mode }),
     setLayoutRunning: (running) => set({ layoutRunning: running }),
+
+    // Topology UI overlay defaults
+    timelineDrawerOpen: false,
+    toggleTimelineDrawer: () => set((s) => ({ timelineDrawerOpen: !s.timelineDrawerOpen })),
+    metricsAnimationsEnabled: true,
+    toggleMetricsAnimations: () => set((s) => ({ metricsAnimationsEnabled: !s.metricsAnimationsEnabled })),
+    nodeLabelsVisible: true,
+    toggleNodeLabels: () => set((s) => ({ nodeLabelsVisible: !s.nodeLabelsVisible })),
 
     // Existing actions (preserved)
     setTopology: (topology) =>

@@ -4,7 +4,7 @@
 # Usage: podman build -t paryty/agent -f deploy/docker/Dockerfile.agent .
 
 # Build stage
-FROM rust:1.87-alpine AS builder
+FROM rust:alpine AS builder
 
 WORKDIR /app
 

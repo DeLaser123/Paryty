@@ -1,0 +1,435 @@
+/**
+ * dashboard.css
+ *
+ * Styles for the Dashboard page and all sub-components.
+ * All colour values reference var(--aef-*) tokens from tokens.css.
+ * No hard-coded hex values.
+ *
+ * Sections:
+ *   1. Page layout
+ *   2. Page header / counter row
+ *   3. Digital Paryty catalogue card
+ *   4. Ability badge
+ *   5. Empty state
+ *   6. Creation wizard modal
+ *   7. Wizard ability selector
+ *   8. Wizard step indicator
+ */
+
+/* â”€â”€â”€ 1. Page layout â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+  background: var(--aef-bg);
+}
+
+.dp-page::-webkit-scrollbar        { width: 3px; }
+.dp-page::-webkit-scrollbar-track  { background: transparent; }
+.dp-page::-webkit-scrollbar-thumb  { background: rgba(255, 255, 255, 0.14); border-radius: var(--aef-radius-full); }
+.dp-page::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.36); }
+
+.dp-page__inner {
+  padding: var(--aef-space-6) var(--aef-space-8);
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-6);
+  max-width: 1400px;
+  width: 100%;
+}
+
+/* â”€â”€â”€ 2. Page header / counter row â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--aef-space-4);
+  flex-wrap: wrap;
+}
+
+.dp-header__title-block {}
+
+.dp-header__title {
+  font-family: var(--aef-font-heading);
+  font-size: 21px;
+  font-weight: 600;
+  color: var(--aef-text-primary);
+  line-height: 1.2;
+}
+
+.dp-header__sub {
+  font-family: var(--aef-font-body);
+  font-size: 11px;
+  color: var(--aef-text-secondary);
+  margin-top: var(--aef-space-1);
+}
+
+.dp-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  flex-shrink: 0;
+}
+
+/* counter strip below the header */
+.dp-counters {
+  display: flex;
+  gap: var(--aef-space-3);
+  flex-wrap: wrap;
+}
+
+/* â”€â”€â”€ 3. Catalogue grid â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-catalogue {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: var(--aef-space-4);
+}
+
+/* â”€â”€â”€ 4. Digital Paryty card (shell uses DS aef-container-card) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-card {
+  cursor: pointer;
+  outline: none;
+  transition: border-color var(--aef-duration-fast) var(--aef-ease-exit),
+              background var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.dp-card:hover,
+.dp-card:focus-visible {
+  border-color: var(--aef-border-strong);
+}
+
+.dp-card:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+.dp-card--active {
+  border-color: var(--aef-text-primary);
+}
+
+/* inner content uses container-card body + custom gap */
+.dp-card__inner {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-4);
+  flex: 1;
+}
+
+/* card top row: health dot + name + system label */
+.dp-card__head {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aef-space-3);
+}
+
+.dp-card__health-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--aef-radius-full);
+  flex-shrink: 0;
+  margin-top: 5px;
+}
+
+.dp-card__health-dot--healthy    { background: var(--aef-status-live); }
+.dp-card__health-dot--degraded   { background: var(--aef-status-warning); }
+.dp-card__health-dot--unhealthy  { background: var(--aef-counter-variant-b); }
+.dp-card__health-dot--unknown    { background: var(--aef-border-strong); }
+
+.dp-card__title-block {
+  flex: 1;
+  min-width: 0;
+}
+
+.dp-card__name {
+  font-family: var(--aef-font-heading);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--aef-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dp-card__system {
+  font-family: var(--aef-font-body);
+  font-size: 9px;
+  color: var(--aef-text-secondary);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* summary stat row */
+.dp-card__stats {
+  display: flex;
+  gap: var(--aef-space-4);
+  flex-wrap: wrap;
+}
+
+.dp-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dp-stat__label {
+  font-family: var(--aef-font-body);
+  font-size: 9px;
+  color: var(--aef-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dp-stat__value {
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+  color: var(--aef-text-primary);
+}
+
+/* ability badge strip */
+.dp-card__abilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aef-space-1);
+}
+
+/* card footer: created date + open arrow */
+.dp-card__footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-top: var(--aef-border-width) solid var(--aef-border);
+  padding-top: var(--aef-space-3);
+  margin-top: auto;
+}
+
+.dp-card__date {
+  font-family: var(--aef-font-body);
+  font-size: 9px;
+  color: var(--aef-text-secondary);
+}
+
+.dp-card__open-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--aef-font-body);
+  font-size: 9px;
+  color: var(--aef-text-secondary);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: color var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.dp-card__open-btn:hover { color: var(--aef-text-primary); }
+
+/* â”€â”€â”€ 5. Ability badge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-ability-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--aef-font-body);
+  font-size: 9px;
+  color: var(--aef-text-secondary);
+  background: var(--aef-surface-card);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-control);
+  padding: 2px 7px;
+  white-space: nowrap;
+}
+
+/* â”€â”€â”€ 6. Empty state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--aef-space-4);
+  padding: var(--aef-space-12) var(--aef-space-8);
+  border: var(--aef-border-width) dashed var(--aef-border);
+  border-radius: var(--aef-radius-card);
+  text-align: center;
+}
+
+.dp-empty__icon {
+  color: var(--aef-border-strong);
+}
+
+.dp-empty__title {
+  font-family: var(--aef-font-heading);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--aef-text-primary);
+}
+
+.dp-empty__sub {
+  font-family: var(--aef-font-body);
+  font-size: 11px;
+  color: var(--aef-text-secondary);
+  max-width: 360px;
+}
+
+/* â”€â”€â”€ 7. Creation wizard modal (uses DS aef-modal classes) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+/* â”€â”€â”€ 8. Wizard form fields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-2);
+}
+
+.dp-field__label {
+  font-family: var(--aef-font-body);
+  font-size: 9px;
+  color: var(--aef-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dp-field__input {
+  background: var(--aef-surface-low);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-field);
+  color: var(--aef-text-primary);
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+  padding: var(--aef-space-2) var(--aef-space-3);
+  outline: none;
+  width: 100%;
+  transition: border-color var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.dp-field__input::placeholder { color: var(--aef-text-secondary); }
+.dp-field__input:focus { border-color: var(--aef-border-strong); }
+
+/* â”€â”€â”€ 9. Wizard ability selector â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-ability-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--aef-space-3);
+}
+
+.dp-ability-tile {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-2);
+  padding: var(--aef-space-4);
+  background: var(--aef-surface-low);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-card);
+  cursor: pointer;
+  text-align: left;
+  transition: border-color var(--aef-duration-fast) var(--aef-ease-exit),
+              background var(--aef-duration-fast) var(--aef-ease-exit);
+  outline: none;
+  position: relative;
+}
+
+.dp-ability-tile:hover,
+.dp-ability-tile:focus-visible {
+  background: var(--aef-surface-hover);
+  border-color: var(--aef-border-strong);
+}
+
+.dp-ability-tile--selected {
+  border-color: var(--aef-text-primary);
+  background: var(--aef-surface-hover);
+}
+
+.dp-ability-tile__check {
+  position: absolute;
+  top: var(--aef-space-3);
+  right: var(--aef-space-3);
+  color: var(--aef-text-primary);
+  opacity: 0;
+  transition: opacity var(--aef-duration-fast) var(--aef-ease-exit);
+}
+.dp-ability-tile--selected .dp-ability-tile__check { opacity: 1; }
+
+.dp-ability-tile__icon {
+  color: var(--aef-icon);
+  display: flex;
+}
+
+.dp-ability-tile__name {
+  font-family: var(--aef-font-heading);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--aef-text-primary);
+}
+
+.dp-ability-tile__desc {
+  font-family: var(--aef-font-body);
+  font-size: 9px;
+  color: var(--aef-text-secondary);
+  line-height: 1.5;
+}
+
+/* â”€â”€â”€ 10. Wizard step dots â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-step-dots {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+}
+
+.dp-step-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--aef-radius-full);
+  background: var(--aef-border);
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit),
+              width var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.dp-step-dot--active {
+  background: var(--aef-text-primary);
+  width: 16px;
+}
+
+/* â”€â”€â”€ 11. Wizard confirm summary â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
+
+.dp-confirm-row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-1);
+  padding: var(--aef-space-3) 0;
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+}
+
+.dp-confirm-row:last-child { border-bottom: none; }
+
+.dp-confirm-row__label {
+  font-family: var(--aef-font-body);
+  font-size: 9px;
+  color: var(--aef-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.dp-confirm-row__value {
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+  color: var(--aef-text-primary);
+}
+
+.dp-confirm-abilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--aef-space-1);
+  margin-top: var(--aef-space-2);
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -19,6 +20,17 @@ const (
 	defaultDrainTimeout = 10 * time.Second
 	defaultRetryBase    = 100 * time.Millisecond
 	dlqPublishTimeout   = 5 * time.Second
+
+	// defaultWorkerPoolMultiplier is multiplied by GOMAXPROCS to compute
+	// the default worker pool size when WithWorkerPool is not specified.
+	defaultWorkerPoolMultiplier = 2
+
+	// maxWorkerPoolSize caps the worker pool to prevent excessive goroutines.
+	maxWorkerPoolSize = 64
+
+	// workerChannelBuffer is the per-worker buffer depth for the work channel.
+	// Total buffer = workerCount * workerChannelBuffer.
+	workerChannelBuffer = 10
 )
 
 // Handler is a function that handles consumed messages.
@@ -56,6 +68,28 @@ func WithDrainTimeout(d time.Duration) ConsumerOption {
 	}
 }
 
+// WithWorkerPool sets the number of worker goroutines for processing records.
+// This replaces the previous goroutine-per-message pattern with a bounded pool,
+// eliminating unbounded goroutine spawning during high-throughput bursts.
+//
+// The worker pool is bounded: n is clamped to [1, maxWorkerPoolSize].
+// When n <= 0, it defaults to runtime.GOMAXPROCS(0) * 2.
+// When not called, NewConsumerWithDLQ sets the default automatically.
+//
+// Memory impact: eliminates 2-8 KB per-message goroutine stacks during bursts.
+// A pool of 64 workers uses a fixed ~512 KB regardless of burst size.
+func WithWorkerPool(n int) ConsumerOption {
+	return func(c *Consumer) {
+		if n <= 0 {
+			n = runtime.GOMAXPROCS(0) * defaultWorkerPoolMultiplier
+		}
+		if n > maxWorkerPoolSize {
+			n = maxWorkerPoolSize
+		}
+		c.workerCount = n
+	}
+}
+
 // Consumer is the Redpanda consumer with DLQ support, retry with backoff,
 // lag monitoring, and graceful drain.
 type Consumer struct {
@@ -73,6 +107,13 @@ type Consumer struct {
 	maxRetries    int
 	drainTimeout  time.Duration
 	adminClient   *kadm.Client
+
+	// Worker pool fields — bounded set of goroutines that process records
+	// from a shared channel, replacing the previous goroutine-per-message pattern.
+	workCh         chan *kgo.Record
+	workerCount    int
+	workerWg       sync.WaitGroup
+	workerCloseOnce sync.Once
 }
 
 // NewConsumer creates a new Redpanda consumer with optional configuration.
@@ -86,7 +127,7 @@ func NewConsumer(cfg Config, group string, topics []string, handler Handler, log
 // exhausted. When DLQ is not configured, failed messages are logged and dropped.
 //
 // Additional ConsumerOption values can be provided to override defaults for
-// max retries and drain timeout.
+// max retries, drain timeout, and worker pool size.
 func NewConsumerWithDLQ(cfg Config, group string, topics []string, handler Handler, logger *zap.Logger, dlqProducer *Producer, dlqTopic string, opts ...ConsumerOption) (*Consumer, error) {
 	kopts := []kgo.Opt{
 		kgo.SeedBrokers(cfg.Brokers...),
@@ -128,12 +169,21 @@ func NewConsumerWithDLQ(cfg Config, group string, topics []string, handler Handl
 		opt(c)
 	}
 
+	// Set default worker pool size if WithWorkerPool was not called.
+	if c.workerCount == 0 {
+		c.workerCount = runtime.GOMAXPROCS(0) * defaultWorkerPoolMultiplier
+		if c.workerCount > maxWorkerPoolSize {
+			c.workerCount = maxWorkerPoolSize
+		}
+	}
+
 	logger.Info("Consumer created",
 		zap.String("group", group),
 		zap.Strings("topics", topics),
 		zap.Bool("dlq_enabled", dlqProducer != nil && dlqTopic != ""),
 		zap.Int("max_retries", c.maxRetries),
 		zap.Duration("drain_timeout", c.drainTimeout),
+		zap.Int("worker_count", c.workerCount),
 	)
 
 	return c, nil
@@ -159,7 +209,8 @@ func (c *Consumer) Close() {
 		c.cancel()
 	}
 
-	// Wait for in-flight handlers with drain timeout.
+	// Wait for the poll loop to exit. This ensures no new records are sent
+	// to workCh after this point.
 	done := make(chan struct{})
 	go func() {
 		c.wg.Wait()
@@ -168,9 +219,33 @@ func (c *Consumer) Close() {
 
 	select {
 	case <-done:
+		c.logger.Info("Poll loop exited")
+	case <-time.After(c.drainTimeout):
+		c.logger.Warn("Drain timeout exceeded waiting for poll loop",
+			zap.Duration("timeout", c.drainTimeout),
+		)
+	}
+
+	// Close the work channel (once) so workers drain remaining records and exit.
+	// Guard against nil workCh — Close may be called before Start.
+	c.workerCloseOnce.Do(func() {
+		if c.workCh != nil {
+			close(c.workCh)
+		}
+	})
+
+	// Wait for in-flight record handlers with drain timeout.
+	workerDone := make(chan struct{})
+	go func() {
+		c.workerWg.Wait()
+		close(workerDone)
+	}()
+
+	select {
+	case <-workerDone:
 		c.logger.Info("All in-flight handlers completed during drain")
 	case <-time.After(c.drainTimeout):
-		c.logger.Warn("Drain timeout exceeded, forcing close",
+		c.logger.Warn("Drain timeout exceeded for worker pool, forcing close",
 			zap.Duration("timeout", c.drainTimeout),
 		)
 	}
@@ -188,18 +263,41 @@ func (c *Consumer) Close() {
 	c.logger.Info("Consumer closed")
 }
 
-// Start starts consuming messages. Each record is processed in its own
-// goroutine, tracked by the WaitGroup for graceful drain on Close.
+// Start starts consuming messages using a bounded worker pool.
+// Records are dispatched to a fixed pool of worker goroutines via a buffered
+// channel, replacing the previous goroutine-per-message pattern. This bounds
+// memory usage during high-throughput bursts (each goroutine stack is 2-8 KB).
+//
+// Worker pool lifecycle:
+//   - Workers start here and block on the work channel.
+//   - Each record is sent to the channel (backpressure when full).
+//   - On Close: context is cancelled → poll loop exits → channel is closed →
+//     workers drain remaining records and exit.
 func (c *Consumer) Start(ctx context.Context) {
 	ctx, c.cancel = context.WithCancel(ctx)
-	c.wg.Add(1)
 
+	// Start the bounded worker pool.
+	c.workCh = make(chan *kgo.Record, c.workerCount*workerChannelBuffer)
+	for i := 0; i < c.workerCount; i++ {
+		c.workerWg.Add(1)
+		go func(workerID int) {
+			defer c.workerWg.Done()
+			c.logger.Debug("Worker started", zap.Int("worker_id", workerID))
+			for record := range c.workCh {
+				c.processRecord(ctx, record)
+			}
+			c.logger.Debug("Worker stopped", zap.Int("worker_id", workerID))
+		}(i)
+	}
+
+	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
 		c.logger.Info("Consumer started",
 			zap.Int("max_retries", c.maxRetries),
 			zap.Duration("drain_timeout", c.drainTimeout),
 			zap.Bool("dlq_enabled", c.dlqProducer != nil),
+			zap.Int("worker_count", c.workerCount),
 		)
 
 		for {
@@ -217,12 +315,11 @@ func (c *Consumer) Start(ctx context.Context) {
 					return
 				}
 
+				// Dispatch to bounded worker pool via channel instead of
+				// spawning a goroutine per record. The channel provides
+				// automatic backpressure when all workers are busy.
 				fetches.EachRecord(func(record *kgo.Record) {
-					c.wg.Add(1)
-					go func() {
-						defer c.wg.Done()
-						c.processRecord(ctx, record)
-					}()
+					c.workCh <- record
 				})
 
 				if err := fetches.Err(); err != nil {

@@ -23,6 +23,8 @@ export interface ParticleState {
   totalEventsReceived: number;
   /** Whether the particle system is currently active (not paused by budget). */
   particlesActive: boolean;
+  /** Operator-controlled toggle — when false, particles are fully suppressed regardless of budget. */
+  particlesEnabled: boolean;
   /** Current transport mode for the event ingestion pipeline. */
   transportMode: TransportMode;
 
@@ -31,6 +33,7 @@ export interface ParticleState {
   setTotalEventsReceived: (count: number) => void;
   incrementTotalEventsReceived: (delta: number) => void;
   setParticlesActive: (active: boolean) => void;
+  toggleParticles: () => void;
   setTransportMode: (mode: TransportMode) => void;
 }
 
@@ -40,16 +43,14 @@ export const useParticleStore = create<ParticleState>()((set) => ({
   visualParticleCount: 0,
   totalEventsReceived: 0,
   particlesActive: true,
+  particlesEnabled: true,
   transportMode: 'ws',
 
   setVisualParticleCount: (count) => set({ visualParticleCount: count }),
-
   setTotalEventsReceived: (count) => set({ totalEventsReceived: count }),
-
   incrementTotalEventsReceived: (delta) =>
     set((state) => ({ totalEventsReceived: state.totalEventsReceived + delta })),
-
   setParticlesActive: (active) => set({ particlesActive: active }),
-
+  toggleParticles: () => set((state) => ({ particlesEnabled: !state.particlesEnabled })),
   setTransportMode: (mode) => set({ transportMode: mode }),
 }));

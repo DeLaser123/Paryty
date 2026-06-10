@@ -1,0 +1,26 @@
+replicaCount: 1
+
+image:
+  repository: paryty-agent
+  tag: latest
+  pullPolicy: IfNotPresent
+
+serviceAccount:
+  create: true
+  name: ""
+
+service:
+  type: ClusterIP
+  port: 9090
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+config:
+  clusterEndpoint: "paryty-cluster-ingestion:9090"
+  logLevel: "info"

@@ -1,0 +1,15 @@
+rbac:
+  create: true
+
+networkPolicy:
+  enabled: true
+
+tls:
+  enabled: true
+  certManager:
+    enabled: true
+    issuer: "letsencrypt-prod"
+
+serviceAccount:
+  create: true
+  name: "paryty-security"

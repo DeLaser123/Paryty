@@ -33,7 +33,7 @@ pub mod reconnect;
 pub mod tenant;
 
 use anyhow::{Context, Result};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::RwLock;
@@ -88,6 +88,22 @@ pub struct Client {
     started_at: Instant,
     /// Whether the agent has completed registration.
     registered: Arc<AtomicBool>,
+
+    // ── Identity State (twin-agent identity pipeline) ──────────────────
+    /// Assigned twin ID (set by cluster via AssignIdentity command).
+    twin_id: Arc<RwLock<Option<String>>>,
+    /// Assigned client ID (set by cluster via AssignIdentity command).
+    client_id: Arc<RwLock<Option<String>>>,
+    /// Topic prefix derived from identity (e.g. "twin/{twin_id}/client/{client_id}").
+    topic_prefix: Arc<RwLock<Option<String>>>,
+    /// Whether identity has been fully assigned and validated.
+    identity_valid: Arc<AtomicBool>,
+
+    // ── Backlog Tracking ───────────────────────────────────────────────
+    /// Estimated backlog bytes (persisted edge buffer size + in-memory).
+    backlog_bytes: Arc<AtomicU64>,
+    /// Timestamp (epoch seconds) of the oldest unflushed backlog entry.
+    backlog_since_epoch: Arc<AtomicI64>,
 }
 
 impl Client {
@@ -104,6 +120,24 @@ impl Client {
         let compressor = Compressor::new();
         let flow_control = FlowControl::new(10_000);
 
+        // Seed identity from config env var overrides (fallback only).
+        let twin_id = config.agent.twin_id.clone();
+        let client_id = config.agent.client_id.clone();
+        let topic_prefix = if let (Some(ref tid), Some(ref cid)) = (&twin_id, &client_id) {
+            Some(format!("twin/{}/client/{}", tid, cid))
+        } else {
+            None
+        };
+        let identity_assigned = twin_id.is_some() && client_id.is_some();
+
+        if identity_assigned {
+            info!(
+                twin_id = %twin_id.as_deref().unwrap_or(""),
+                client_id = %client_id.as_deref().unwrap_or(""),
+                "Identity seeded from config/env"
+            );
+        }
+
         Ok(Self {
             grpc: Arc::new(grpc),
             reconnect: Arc::new(reconnect),
@@ -116,22 +150,120 @@ impl Client {
             session_id: Arc::new(RwLock::new(String::new())),
             started_at: Instant::now(),
             registered: Arc::new(AtomicBool::new(false)),
+            twin_id: Arc::new(RwLock::new(twin_id)),
+            client_id: Arc::new(RwLock::new(client_id)),
+            topic_prefix: Arc::new(RwLock::new(topic_prefix)),
+            identity_valid: Arc::new(AtomicBool::new(identity_assigned)),
+            backlog_bytes: Arc::new(AtomicU64::new(0)),
+            backlog_since_epoch: Arc::new(AtomicI64::new(0)),
         })
+    }
+
+    // ── Identity ───────────────────────────────────────────────────────
+
+    /// Resolve identity after registration by calling the ResolveIdentity
+    /// gRPC endpoint to discover the assigned twin/client ID.
+    ///
+    /// This is the primary identity assignment path; env-var fallback is
+    /// a backup for environments where the gRPC call may not be available.
+    pub async fn resolve_identity(&self) -> Result<()> {
+        if !self.grpc.is_connected().await {
+            anyhow::bail!("Cannot resolve identity: not connected");
+        }
+
+        match self.grpc.resolve_identity(&self.agent_id).await {
+            Ok((twin_id, client_id)) => {
+                let prefix = format!("twin/{}/client/{}", twin_id, client_id);
+                self.apply_identity(Some(twin_id), Some(client_id), Some(prefix)).await;
+                info!("Identity resolved via gRPC ResolveIdentity");
+                Ok(())
+            }
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "ResolveIdentity gRPC call failed — using fallback identity if configured"
+                );
+                if self.is_identity_assigned() {
+                    Ok(())
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
+    /// Hot-apply a new identity without restart.
+    ///
+    /// Updates the twin ID, client ID, and topic prefix atomically.
+    /// Sets `identity_valid` to true, enabling the live send pipeline.
+    /// Also updates the gRPC client's identity metadata for subsequent RPCs.
+    pub async fn apply_identity(
+        &self,
+        twin_id: Option<String>,
+        client_id: Option<String>,
+        topic_prefix: Option<String>,
+    ) {
+        {
+            let mut tid = self.twin_id.write().await;
+            *tid = twin_id.clone();
+        }
+        {
+            let mut cid = self.client_id.write().await;
+            *cid = client_id.clone();
+        }
+        {
+            let mut tp = self.topic_prefix.write().await;
+            *tp = topic_prefix.clone();
+        }
+
+        let assigned = twin_id.is_some() && client_id.is_some();
+        self.identity_valid.store(assigned, Ordering::Release);
+
+        if assigned {
+            let tid = twin_id.unwrap_or_default();
+            let cid = client_id.unwrap_or_default();
+            self.grpc.update_identity(Some(tid.clone()), Some(cid.clone()));
+            info!(
+                twin_id = %tid,
+                client_id = %cid,
+                topic_prefix = %topic_prefix.as_deref().unwrap_or(""),
+                "Identity applied (hot-reload)"
+            );
+        } else {
+            self.grpc.update_identity(None, None);
+            info!("Identity cleared");
+        }
+    }
+
+    /// Check whether identity has been fully assigned.
+    pub fn is_identity_assigned(&self) -> bool {
+        self.identity_valid.load(Ordering::Acquire)
+    }
+
+    /// Get the current twin ID.
+    pub async fn get_twin_id(&self) -> Option<String> {
+        self.twin_id.read().await.clone()
+    }
+
+    /// Get the current client ID.
+    pub async fn get_client_id(&self) -> Option<String> {
+        self.client_id.read().await.clone()
+    }
+
+    /// Get the current topic prefix.
+    pub async fn get_topic_prefix(&self) -> Option<String> {
+        self.topic_prefix.read().await.clone()
+    }
+
+    /// Track backlog info for heartbeat reporting.
+    pub fn set_backlog_info(&self, bytes: u64, since_epoch: i64) {
+        self.backlog_bytes.store(bytes, Ordering::Relaxed);
+        self.backlog_since_epoch.store(since_epoch, Ordering::Relaxed);
     }
 
     // ── Registration ──────────────────────────────────────────────────
 
     /// Register this agent with the cluster after a successful connection.
-    ///
-    /// Sends an `AgentRegistration` RPC containing agent ID, hostname,
-    /// version, and capabilities. On success, stores the session ID
-    /// returned by the cluster for use in subsequent RPCs.
-    ///
-    /// If an API key is configured, it is sent as `x-api-key` gRPC metadata
-    /// so the server can resolve the tenant. After registration, the tenant
-    /// ID (session ID) is cached locally for restart resilience.
-    ///
-    /// Call this immediately after `connect()` succeeds.
     pub async fn register_on_connect(&self) -> Result<()> {
         let hostname = get_hostname();
 
@@ -151,12 +283,13 @@ impl Client {
             }),
             labels: None,
             started_at: None,
+            twin_id: String::new(),
+            client_id: String::new(),
         };
 
         let response: AgentRegistrationResponse =
             self.grpc.register_agent(registration).await.context("Agent registration failed")?;
 
-        // Store session ID for subsequent RPCs.
         {
             let mut sid = self.session_id.write().await;
             *sid = response.session_id.clone();
@@ -168,7 +301,6 @@ impl Client {
             "Agent registered with cluster"
         );
 
-        // Apply any server-pushed configuration overrides.
         if let Some(server_config) = response.config {
             info!(
                 collection_interval_ms = server_config.collection_interval_ms,
@@ -177,15 +309,20 @@ impl Client {
             );
         }
 
+        if !self.is_identity_assigned() {
+            if let Err(e) = self.resolve_identity().await {
+                warn!(
+                    error = %e,
+                    "Identity resolution after registration failed (best-effort, continuing)"
+                );
+            }
+        }
+
         Ok(())
     }
 
     // ── Registration Loop ─────────────────────────────────────────────
 
-    /// Start a background task that retries registration until it succeeds.
-    ///
-    /// Uses exponential backoff (1s → 2s → 4s → … → 30s max) with jitter.
-    /// Exits when registration succeeds or the cancel token fires.
     pub fn start_registration_loop(self: &Arc<Self>) {
         let client = Arc::clone(self);
         let cancel = client.cancel_token.clone();
@@ -193,12 +330,10 @@ impl Client {
         tokio::spawn(async move {
             let mut attempt: u32 = 0;
             loop {
-                // If already registered, nothing to do.
                 if client.is_registered() {
                     break;
                 }
 
-                // If not connected, wait for the reconnection loop to fix that.
                 if !client.grpc.is_connected().await {
                     tokio::select! {
                         _ = cancel.cancelled() => break,
@@ -232,29 +367,19 @@ impl Client {
         });
     }
 
-    // ── Send Metrics (compress → flow control → send_batch → buffer) ───
+    // ── Send Metrics (dual pipeline: live + backlog) ───────────────────
 
-    /// Send metrics data to the cluster.
-    ///
-    /// Pipeline:
-    /// 1. Compress data via Zstd
-    /// 2. Check flow control (backpressure / sampling)
-    /// 3. Try send via gRPC `send_batch()` unary RPC
-    /// 4. On failure, persist to edge buffer for replay on reconnect
     pub async fn send_metrics(&self, category: &str, data: &[u8]) -> Result<()> {
         let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
 
         info!(seq = seq, category = category, data_len = data.len(), "send_metrics called");
 
-        // 1. Compress the data.
         let compressed =
             self.compressor.compress_metrics(data).context("Failed to compress metrics")?;
 
-        // 2. Check flow control.
         if self.flow_control.is_backpressured() {
             let rate = self.flow_control.sampling_rate().await;
             if fastrand::f64() > rate {
-                // Dropped by sampling — still buffer for safety.
                 self.buffer.write(compressed.clone(), DataType::Metrics).await?;
                 debug!(
                     seq = seq,
@@ -266,11 +391,13 @@ impl Client {
             }
         }
 
-        // 3. Try send via gRPC send_batch.
+        // Try live send if identity is assigned.
+        if self.identity_valid.load(Ordering::Acquire) {
+            self.send_live(category, data, seq).await;
+        }
+
         let connected = self.grpc.is_connected().await;
-        info!(seq = seq, connected = connected, "send_metrics: connection check");
         if connected {
-            // Deserialize the MetalBatch JSON and convert to proto MetricBatch.
             let metal: MetalBatch = serde_json::from_slice(data).unwrap_or_else(|_| MetalBatch {
                 timestamp: String::new(),
                 cpu: None,
@@ -378,7 +505,7 @@ impl Client {
                                 tcp_stats: n.tcp_stats.clone().map(|ts| crate::proto::TcpStats {
                                     established: ts.active_connections as i32,
                                     time_wait: ts.time_wait as i32,
-                                    close_wait: 0i32, // not collected by network collector
+                                    close_wait: 0i32,
                                     listen: ts.listen as i32,
                                     retransmit_count: ts.retransmits as i64,
                                 }),
@@ -470,7 +597,6 @@ impl Client {
                         );
                         return Ok(());
                     }
-                    // Server rejected the batch — log error detail and buffer.
                     let err_msg =
                         response.error.as_ref().map(|e| e.message.as_str()).unwrap_or("unknown");
                     warn!(
@@ -479,16 +605,13 @@ impl Client {
                         error = err_msg,
                         "send_batch rejected by server, buffering"
                     );
-                    // Fall through to buffer.
                 }
                 Err(e) => {
                     warn!(seq = seq, category = category, "send_batch failed: {}", e);
-                    // Fall through to buffer.
                 }
             }
         }
 
-        // 4. Buffer for replay on reconnect.
         self.buffer.write(compressed, DataType::Metrics).await?;
         warn!(
             seq = seq,
@@ -499,19 +622,102 @@ impl Client {
         Ok(())
     }
 
+    /// Send metrics via the live (identity-aware) pipeline.
+    async fn send_live(&self, category: &str, data: &[u8], seq: u64) {
+        let twin_id = self.twin_id.read().await.clone();
+        let client_id = self.client_id.read().await.clone();
+
+        debug!(
+            seq = seq,
+            category = category,
+            twin_id = ?twin_id,
+            client_id = ?client_id,
+            "Live send path (identity assigned)"
+        );
+
+        if !self.grpc.is_connected().await {
+            debug!(seq = seq, "Live send skipped: not connected");
+            return;
+        }
+
+        let compressed = match self.compressor.compress_metrics(data) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(seq = seq, "Live send: compression failed: {}", e);
+                return;
+            }
+        };
+
+        if let Err(e) = self.grpc.send(compressed).await {
+            warn!(seq = seq, "Live send failed: {} — data will be in backlog", e);
+        } else {
+            debug!(seq = seq, "Live send successful");
+        }
+    }
+
+    /// Upload backlog data as a chunked stream.
+    pub async fn upload_backlog_stream(&self) -> Result<()> {
+        info!("Starting chunked backlog upload");
+        let entries = self.buffer.drain().await;
+        let total = entries.len();
+        if total == 0 {
+            info!("No backlog entries to upload");
+            return Ok(());
+        }
+
+        info!(total_entries = total, "Uploading backlog in chunks");
+
+        let mut sent_count: usize = 0;
+        let mut failed_count: usize = 0;
+
+        for entry in entries {
+            let result = match entry.data_type {
+                DataType::Metrics => self.grpc.send(entry.data.clone()).await,
+                DataType::Traces => self.grpc.send(entry.data.clone()).await,
+                DataType::Events => self.grpc.send(entry.data.clone()).await,
+                DataType::NetworkEvents => self.grpc.send(entry.data.clone()).await,
+            };
+
+            match result {
+                Ok(()) => {
+                    sent_count += 1;
+                    if let Some(row_id) = entry.sqlite_row_id {
+                        if let Err(e) = self.buffer.mark_sent(row_id) {
+                            warn!(row_id = row_id, "Failed to mark SQLite entry sent: {}", e);
+                        }
+                    }
+                }
+                Err(e) => {
+                    failed_count += 1;
+                    warn!(
+                        seq = entry.sequence_number,
+                        "Backlog upload send failed: {} — stopping upload", e
+                    );
+                    if let Some(row_id) = entry.sqlite_row_id {
+                        if let Err(e) = self.buffer.mark_retry(row_id) {
+                            warn!(row_id = row_id, "Failed to mark SQLite entry retry: {}", e);
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        info!(sent = sent_count, failed = failed_count, total = total, "Backlog upload complete");
+
+        Ok(())
+    }
+
     // ── Send Traces ───────────────────────────────────────────────────
 
-    /// Send trace data to the cluster.
     pub async fn send_traces(&self, data: &[u8]) -> Result<()> {
         let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
         let compressed = self.compressor.compress_traces(data)?;
         let compressed_len = compressed.len();
 
-        // Buffer first for zero data loss.
         self.buffer.write(compressed.clone(), DataType::Traces).await?;
 
         if self.grpc.is_connected().await {
-            // Traces don't have a dedicated proto RPC — send via legacy channel.
             if let Err(e) = self.grpc.send(compressed).await {
                 warn!("Failed to send traces via gRPC (seq: {}): {}", seq, e);
             } else {
@@ -524,7 +730,6 @@ impl Client {
 
     // ── Send Events ───────────────────────────────────────────────────
 
-    /// Send event data to the cluster.
     pub async fn send_events(&self, data: &[u8]) -> Result<()> {
         let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
         self.buffer.write(data.to_vec(), DataType::Events).await?;
@@ -542,10 +747,6 @@ impl Client {
 
     // ── Send Network Events ───────────────────────────────────────────
 
-    /// Send network events to the cluster via JSON (legacy path).
-    ///
-    /// Preserved for backward compatibility (e.g., proc_fallback).
-    /// Prefer [`send_network_events_proto`] for new code.
     pub async fn send_network_events(&self, data: &[u8]) -> Result<()> {
         let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
         self.buffer.write(data.to_vec(), DataType::NetworkEvents).await?;
@@ -561,13 +762,6 @@ impl Client {
         Ok(())
     }
 
-    /// Send network events to the cluster via the typed `ReportNetworkEvents`
-    /// client-streaming gRPC RPC.
-    ///
-    /// Converts each [`crate::ebpf::NetworkEvent`] to its proto representation,
-    /// wraps them in a [`NetworkEventBatch`], and sends via the dedicated RPC.
-    /// On failure, falls back to buffering the events as JSON in the edge buffer
-    /// for replay on reconnect.
     pub async fn send_network_events_proto(
         &self,
         events: &[crate::ebpf::NetworkEvent],
@@ -575,7 +769,6 @@ impl Client {
         let seq = self.sequence_counter.fetch_add(1, Ordering::SeqCst);
         let session_id = self.session_id.read().await.clone();
 
-        // Convert ebpf events to proto events.
         let proto_events: Vec<crate::proto::paryty::v1::NetworkEvent> =
             events.iter().map(convert_network_event).collect();
 
@@ -593,7 +786,6 @@ impl Client {
             "Sending network events via ReportNetworkEvents RPC"
         );
 
-        // Try proto RPC first.
         if self.grpc.is_connected().await {
             match self.grpc.report_network_events(batch).await {
                 Ok(response) => {
@@ -611,12 +803,10 @@ impl Client {
                         error = %e,
                         "ReportNetworkEvents RPC failed, falling back to edge buffer"
                     );
-                    // Fall through to buffer.
                 }
             }
         }
 
-        // Fallback: serialize to JSON and buffer for replay on reconnect.
         match serde_json::to_vec(events) {
             Ok(data) => {
                 self.buffer.write(data, DataType::NetworkEvents).await?;
@@ -636,11 +826,6 @@ impl Client {
 
     // ── Flush Buffer ──────────────────────────────────────────────────
 
-    /// Flush pending entries from the edge buffer to the cluster.
-    ///
-    /// Drains entries and attempts to send each one. On success, marks
-    /// SQLite entries as sent. On failure, marks retry and stops early
-    /// to avoid wasting time on a down connection.
     pub async fn flush_buffer(&self) -> Result<()> {
         let entries = self.buffer.drain().await;
         let total = entries.len();
@@ -653,7 +838,6 @@ impl Client {
         let mut failed_count: usize = 0;
 
         for entry in entries {
-            // Attempt to send via the appropriate path.
             let result = match entry.data_type {
                 DataType::Metrics => self.grpc.send(entry.data.clone()).await,
                 DataType::Traces => self.grpc.send(entry.data.clone()).await,
@@ -664,7 +848,6 @@ impl Client {
             match result {
                 Ok(()) => {
                     sent_count += 1;
-                    // Acknowledge in SQLite if it came from there.
                     if let Some(row_id) = entry.sqlite_row_id {
                         if let Err(e) = self.buffer.mark_sent(row_id) {
                             warn!(row_id = row_id, "Failed to mark SQLite entry sent: {}", e);
@@ -677,13 +860,11 @@ impl Client {
                         seq = entry.sequence_number,
                         "Buffer flush send failed: {} — stopping flush", e
                     );
-                    // Mark retry in SQLite.
                     if let Some(row_id) = entry.sqlite_row_id {
                         if let Err(e) = self.buffer.mark_retry(row_id) {
                             warn!(row_id = row_id, "Failed to mark SQLite entry retry: {}", e);
                         }
                     }
-                    // Stop flushing — connection is likely down.
                     break;
                 }
             }
@@ -696,11 +877,6 @@ impl Client {
 
     // ── Heartbeat Loop ────────────────────────────────────────────────
 
-    /// Start the heartbeat loop as a background tokio task.
-    ///
-    /// Sends a `HeartbeatRequest` via the proto `heartbeat()` RPC every
-    /// 30 seconds. Accepts a `CancellationToken` for cooperative shutdown.
-    /// On heartbeat success, processes any pending commands from the server.
     pub fn start_heartbeat_loop(self: &Arc<Self>) {
         let client = Arc::clone(self);
         let cancel = client.cancel_token.clone();
@@ -708,7 +884,7 @@ impl Client {
         tokio::spawn(async move {
             info!("Heartbeat loop started (interval: 30s)");
             let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            interval.tick().await; // Skip the immediate first tick.
+            interval.tick().await;
 
             loop {
                 tokio::select! {
@@ -722,6 +898,8 @@ impl Client {
                             continue;
                         }
 
+                        client.refresh_backlog_info();
+
                         let session_id = client.session_id.read().await.clone();
                         let request = HeartbeatRequest {
                             agent_id: client.agent_id.clone(),
@@ -730,7 +908,21 @@ impl Client {
                             edge_buffer_bytes: client.buffer.memory_usage() as i64,
                             edge_buffer_count: client.buffer.len().await as i64,
                             self_metrics: None,
+                            backlog_bytes: client.backlog_bytes.load(Ordering::Relaxed) as i64,
+                            backlog_since_epoch: client.backlog_since_epoch.load(Ordering::Relaxed),
                         };
+
+                        let backlog_bytes = client.backlog_bytes.load(Ordering::Relaxed);
+                        let backlog_since = client.backlog_since_epoch.load(Ordering::Relaxed);
+                        if backlog_bytes > 0 {
+                            info!(
+                                backlog_bytes = backlog_bytes,
+                                backlog_since_epoch = backlog_since,
+                                edge_buffer_bytes = request.edge_buffer_bytes,
+                                edge_buffer_count = request.edge_buffer_count,
+                                "Heartbeat with backlog"
+                            );
+                        }
 
                         match client.grpc.heartbeat(request).await {
                             Ok(response) => {
@@ -739,7 +931,6 @@ impl Client {
                                     pending_commands = response.pending_commands.len(),
                                     "Heartbeat acknowledged"
                                 );
-                                // Process any pending commands from the heartbeat response.
                                 for cmd in &response.pending_commands {
                                     client.handle_agent_command(cmd.r#type, &cmd.payload).await;
                                 }
@@ -756,16 +947,17 @@ impl Client {
         });
     }
 
+    fn refresh_backlog_info(&self) {
+        let persistent_size = self.buffer.persistent_size();
+        let oldest_ts = self.buffer.oldest_entry_timestamp();
+        let memory_usage = self.buffer.memory_usage();
+
+        self.backlog_bytes.store(persistent_size + memory_usage, Ordering::Relaxed);
+        self.backlog_since_epoch.store(oldest_ts, Ordering::Relaxed);
+    }
+
     // ── Stream Listener ───────────────────────────────────────────────
 
-    /// Start the bidirectional stream listener as a background tokio task.
-    ///
-    /// Opens a `StreamMetrics` bidirectional gRPC stream and spawns a task
-    /// to listen for `ClusterToAgent` messages. Dispatches:
-    /// - `FlowControl` → `flow_control.apply_server_signal()`
-    /// - `ConfigPush` → log (future: apply config hot-reload)
-    /// - `AgentCommand` → `handle_agent_command()`
-    /// - `Heartbeat` → log (heartbeat responses on stream)
     pub fn start_stream_listener(self: &Arc<Self>) {
         let client = Arc::clone(self);
         let cancel = client.cancel_token.clone();
@@ -773,7 +965,6 @@ impl Client {
         tokio::spawn(async move {
             info!("Stream listener starting");
 
-            // Wait until connected before opening the stream.
             loop {
                 if cancel.is_cancelled() {
                     info!("Stream listener shutting down (cancelled before connect)");
@@ -785,9 +976,6 @@ impl Client {
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
 
-            // Open the bidirectional stream with a timeout.
-            // The timeout prevents indefinite blocking if the server is slow
-            // to accept the stream (e.g., server waiting for client first msg).
             let (tx, mut inbound) = match tokio::time::timeout(
                 std::time::Duration::from_secs(15),
                 client.grpc.stream_metrics(),
@@ -808,11 +996,6 @@ impl Client {
                 }
             };
 
-            // Send an initial heartbeat to the server.
-            // The Go server's StreamMetrics handler blocks on stream.Recv() waiting
-            // for a client message before it sends any response. Without this, the
-            // server gets EOF (if sender is dropped) or blocks forever, and the
-            // client's inbound.message() hangs indefinitely — deadlocking the runtime.
             {
                 let sid = client.session_id.read().await.clone();
                 let initial_hb = AgentToCluster {
@@ -824,6 +1007,8 @@ impl Client {
                             edge_buffer_bytes: 0,
                             edge_buffer_count: 0,
                             self_metrics: None,
+                            backlog_bytes: 0,
+                            backlog_since_epoch: 0,
                         },
                     )),
                 };
@@ -834,13 +1019,9 @@ impl Client {
                 debug!("Sent initial stream heartbeat to server");
             }
 
-            // Periodic heartbeat timer — keeps the stream alive so the server's
-            // Recv() loop continues to receive messages and send FlowControl
-            // responses that the client reads from `inbound`.
             let mut heartbeat_interval = tokio::time::interval(std::time::Duration::from_secs(30));
-            heartbeat_interval.tick().await; // consume the immediate first tick
+            heartbeat_interval.tick().await;
 
-            // Listen for incoming messages from the cluster.
             loop {
                 tokio::select! {
                     _ = cancel.cancelled() => {
@@ -858,6 +1039,8 @@ impl Client {
                                     edge_buffer_bytes: 0,
                                     edge_buffer_count: 0,
                                     self_metrics: None,
+                                    backlog_bytes: 0,
+                                    backlog_since_epoch: 0,
                                 },
                             )),
                         };
@@ -885,12 +1068,10 @@ impl Client {
                 }
             }
 
-            // `tx` is dropped here, closing the outbound stream.
             info!("Stream listener stopped");
         });
     }
 
-    /// Dispatch a `ClusterToAgent` message to the appropriate handler.
     async fn dispatch_cluster_message(&self, msg: ClusterToAgent) {
         let message = match msg.message {
             Some(m) => m,
@@ -921,7 +1102,6 @@ impl Client {
                     compression = %config.compression,
                     "Received config push from cluster"
                 );
-                // TODO: Apply hot-reload configuration.
             }
             cluster_to_agent::Message::Command(cmd) => {
                 info!(
@@ -942,15 +1122,16 @@ impl Client {
     }
 
     /// Handle an `AgentCommand` from the cluster.
+    ///
+    /// Supports all known proto enum variants including the extended
+    /// identity pipeline commands (AssignIdentity=5, UploadBacklog=6, DeleteBacklog=7).
     async fn handle_agent_command(&self, command_type: i32, payload: &str) {
         match AgentCommandType::try_from(command_type) {
             Ok(AgentCommandType::Restart) => {
                 info!(payload = payload, "Agent restart command received (no-op)");
-                // TODO: Trigger agent restart.
             }
             Ok(AgentCommandType::UpdateConfig) => {
                 info!(payload = payload, "Config update command received (no-op)");
-                // TODO: Apply config update.
             }
             Ok(AgentCommandType::FlushBuffer) => {
                 info!("Flush buffer command received");
@@ -960,7 +1141,53 @@ impl Client {
             }
             Ok(AgentCommandType::ToggleLayer) => {
                 info!(payload = payload, "Toggle layer command received (no-op)");
-                // TODO: Enable/disable a collection layer.
+            }
+            Ok(AgentCommandType::AssignIdentity) => {
+                info!(payload = payload, "AssignIdentity command received");
+                match serde_json::from_str::<serde_json::Value>(payload) {
+                    Ok(json) => {
+                        let twin_id =
+                            json.get("twin_id").and_then(|v| v.as_str()).map(String::from);
+                        let client_id =
+                            json.get("client_id").and_then(|v| v.as_str()).map(String::from);
+                        let topic_prefix =
+                            json.get("topic_prefix").and_then(|v| v.as_str()).map(String::from);
+
+                        self.apply_identity(
+                            twin_id.clone(),
+                            client_id.clone(),
+                            topic_prefix.clone(),
+                        )
+                        .await;
+                        info!(
+                            twin_id = %twin_id.as_deref().unwrap_or(""),
+                            client_id = %client_id.as_deref().unwrap_or(""),
+                            "Identity assigned via cluster command"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            payload = payload,
+                            error = %e,
+                            "Failed to parse AssignIdentity payload"
+                        );
+                    }
+                }
+            }
+            Ok(AgentCommandType::UploadBacklog) => {
+                info!("UploadBacklog command received");
+                let client = self.clone();
+                tokio::spawn(async move {
+                    match client.upload_backlog_stream().await {
+                        Ok(()) => info!("Backlog upload completed"),
+                        Err(e) => warn!("Backlog upload failed: {}", e),
+                    }
+                });
+            }
+            Ok(AgentCommandType::DeleteBacklog) => {
+                info!("DeleteBacklog command received");
+                self.buffer.delete_all_backlog();
+                info!("Backlog deleted permanently");
             }
             Ok(AgentCommandType::Unspecified) | Err(_) => {
                 warn!(
@@ -972,11 +1199,8 @@ impl Client {
         }
     }
 
-    // ── Health Check (uses proto Heartbeat RPC) ───────────────────────
+    // ── Health Check ──────────────────────────────────────────────────
 
-    /// Perform a health check by sending a heartbeat.
-    ///
-    /// Returns true if the heartbeat was acknowledged by the cluster.
     pub async fn health_check(&self) -> Result<bool> {
         if !self.grpc.is_connected().await {
             return Ok(false);
@@ -990,6 +1214,8 @@ impl Client {
             edge_buffer_bytes: self.buffer.memory_usage() as i64,
             edge_buffer_count: self.buffer.len().await as i64,
             self_metrics: None,
+            backlog_bytes: 0,
+            backlog_since_epoch: 0,
         };
 
         match self.grpc.heartbeat(request).await {
@@ -1006,38 +1232,28 @@ impl Client {
 
     // ── Connection Management ─────────────────────────────────────────
 
-    /// Connect to the cluster.
     pub async fn connect(&self) -> Result<()> {
         self.grpc.connect().await
     }
 
-    /// Disconnect from the cluster.
     pub async fn disconnect(&self) {
         self.grpc.disconnect().await;
     }
 
-    /// Check if connected to the cluster.
     pub async fn is_connected(&self) -> bool {
         self.grpc.is_connected().await
     }
 
-    /// Get the session ID assigned by the cluster.
     pub async fn get_session_id(&self) -> String {
         self.session_id.read().await.clone()
     }
 
-    /// Check if the agent has completed registration.
     pub fn is_registered(&self) -> bool {
         self.registered.load(Ordering::Acquire)
     }
 
     // ── Reconnection Loop ─────────────────────────────────────────────
 
-    /// Start the background reconnection loop.
-    ///
-    /// Spawns a tokio task that monitors the connection and automatically
-    /// reconnects when disconnected. On successful reconnect, re-registers
-    /// the agent and replays buffered data.
     pub fn start_reconnection_loop(self: &Arc<Self>) {
         let client = Arc::clone(self);
         let cancel = client.cancel_token.clone();
@@ -1051,11 +1267,7 @@ impl Client {
                     }
                     _ = tokio::time::sleep(std::time::Duration::from_secs(5)) => {
                         if client.grpc.is_connected().await {
-                            // Connected but not yet registered — the registration
-                            // loop handles retries, so just flush buffer if already
-                            // registered, otherwise wait.
                             if client.is_registered() {
-                                // Best-effort buffer flush while idle.
                                 if let Err(e) = client.flush_buffer().await {
                                     warn!("Buffer flush during idle failed: {}", e);
                                 }
@@ -1067,12 +1279,10 @@ impl Client {
                             Ok(true) => {
                                 info!("Reconnected to cluster");
 
-                                // Re-register after reconnection.
                                 if let Err(e) = client.register_on_connect().await {
                                     warn!("Re-registration after reconnect failed: {}", e);
                                 }
 
-                                // Flush buffered data.
                                 if let Err(e) = client.flush_buffer().await {
                                     warn!("Buffer flush after reconnect failed: {}", e);
                                 }
@@ -1093,23 +1303,14 @@ impl Client {
 
     // ── Graceful Shutdown ─────────────────────────────────────────────
 
-    /// Gracefully shut down the communication layer.
-    ///
-    /// 1. Cancel all background tasks (heartbeat, stream, reconnection).
-    /// 2. Flush remaining buffered data (best-effort).
-    /// 3. Disconnect the gRPC client.
-    /// 4. Log shutdown completion.
     pub async fn shutdown(&self) {
         info!("Communication layer shutting down");
 
-        // 1. Cancel all background tasks.
         self.cancel_token.cancel();
         debug!("Cancellation token triggered — background tasks will stop");
 
-        // Small delay to let tasks observe the cancellation.
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
-        // 2. Flush remaining buffered data (best-effort).
         if self.grpc.is_connected().await {
             match self.flush_buffer().await {
                 Ok(()) => info!("Edge buffer flushed during shutdown"),
@@ -1119,10 +1320,8 @@ impl Client {
             debug!("Skipping buffer flush during shutdown (not connected)");
         }
 
-        // 3. Disconnect gRPC.
         self.grpc.disconnect().await;
 
-        // 4. Shutdown edge buffer (checkpoint SQLite WAL).
         self.buffer.shutdown();
 
         info!("Communication layer shutdown complete");
@@ -1130,22 +1329,18 @@ impl Client {
 
     // ── Accessors ─────────────────────────────────────────────────────
 
-    /// Get the cancellation token (for external shutdown coordination).
     pub fn cancel_token(&self) -> &CancellationToken {
         &self.cancel_token
     }
 
-    /// Get the edge buffer reference.
     pub fn buffer(&self) -> &EdgeBuffer {
         &self.buffer
     }
 
-    /// Get the compressor reference.
     pub fn compressor(&self) -> &Compressor {
         &self.compressor
     }
 
-    /// Get the flow control reference.
     pub fn flow_control(&self) -> &FlowControl {
         &self.flow_control
     }
@@ -1153,12 +1348,6 @@ impl Client {
 
 // ── Proto Conversion Helpers ───────────────────────────────────────────
 
-/// Convert an eBPF [`crate::ebpf::NetworkEvent`] to a proto
-/// [`crate::proto::paryty::v1::NetworkEvent`].
-///
-/// Maps each variant to the corresponding proto oneof variant.
-/// Fields not available in the eBPF data (e.g., bytes_sent/received for TCP,
-/// query_type for DNS) are set to sensible defaults (0, empty string).
 fn convert_network_event(
     event: &crate::ebpf::NetworkEvent,
 ) -> crate::proto::paryty::v1::NetworkEvent {
@@ -1252,10 +1441,6 @@ fn convert_network_event(
     }
 }
 
-/// Map a TCP state string (as produced by the eBPF/proc observers) to the
-/// proto [`crate::proto::paryty::v1::TcpState`] enumeration value.
-///
-/// Returns `TcpState::Unspecified` for unrecognized state strings.
 fn tcp_state_from_str(state: &str) -> crate::proto::paryty::v1::TcpState {
     use crate::proto::paryty::v1::TcpState;
     match state {
@@ -1269,35 +1454,22 @@ fn tcp_state_from_str(state: &str) -> crate::proto::paryty::v1::TcpState {
         "LAST_ACK" => TcpState::LastAck,
         "CLOSING" => TcpState::Closing,
         "LISTEN" => TcpState::Listen,
-        "CLOSED" => TcpState::Unspecified, // No direct proto equivalent; use Unspecified.
+        "CLOSED" => TcpState::Unspecified,
         _ => TcpState::Unspecified,
     }
 }
 
 // ── Helper Functions ───────────────────────────────────────────────────
 
-/// Get the system hostname.
-///
-/// Uses the `COMPUTERNAME` (Windows) or `HOSTNAME` (Unix) environment
-/// variable. Falls back to "unknown" if neither is set.
 fn get_hostname() -> String {
     std::env::var("COMPUTERNAME")
         .or_else(|_| std::env::var("HOSTNAME"))
         .unwrap_or_else(|_| "unknown".to_string())
 }
 
-/// Collect local non-loopback IP addresses.
-///
-/// Uses a UDP socket connect trick to discover the local IP that would
-/// route to a public address. This is a well-known cross-platform
-/// technique that works without elevated privileges.
-///
-/// On WSL2, falls back to reading the default gateway from `/proc/net/route`
-/// since the UDP trick may not resolve the host-side IP correctly.
 fn collect_local_ips() -> Vec<String> {
     let mut ips = Vec::new();
 
-    // Primary: UDP socket trick to find the outward-facing IP.
     if let Ok(socket) = std::net::UdpSocket::bind("0.0.0.0:0") {
         if socket.connect("8.8.8.8:80").is_ok() {
             if let Ok(addr) = socket.local_addr() {
@@ -1309,8 +1481,6 @@ fn collect_local_ips() -> Vec<String> {
         }
     }
 
-    // WSL2 fallback: read default gateway from /proc/net/route.
-    // The gateway is the Windows host, which the cluster may be running on.
     #[cfg(target_os = "linux")]
     if let Ok(content) = std::fs::read_to_string("/proc/net/route") {
         let is_wsl2 = std::fs::read_to_string("/proc/version")
@@ -1320,7 +1490,6 @@ fn collect_local_ips() -> Vec<String> {
             for line in content.lines().skip(1) {
                 let fields: Vec<&str> = line.split_whitespace().collect();
                 if fields.len() >= 3 && fields[1] == "00000000" && fields[2] != "00000000" {
-                    // Gateway is stored as little-endian hex.
                     if let Ok(gw) = u32::from_str_radix(fields[2], 16) {
                         let gateway_ip = format!(
                             "{}.{}.{}.{}",
@@ -1347,20 +1516,14 @@ fn collect_local_ips() -> Vec<String> {
 mod tests {
     use super::*;
 
-    /// Verify that collect_local_ips returns at least one address
-    /// (the loopback filter removes 127.x, but there should be
-    /// at least one non-loopback interface on most machines).
     #[test]
     fn test_collect_local_ips() {
         let ips = collect_local_ips();
-        // Not asserting non-empty — some CI machines may only have loopback.
-        // Just verify it doesn't panic.
         for ip in &ips {
             assert!(!ip.starts_with("127."), "loopback should be filtered: {}", ip);
         }
     }
 
-    /// Verify that Client::new succeeds with a test config.
     #[tokio::test]
     async fn test_client_new() {
         let config = test_config();
@@ -1372,7 +1535,72 @@ mod tests {
         assert!(!client.cancel_token().is_cancelled());
     }
 
-    /// Verify that shutdown triggers cancellation and is idempotent.
+    #[tokio::test]
+    async fn test_identity_unassigned_by_default() {
+        let config = test_config();
+        let client = Client::new(&config).await.expect("Client::new should succeed");
+
+        assert!(!client.is_identity_assigned());
+        assert!(client.get_twin_id().await.is_none());
+        assert!(client.get_client_id().await.is_none());
+        assert!(client.get_topic_prefix().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_apply_identity() {
+        let config = test_config();
+        let client = Client::new(&config).await.expect("Client::new should succeed");
+
+        assert!(!client.is_identity_assigned());
+
+        client
+            .apply_identity(
+                Some("twin-001".to_string()),
+                Some("client-001".to_string()),
+                Some("twin/twin-001/client/client-001".to_string()),
+            )
+            .await;
+
+        assert!(client.is_identity_assigned());
+        assert_eq!(client.get_twin_id().await.as_deref(), Some("twin-001"));
+        assert_eq!(client.get_client_id().await.as_deref(), Some("client-001"));
+        assert_eq!(
+            client.get_topic_prefix().await.as_deref(),
+            Some("twin/twin-001/client/client-001")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_apply_identity_clear() {
+        let config = test_config();
+        let client = Client::new(&config).await.expect("Client::new should succeed");
+
+        client
+            .apply_identity(
+                Some("twin-001".to_string()),
+                Some("client-001".to_string()),
+                Some("twin/twin-001/client/client-001".to_string()),
+            )
+            .await;
+        assert!(client.is_identity_assigned());
+
+        client.apply_identity(None, None, None).await;
+        assert!(!client.is_identity_assigned());
+        assert!(client.get_twin_id().await.is_none());
+        assert!(client.get_client_id().await.is_none());
+        assert!(client.get_topic_prefix().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_backlog_tracking() {
+        let config = test_config();
+        let client = Client::new(&config).await.expect("Client::new should succeed");
+
+        client.set_backlog_info(1024, 1700000000);
+        assert_eq!(client.backlog_bytes.load(Ordering::Relaxed), 1024);
+        assert_eq!(client.backlog_since_epoch.load(Ordering::Relaxed), 1700000000);
+    }
+
     #[tokio::test]
     async fn test_client_shutdown_cancels_token() {
         let config = test_config();
@@ -1385,31 +1613,25 @@ mod tests {
         assert!(client.cancel_token().is_cancelled());
     }
 
-    /// Verify that send_metrics buffers data when disconnected.
     #[tokio::test]
     async fn test_send_metrics_buffers_when_disconnected() {
         let config = test_config();
         let client = Client::new(&config).await.expect("Client::new should succeed");
 
-        // Send while disconnected — should buffer without error.
         client.send_metrics("cpu", b"{\"cpu\": 42.0}").await.expect("send_metrics should succeed");
 
-        // Edge buffer should have at least one entry.
         let count = client.buffer().len().await;
         assert!(count > 0, "edge buffer should contain buffered entry");
     }
 
-    /// Verify flush_buffer handles empty buffer gracefully.
     #[tokio::test]
     async fn test_flush_buffer_empty() {
         let config = test_config();
         let client = Client::new(&config).await.expect("Client::new should succeed");
 
-        // Flush empty buffer — should succeed without error.
         client.flush_buffer().await.expect("flush_buffer on empty buffer should succeed");
     }
 
-    /// Verify health_check returns false when not connected.
     #[tokio::test]
     async fn test_health_check_not_connected() {
         let config = test_config();
@@ -1419,7 +1641,6 @@ mod tests {
         assert!(!healthy, "health check should return false when disconnected");
     }
 
-    /// Verify tcp_state_from_str maps known states correctly.
     #[test]
     fn test_tcp_state_from_str() {
         use crate::proto::paryty::v1::TcpState;
@@ -1433,7 +1654,6 @@ mod tests {
         assert_eq!(tcp_state_from_str("UNKNOWN_STATE"), TcpState::Unspecified);
     }
 
-    /// Verify convert_network_event produces valid proto messages.
     #[test]
     fn test_convert_network_event_tcp() {
         use crate::ebpf::NetworkEvent;
@@ -1467,7 +1687,6 @@ mod tests {
         }
     }
 
-    /// Verify convert_network_event handles DnsQuery correctly.
     #[test]
     fn test_convert_network_event_dns() {
         use crate::ebpf::NetworkEvent;
@@ -1491,7 +1710,6 @@ mod tests {
         }
     }
 
-    /// Verify convert_network_event handles HttpRequest correctly.
     #[test]
     fn test_convert_network_event_http() {
         use crate::ebpf::NetworkEvent;
@@ -1523,7 +1741,6 @@ mod tests {
         }
     }
 
-    /// Verify send_network_events_proto buffers when disconnected.
     #[tokio::test]
     async fn test_send_network_events_proto_buffers_when_disconnected() {
         let config = test_config();
@@ -1539,7 +1756,6 @@ mod tests {
             process_name: "test".to_string(),
         }];
 
-        // Should succeed and buffer the events as JSON.
         client
             .send_network_events_proto(&events)
             .await
@@ -1549,13 +1765,15 @@ mod tests {
         assert!(count > 0, "edge buffer should contain buffered network events");
     }
 
-    /// Build a minimal test config.
     fn test_config() -> Config {
         Config {
             agent: crate::config::AgentConfig {
                 id: "test-agent".to_string(),
                 cluster_endpoint: "http://localhost:50051".to_string(),
                 api_key: "test-key".to_string(),
+                tenant_id: None,
+                twin_id: None,
+                client_id: None,
                 self_metrics: crate::config::SelfMetricsConfig { enabled: false, port: 9090 },
             },
             layers: crate::config::LayersConfig {

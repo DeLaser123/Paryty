@@ -92,6 +92,39 @@ func calcPercentile(values []float64, p float64) float64 {
 	return sorted[lower] + fraction*(sorted[upper]-sorted[lower])
 }
 
+// calcPercentileSorted computes the p-th percentile from an already-sorted
+// slice using linear interpolation. This avoids redundant sorting when
+// multiple percentiles are needed from the same data.
+// p must be in [0, 100]. Returns 0 for empty slices.
+func calcPercentileSorted(sorted []float64, p float64) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	if p < 0 {
+		p = 0
+	}
+	if p > 100 {
+		p = 100
+	}
+
+	if p == 0 {
+		return sorted[0]
+	}
+	if p == 100 {
+		return sorted[len(sorted)-1]
+	}
+
+	rank := (p / 100) * float64(len(sorted)-1)
+	lower := int(math.Floor(rank))
+	upper := int(math.Ceil(rank))
+	if lower == upper {
+		return sorted[lower]
+	}
+
+	fraction := rank - float64(lower)
+	return sorted[lower] + fraction*(sorted[upper]-sorted[lower])
+}
+
 // calcMedian computes the 50th percentile.
 func calcMedian(values []float64) float64 {
 	return calcPercentile(values, 50)

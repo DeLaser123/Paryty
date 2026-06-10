@@ -1,0 +1,43 @@
+apiVersion: v2
+name: paryty
+description: Paryty Observability Platform — unified monitoring, intelligence, and simulation
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+
+dependencies:
+  - name: paryty-agent
+    version: "0.1.0"
+    repository: "file://../paryty-agent"
+    condition: paryty-agent.enabled
+  - name: paryty-cluster
+    version: "0.1.0"
+    repository: "file://../paryty-cluster"
+    condition: paryty-cluster.enabled
+  - name: paryty-frontend
+    version: "0.1.0"
+    repository: "file://../paryty-frontend"
+    condition: paryty-frontend.enabled
+  - name: paryty-security
+    version: "0.1.0"
+    repository: "file://../paryty-security"
+    condition: paryty-security.enabled
+  - name: paryty-monitoring
+    version: "0.1.0"
+    repository: "file://../paryty-monitoring"
+    condition: paryty-monitoring.enabled
+  - name: paryty-storage
+    version: "0.1.0"
+    repository: "file://../paryty-storage"
+    condition: paryty-storage.enabled
+
+keywords:
+  - observability
+  - monitoring
+  - metrics
+  - tracing
+  - paryty
+
+maintainers:
+  - name: Paryty Team
+    email: engineering@paryty.io

@@ -103,9 +103,10 @@ export class TextureAtlas {
     g.drawRect(0, 0, 4, 4);
     g.endFill();
 
-    const texture = this.renderer.generateTexture(g, {
+    const texture = this.renderer.generateTexture({
+      target: g,
       resolution: 1,
-      region: new PIXI.Rectangle(0, 0, 4, 4),
+      frame: new PIXI.Rectangle(0, 0, 4, 4),
     });
     g.destroy();
 

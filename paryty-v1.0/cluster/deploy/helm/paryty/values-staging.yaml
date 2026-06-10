@@ -1,0 +1,43 @@
+# =============================================================================
+# Paryty Umbrella Chart — Staging Overrides
+# =============================================================================
+
+global:
+  environment: "staging"
+
+paryty-agent:
+  replicaCount: 2
+
+paryty-cluster:
+  query:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+  ingestion:
+    replicaCount: 2
+    resources:
+      requests:
+        cpu: 250m
+        memory: 256Mi
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+
+paryty-frontend:
+  replicaCount: 2
+
+paryty-storage:
+  postgresql:
+    persistence:
+      size: 20Gi
+  dragonfly:
+    persistence:
+      size: 10Gi
+  questdb:
+    persistence:
+      size: 50Gi

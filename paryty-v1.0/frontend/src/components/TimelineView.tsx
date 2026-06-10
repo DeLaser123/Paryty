@@ -1,4 +1,5 @@
 import { useTimeline } from '../hooks/useTimeline';
+import { ParytySelect } from './common/ParytySelect';
 
 export default function TimelineView() {
   const timeline = useTimeline();
@@ -8,24 +9,26 @@ export default function TimelineView() {
       <div className="view-header">
         <h2>Timeline</h2>
         <div className="view-controls">
-          <button onClick={() => timeline.play()} disabled={timeline.position.state === 'playing'}>
+          <button className="aef-btn aef-btn-inactive" onClick={() => timeline.play()} disabled={timeline.position.state === 'playing'}>
             Play
           </button>
-          <button onClick={() => timeline.pause()} disabled={timeline.position.state !== 'playing'}>
+          <button className="aef-btn aef-btn-inactive" onClick={() => timeline.pause()} disabled={timeline.position.state !== 'playing'}>
             Pause
           </button>
-          <button onClick={() => timeline.stop()}>Stop</button>
-          <select
-            value={timeline.config.speed}
-            onChange={(e) => timeline.setSpeed(Number(e.target.value) as 0.5 | 1 | 2 | 4 | 8 | 16)}
-          >
-            <option value="0.5">0.5x</option>
-            <option value="1">1x</option>
-            <option value="2">2x</option>
-            <option value="4">4x</option>
-            <option value="8">8x</option>
-            <option value="16">16x</option>
-          </select>
+          <button className="aef-btn aef-btn-inactive" onClick={() => timeline.stop()}>Stop</button>
+          <ParytySelect
+            options={[
+              { label: '0.5x', value: '0.5' },
+              { label: '1x', value: '1' },
+              { label: '2x', value: '2' },
+              { label: '4x', value: '4' },
+              { label: '8x', value: '8' },
+              { label: '16x', value: '16' },
+            ]}
+            value={String(timeline.config.speed)}
+            onChange={(val) => timeline.setSpeed(Number(val) as 0.5 | 1 | 2 | 4 | 8 | 16)}
+            placeholder="Speed"
+          />
           <input
             type="range"
             min={0}

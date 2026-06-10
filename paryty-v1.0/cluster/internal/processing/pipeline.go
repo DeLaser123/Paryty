@@ -11,14 +11,16 @@ package processing
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/paryty/paryty-v1.0/cluster/internal/config"
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
+	"github.com/paryty/paryty-v1.0/cluster/internal/pool"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -87,6 +89,137 @@ type PipelineHealth struct {
 	ErrorsTotal int64 `json:"errors_total"`
 }
 
+// MemoryStats holds current memory monitoring statistics.
+// Thread-safe: all fields are accessed via atomic operations or under the
+// monitor's lock.
+type MemoryStats struct {
+	// CurrentAlloc is the current process memory allocation in bytes (from runtime.MemStats).
+	CurrentAlloc int64
+
+	// PeakAlloc is the highest allocation observed since monitoring started.
+	PeakAlloc int64
+
+	// BreakerTrips is the number of times the circuit breaker has tripped.
+	BreakerTrips int64
+
+	// LastCheckTime is when the last memory check was performed.
+	LastCheckTime time.Time
+}
+
+// MemoryMonitor tracks process memory and manages the circuit breaker.
+// When memory exceeds 95% of MaxRAMBytes, the breaker opens and rejects
+// new messages until memory drops below 80% (the warning threshold).
+//
+// Thread-safe. Safe for concurrent use from multiple goroutines.
+type MemoryMonitor struct {
+	config      config.MemoryConfig
+	logger      *zap.Logger
+	breakerOpen atomic.Bool
+	stats       MemoryStats
+	mu          sync.RWMutex // protects stats
+}
+
+// NewMemoryMonitor creates a new memory monitor with the given configuration.
+// Call Start() to begin periodic memory checks in a background goroutine.
+func NewMemoryMonitor(cfg config.MemoryConfig, logger *zap.Logger) *MemoryMonitor {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
+	return &MemoryMonitor{
+		config: cfg,
+		logger: logger,
+	}
+}
+
+// Start begins periodic memory monitoring. It runs until ctx is cancelled.
+// This method blocks and should be called in a dedicated goroutine.
+func (m *MemoryMonitor) Start(ctx context.Context) {
+	ticker := time.NewTicker(m.config.CheckInterval)
+	defer ticker.Stop()
+
+	// Perform an initial check immediately on start.
+	m.check()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.check()
+		}
+	}
+}
+
+// check reads runtime memory stats and updates the circuit breaker state.
+// The breaker uses two thresholds:
+//   - 80% of MaxRAMBytes: warning (logged, breaker may close here)
+//   - 95% of MaxRAMBytes: breaker opens (rejects new messages)
+func (m *MemoryMonitor) check() {
+	var memStats runtime.MemStats
+	runtime.ReadMemStats(&memStats)
+
+	currentAlloc := int64(memStats.Alloc)
+
+	// Update stats under write lock.
+	m.mu.Lock()
+	m.stats.CurrentAlloc = currentAlloc
+	if currentAlloc > m.stats.PeakAlloc {
+		m.stats.PeakAlloc = currentAlloc
+	}
+	m.stats.LastCheckTime = time.Now()
+	m.mu.Unlock()
+
+	// Check thresholds against MaxRAMBytes.
+	maxRAM := m.config.MaxRAMBytes
+	warningThreshold := maxRAM * 80 / 100 // 80%
+	breakerThreshold := maxRAM * 95 / 100 // 95%
+
+	if currentAlloc > breakerThreshold {
+		if !m.breakerOpen.Load() {
+			m.breakerOpen.Store(true)
+			m.mu.Lock()
+			m.stats.BreakerTrips++
+			trips := m.stats.BreakerTrips
+			m.mu.Unlock()
+			m.logger.Error("memory circuit breaker OPEN — rejecting new messages",
+				zap.Int64("current_mb", currentAlloc/1024/1024),
+				zap.Int64("limit_mb", maxRAM/1024/1024),
+				zap.Int64("breaker_trips", trips),
+			)
+		}
+	} else if currentAlloc < warningThreshold {
+		if m.breakerOpen.Load() {
+			m.breakerOpen.Store(false)
+			m.logger.Info("memory circuit breaker CLOSED — resuming processing",
+				zap.Int64("current_mb", currentAlloc/1024/1024),
+				zap.Int64("limit_mb", maxRAM/1024/1024),
+			)
+		}
+	}
+
+	// Log warning when approaching the breaker threshold (80-95%).
+	if currentAlloc > warningThreshold && currentAlloc <= breakerThreshold {
+		m.logger.Warn("memory usage approaching limit",
+			zap.Int64("current_mb", currentAlloc/1024/1024),
+			zap.Int64("limit_mb", maxRAM/1024/1024),
+			zap.Int("percent", int(currentAlloc*100/maxRAM)),
+		)
+	}
+}
+
+// IsBreakerOpen returns true if the memory circuit breaker is open.
+// When open, the pipeline should reject new messages to prevent OOM.
+func (m *MemoryMonitor) IsBreakerOpen() bool {
+	return m.breakerOpen.Load()
+}
+
+// GetStats returns a snapshot of the current memory monitoring statistics.
+func (m *MemoryMonitor) GetStats() MemoryStats {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.stats
+}
+
 // Pipeline is the single-binary orchestrator that runs aggregator, correlator,
 // enricher, and downsampler as in-process stages. It consumes from Redpanda,
 // routes messages by topic through the processing pipeline, and publishes
@@ -94,17 +227,18 @@ type PipelineHealth struct {
 //
 // Thread-safe. All public methods are safe for concurrent use.
 type Pipeline struct {
-	config      PipelineConfig
-	aggregator  *Aggregator
-	correlator  *Correlator
-	enricher    *Enricher
-	downsampler *Downsampler
-	store       PipelineStore
-	producer    PipelineProducer
-	consumer    PipelineConsumer
-	dragonfly   DragonflyClient
-	logger      *zap.Logger
-	tenant      string
+	config         PipelineConfig
+	aggregator     *Aggregator
+	correlator     *Correlator
+	enricher       *Enricher
+	downsampler    *Downsampler
+	store          PipelineStore
+	producer       PipelineProducer
+	consumer       PipelineConsumer
+	dragonfly      DragonflyClient
+	logger         *zap.Logger
+	tenant         string
+	memoryMonitor  *MemoryMonitor
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -129,6 +263,7 @@ type Pipeline struct {
 //   - dragonfly: DragonflyClient for graph snapshot persistence. May be nil.
 //   - logger: structured logger. If nil, a no-op logger is used.
 //   - tenant: the tenant identifier for storage and publishing operations.
+//   - memConfig: memory budget configuration for the circuit breaker.
 func NewPipeline(
 	config PipelineConfig,
 	aggregator *Aggregator,
@@ -141,6 +276,7 @@ func NewPipeline(
 	dragonfly DragonflyClient,
 	logger *zap.Logger,
 	tenant string,
+	memConfig config.MemoryConfig,
 ) *Pipeline {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -150,26 +286,28 @@ func NewPipeline(
 	}
 
 	return &Pipeline{
-		config:      config,
-		aggregator:  aggregator,
-		correlator:  correlator,
-		enricher:    enricher,
-		downsampler: downsampler,
-		store:       store,
-		producer:    producer,
-		consumer:    consumer,
-		dragonfly:   dragonfly,
-		logger:      logger,
-		tenant:      tenant,
+		config:        config,
+		aggregator:    aggregator,
+		correlator:    correlator,
+		enricher:      enricher,
+		downsampler:   downsampler,
+		store:         store,
+		producer:      producer,
+		consumer:      consumer,
+		dragonfly:     dragonfly,
+		logger:        logger,
+		tenant:        tenant,
+		memoryMonitor: NewMemoryMonitor(memConfig, logger),
 	}
 }
 
 // Start launches all pipeline goroutines:
 //  1. Consumer: subscribe to input topics, route messages via processMessage.
-//  2. Window flush: periodic (1s) check for closed windows → aggregate → enrich → publish.
-//  3. Downsampler: periodic (1h) downsampling.
-//  4. Graph cleanup: periodic (1m) stale node removal.
-//  5. Snapshot: periodic (30s windows, 60s graph) Dragonfly snapshots.
+//  2. Memory monitor: periodic memory checks with circuit breaker.
+//  3. Window flush: periodic (1s) check for closed windows → aggregate → enrich → publish.
+//  4. Downsampler: periodic (1h) downsampling.
+//  5. Graph cleanup: periodic (1m) stale node removal.
+//  6. Snapshot: periodic (30s windows, 60s graph) Dragonfly snapshots.
 //
 // Returns an error if the consumer cannot be started.
 func (p *Pipeline) Start(ctx context.Context) error {
@@ -181,6 +319,13 @@ func (p *Pipeline) Start(ctx context.Context) error {
 		zap.Strings("topics", p.config.InputTopics),
 		zap.String("consumer_group", p.config.ConsumerGroup),
 	)
+
+	// Start the memory monitor in a background goroutine.
+	p.wg.Add(1)
+	go func() {
+		defer p.wg.Done()
+		p.memoryMonitor.Start(p.ctx)
+	}()
 
 	// Start the aggregator's window manager.
 	p.aggregator.Start(p.ctx)
@@ -254,10 +399,14 @@ func (p *Pipeline) Stop() {
 		p.producer.Close()
 	}
 
+	// Log final memory stats.
+	memStats := p.memoryMonitor.GetStats()
 	p.logger.Info("Pipeline stopped",
 		zap.Int64("messages_processed", p.processed.Load()),
 		zap.Int64("errors_total", p.errors.Load()),
 		zap.Duration("uptime", time.Since(p.startTime)),
+		zap.Int64("peak_memory_mb", memStats.PeakAlloc/1024/1024),
+		zap.Int64("breaker_trips", memStats.BreakerTrips),
 	)
 }
 
@@ -271,6 +420,10 @@ func (p *Pipeline) Health() PipelineHealth {
 			status = "degraded"
 		}
 	}
+	// If the circuit breaker is open, status is degraded.
+	if p.memoryMonitor.IsBreakerOpen() {
+		status = "degraded"
+	}
 
 	return PipelineHealth{
 		Status:            status,
@@ -278,6 +431,12 @@ func (p *Pipeline) Health() PipelineHealth {
 		MessagesProcessed: p.processed.Load(),
 		ErrorsTotal:       p.errors.Load(),
 	}
+}
+
+// MemoryMonitorRef returns the memory monitor for external inspection.
+// Used by the query API to expose memory stats.
+func (p *Pipeline) MemoryMonitorRef() *MemoryMonitor {
+	return p.memoryMonitor
 }
 
 // handleRecord is the topic-aware record handler for the consumer.
@@ -304,13 +463,19 @@ func (p *Pipeline) handleRecord(ctx context.Context, record *kgo.Record) error {
 // Tenant is extracted from the message key (format: "tenant_id:agent_id").
 // Falls back to p.tenant if the key does not contain a tenant prefix.
 func (p *Pipeline) processMessage(ctx context.Context, topic, key string, value []byte) error {
+	// Check circuit breaker before processing.
+	// When the breaker is open, reject messages to prevent OOM.
+	if p.memoryMonitor.IsBreakerOpen() {
+		return fmt.Errorf("memory circuit breaker open, rejecting message")
+	}
+
 	// Extract tenant from message key for multi-tenant routing.
 	tenant := extractTenantFromKey(key)
 
 	switch {
 	case strings.HasSuffix(topic, "metrics.raw"):
 		var batch models.MetricBatch
-		if err := json.Unmarshal(value, &batch); err != nil {
+		if err := pool.PooledJSONUnmarshal(value, &batch); err != nil {
 			p.logger.Warn("Failed to unmarshal MetricBatch",
 				zap.String("topic", topic),
 				zap.Error(err),
@@ -321,7 +486,7 @@ func (p *Pipeline) processMessage(ctx context.Context, topic, key string, value 
 
 	case strings.HasSuffix(topic, "network.events"):
 		var event models.NetworkEvent
-		if err := json.Unmarshal(value, &event); err != nil {
+		if err := pool.PooledJSONUnmarshal(value, &event); err != nil {
 			p.logger.Warn("Failed to unmarshal NetworkEvent",
 				zap.String("topic", topic),
 				zap.Error(err),
@@ -333,7 +498,7 @@ func (p *Pipeline) processMessage(ctx context.Context, topic, key string, value 
 
 	case strings.HasSuffix(topic, "traces"):
 		var span models.Span
-		if err := json.Unmarshal(value, &span); err != nil {
+		if err := pool.PooledJSONUnmarshal(value, &span); err != nil {
 			p.logger.Warn("Failed to unmarshal Span",
 				zap.String("topic", topic),
 				zap.Error(err),
@@ -356,10 +521,10 @@ func (p *Pipeline) processMessage(ctx context.Context, topic, key string, value 
 
 	case strings.HasSuffix(topic, "events"):
 		var events []models.Event
-		if err := json.Unmarshal(value, &events); err != nil {
+		if err := pool.PooledJSONUnmarshal(value, &events); err != nil {
 			// Try single event.
 			var single models.Event
-			if err2 := json.Unmarshal(value, &single); err2 != nil {
+			if err2 := pool.PooledJSONUnmarshal(value, &single); err2 != nil {
 				p.logger.Warn("Failed to unmarshal Events",
 					zap.String("topic", topic),
 					zap.Error(err),
@@ -612,7 +777,7 @@ func (p *Pipeline) runSnapshots() {
 }
 
 // extractTenantFromTopic extracts tenant from topic name.
-// "paryty.acme.metrics.raw" ? "acme"
+// "paryty.acme.metrics.raw" → "acme"
 func extractTenantFromTopic(topic string) string {
 	parts := strings.Split(topic, ".")
 	if len(parts) >= 3 && parts[0] == "paryty" {
@@ -622,7 +787,7 @@ func extractTenantFromTopic(topic string) string {
 }
 
 // extractTenantFromKey extracts tenant from partition key.
-// "tenant_id:agent_id" ? "tenant_id"
+// "tenant_id:agent_id" → "tenant_id"
 func extractTenantFromKey(key string) string {
 	parts := strings.SplitN(key, ":", 2)
 	if len(parts) >= 2 {

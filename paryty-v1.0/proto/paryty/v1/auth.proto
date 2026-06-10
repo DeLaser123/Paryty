@@ -1,0 +1,381 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "paryty/v1/common.proto";
+
+// ============================================================================
+// Auth Service — User authentication and token management
+// ============================================================================
+
+service AuthService {
+  // Register a new user account within a tenant.
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+
+  // Login with email + password, returns access token + refresh token.
+  rpc Login(LoginRequest) returns (LoginResponse);
+
+  // RefreshToken exchanges a refresh token for a new token pair.
+  rpc RefreshToken(RefreshTokenRequest) returns (LoginResponse);
+
+  // Logout revokes the refresh token.
+  rpc Logout(LogoutRequest) returns (google.protobuf.Empty);
+
+  // ValidateToken validates an access token and returns the user/tenant claims.
+  rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+message RegisterRequest {
+  string email = 1;
+  string password = 2;     // min 8 chars, must pass entropy check
+  string name = 3;
+  string plan_name = 4;    // "basic", "pro", "pro_plus"
+}
+
+message RegisterResponse {
+  string tenant_id = 1;
+  string user_id = 2;
+  string access_token = 3;
+  string refresh_token = 4;
+  int64 expires_in = 5;    // seconds until access token expires
+}
+
+message LoginRequest {
+  string email = 1;
+  string password = 2;
+}
+
+message LoginResponse {
+  string access_token = 1;
+  string refresh_token = 2;
+  int64 expires_in = 3;
+  UserInfo user = 4;
+}
+
+message RefreshTokenRequest {
+  string refresh_token = 1;
+}
+
+message LogoutRequest {
+  string refresh_token = 1;
+}
+
+message ValidateTokenRequest {
+  string access_token = 1;
+}
+
+message ValidateTokenResponse {
+  bool valid = 1;
+  string user_id = 2;
+  string tenant_id = 3;
+  string role = 4;
+  repeated string permissions = 5;
+  google.protobuf.Timestamp expires_at = 6;
+}
+
+message UserInfo {
+  string user_id = 1;
+  string tenant_id = 2;
+  string email = 3;
+  string name = 4;
+  string role = 5;
+  map<string, bool> permissions = 6;
+  google.protobuf.Timestamp created_at = 7;
+}
+
+// ============================================================================
+// User Service — Sub-user management (tenant admin operations)
+// ============================================================================
+
+service UserService {
+  rpc CreateSubUser(CreateSubUserRequest) returns (UserInfo);
+  rpc ListUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc GetUser(GetUserRequest) returns (UserInfo);
+  rpc UpdateUser(UpdateUserRequest) returns (UserInfo);
+  rpc DeleteUser(DeleteUserRequest) returns (google.protobuf.Empty);
+  rpc UpdatePermissions(UpdatePermissionsRequest) returns (UserInfo);
+}
+
+message CreateSubUserRequest {
+  string email = 1;
+  string password = 2;
+  string name = 3;
+  string role = 4;          // "admin", "operator", or "viewer"
+  map<string, bool> permissions = 5;
+}
+
+message ListUsersRequest {
+  PaginationRequest pagination = 1;
+}
+
+message ListUsersResponse {
+  repeated UserInfo users = 1;
+  PaginationResponse pagination = 2;
+}
+
+message GetUserRequest {
+  string user_id = 1;
+}
+
+message UpdateUserRequest {
+  string user_id = 1;
+  string name = 2;
+  string role = 3;
+  bool is_active = 4;
+}
+
+message DeleteUserRequest {
+  string user_id = 1;
+}
+
+message UpdatePermissionsRequest {
+  string user_id = 1;
+  map<string, bool> permissions = 2;
+}
+
+// ============================================================================
+// Plan Service — Plan listing and feature checking
+// ============================================================================
+
+service PlanService {
+  // ListPlans returns all creatable plans (for signup page).
+  rpc ListPlans(google.protobuf.Empty) returns (ListPlansResponse);
+
+  // GetCurrentPlan returns the authenticated tenant's active plan.
+  rpc GetCurrentPlan(google.protobuf.Empty) returns (PlanInfo);
+
+  // GetPlanFeatures returns the effective features for the authenticated tenant.
+  rpc GetPlanFeatures(google.protobuf.Empty) returns (PlanFeaturesResponse);
+}
+
+message ListPlansResponse {
+  repeated PlanInfo plans = 1;
+}
+
+message PlanInfo {
+  string name = 1;
+  string display_name = 2;
+  int32 max_twins = 3;
+  bool creatable = 4;
+  map<string, bool> features = 5;
+  PlanLimits limits = 6;
+  PlanQuotas quotas = 7;
+  // Current usage for the authenticated tenant (only in GetCurrentPlan).
+  PlanUsage usage = 8;
+}
+
+message PlanLimits {
+  int32 agents_per_twin = 1;
+  int32 data_retention_days = 2;
+  string metrics_resolution = 3;
+  int32 alert_rules_per_tenant = 4;
+  int32 sub_users = 5;
+}
+
+message PlanQuotas {
+  int64 ingestion_bytes_per_day = 1;
+  int32 query_requests_per_minute = 2;
+}
+
+message PlanUsage {
+  int32 twins_used = 1;
+  int32 twins_limit = 2;
+  int32 agents_used = 3;
+  int32 agents_limit = 4;
+  int32 users_used = 5;
+  int32 users_limit = 6;
+}
+
+message PlanFeaturesResponse {
+  map<string, bool> features = 1;
+}
+
+// ============================================================================
+// Twin Service — Paryty Twin lifecycle management
+// ============================================================================
+
+service TwinService {
+  // CreateTwin starts the twin creation wizard flow.
+  rpc CreateTwin(CreateTwinRequest) returns (TwinInfo);
+
+  // ListTwins returns all twins for the authenticated tenant.
+  rpc ListTwins(ListTwinsRequest) returns (ListTwinsResponse);
+
+  // GetTwin returns details for a specific twin.
+  rpc GetTwin(GetTwinRequest) returns (TwinInfo);
+
+  // UpdateTwin updates twin metadata.
+  rpc UpdateTwin(UpdateTwinRequest) returns (TwinInfo);
+
+  // DeleteTwin soft-deletes a twin and disassociates all agents.
+  rpc DeleteTwin(DeleteTwinRequest) returns (google.protobuf.Empty);
+
+  // GetTwinConfig returns the agent configuration for a twin.
+  // Called by agents during registration to discover their configuration.
+  rpc GetTwinConfig(GetTwinConfigRequest) returns (TwinConfig);
+
+  // ResolveIdentity is called by agents at boot to discover their
+  // assigned twin/client identity. Returns unassigned if no assignment exists.
+  rpc ResolveIdentity(ResolveIdentityRequest) returns (ResolveIdentityResponse);
+
+  // AssignAgentToTwin assigns an agent to a twin and pushes identity to the agent.
+  rpc AssignAgentToTwin(AssignAgentToTwinRequest) returns (AssignAgentToTwinResponse);
+
+  // ListTwinAgents returns all agents associated with a twin.
+  rpc ListTwinAgents(ListTwinAgentsRequest) returns (ListTwinAgentsResponse);
+
+  // AcceptBacklog instructs the agent to begin uploading its historical backlog.
+  rpc AcceptBacklog(AcceptBacklogRequest) returns (AcceptBacklogResponse);
+
+  // RejectBacklog instructs the agent to permanently delete its local backlog.
+  rpc RejectBacklog(RejectBacklogRequest) returns (RejectBacklogResponse);
+}
+
+message CreateTwinRequest {
+  string name = 1;
+  string description = 2;
+  TwinConfig config = 3;
+}
+
+message TwinInfo {
+  string id = 1;
+  string tenant_id = 2;
+  string name = 3;
+  string description = 4;
+  string status = 5;
+  int32 agent_count = 6;
+  TwinConfig config = 7;
+  google.protobuf.Timestamp created_at = 8;
+  google.protobuf.Timestamp updated_at = 9;
+}
+
+message TwinConfig {
+  // List of agent labels to auto-assign (e.g., {"env": "prod", "region": "us-east-1"}).
+  map<string, string> agent_labels = 1;
+  // Enabled collectors (e.g., ["cpu", "memory", "disk", "network", "ebpf"]).
+  repeated string enabled_collectors = 2;
+  // Collection interval in seconds.
+  int32 collection_interval_seconds = 3;
+  // Sampling rate (0.0 - 1.0).
+  float sampling_rate = 4;
+}
+
+message ListTwinsRequest {
+  PaginationRequest pagination = 1;
+}
+
+message ListTwinsResponse {
+  repeated TwinInfo twins = 1;
+  PaginationResponse pagination = 2;
+}
+
+message GetTwinRequest {
+  string twin_id = 1;
+}
+
+message UpdateTwinRequest {
+  string twin_id = 1;
+  string name = 2;
+  string description = 3;
+  TwinConfig config = 4;
+}
+
+message DeleteTwinRequest {
+  string twin_id = 1;
+}
+
+message GetTwinConfigRequest {
+  string twin_id = 1;
+  string agent_id = 2;
+}
+
+// ============================================================================
+// Agent Identity & Backlog Management Messages
+// ============================================================================
+
+message ResolveIdentityRequest {
+  // Agent ID requesting identity resolution.
+  string agent_id = 1;
+}
+
+message ResolveIdentityResponse {
+  // Whether the agent has an assigned twin.
+  bool assigned = 1;
+  // Assigned twin ID.
+  string twin_id = 2;
+  // Client/tenant ID.
+  string client_id = 3;
+  // Topic prefix for Redpanda routing (e.g., "clients.acme.twin_7a3f").
+  string topic_prefix = 4;
+}
+
+message AssignAgentToTwinRequest {
+  // Target twin ID.
+  string twin_id = 1;
+  // Agent ID to assign.
+  string agent_id = 2;
+}
+
+message AssignAgentToTwinResponse {
+  // Whether the assignment was accepted by the agent.
+  bool accepted = 1;
+  // Error message if assignment failed.
+  string error = 2;
+}
+
+message ListTwinAgentsRequest {
+  // Twin ID to list agents for.
+  string twin_id = 1;
+}
+
+message ListTwinAgentsResponse {
+  // Agents associated with this twin.
+  repeated TwinAgentInfo agents = 1;
+}
+
+message TwinAgentInfo {
+  // Agent identifier.
+  string agent_id = 1;
+  // Agent hostname.
+  string hostname = 2;
+  // Connection status: online, offline, connecting, error.
+  string status = 3;
+  // Backlog size in bytes (0 if no backlog).
+  int64 backlog_bytes = 4;
+  // When the agent last sent a heartbeat.
+  google.protobuf.Timestamp last_heartbeat = 5;
+  // Whether this agent is assigned to this twin.
+  bool assigned = 6;
+  // Agent operating system.
+  string os = 7;
+  // Agent CPU architecture.
+  string arch = 8;
+}
+
+message AcceptBacklogRequest {
+  // Twin ID.
+  string twin_id = 1;
+  // Agent ID with backlog to accept.
+  string agent_id = 2;
+}
+
+message AcceptBacklogResponse {
+  // Whether the backlog upload command was dispatched.
+  bool accepted = 1;
+}
+
+message RejectBacklogRequest {
+  // Twin ID.
+  string twin_id = 1;
+  // Agent ID with backlog to reject.
+  string agent_id = 2;
+}
+
+message RejectBacklogResponse {
+  // Whether the backlog deletion command was dispatched.
+  bool deleted = 1;
+}

@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-query
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.query.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: query
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: query
+    spec:
+      containers:
+        - name: query
+          image: "{{ .Values.global.imageRegistry | default "ghcr.io/paryty" }}/{{ .Values.query.image.repository }}:{{ .Values.query.image.tag }}"
+          imagePullPolicy: {{ .Values.query.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.query.service.port }}
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+          resources:
+            {{- toYaml .Values.query.resources | nindent 12 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-ingestion
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.ingestion.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: ingestion
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: ingestion
+    spec:
+      containers:
+        - name: ingestion
+          image: "{{ .Values.global.imageRegistry | default "ghcr.io/paryty" }}/{{ .Values.ingestion.image.repository }}:{{ .Values.ingestion.image.tag }}"
+          imagePullPolicy: {{ .Values.ingestion.image.pullPolicy }}
+          ports:
+            - name: grpc
+              containerPort: {{ .Values.ingestion.service.port }}
+          env:
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+          resources:
+            {{- toYaml .Values.ingestion.resources | nindent 12 }}

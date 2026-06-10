@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-monitoring
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: monitoring
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: monitoring
+    spec:
+      containers:
+        - name: monitoring
+          image: "{{ .Values.global.imageRegistry | default "ghcr.io/paryty" }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: CHECK_INTERVAL
+              value: {{ .Values.config.checkInterval | quote }}
+            - name: WEBHOOK_ALERT_URL
+              value: {{ .Values.config.webhookURL | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

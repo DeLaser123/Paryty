@@ -3032,6 +3032,34 @@ tenant:
 
 ---
 
+### 10.3 Pipeline Memory Budget
+
+| Metric | Target (10K agents) | Target (100K agents) | Notes |
+|---|---|---|---|
+| pipeline.exe RSS | < 1 GB | < 2 GB | Total process memory |
+| Per-agent RAM | < 20 KB | < 20 KB | Window buffers + state |
+| Goroutines per agent | < 1 | < 1 | Worker pool shared |
+| JSON cycles per message | 1 (unmarshal) + 1 (marshal) | same | Pooled operations |
+| Zstd encoder instances | pooled (max 4) | pooled (max 8) | sync.Pool reuse |
+| MaxBufferedRecords | 1,000 | 2,000 | Producer buffer |
+| EventBufferSize | 1,000 | 2,000 | Correlator ring buffer |
+| WindowBufferCapacity | 256 | 256 | Values per window |
+
+**Memory Optimization Techniques Applied:**
+1. Bounded goroutine worker pool (64 workers max)
+2. Pooled Zstd encoder/decoder (sync.Pool)
+3. Pooled JSON buffers (sync.Pool)
+4. Reduced window buffer capacity (10K ? 256)
+5. In-place percentile calculation
+6. Async cold store writes with bounded queue
+7. Lazy snapshot assembly with streaming
+8. Single Redis client (eliminated duplicate)
+9. Capped graph changes (5,000 max)
+10. Memory circuit breaker at 95% threshold
+
+**Verification:** Run `scripts/verify-perf-phase4.ps1` and monitor `pipeline.exe` RSS memory.
+
+
 ## 12. Appendices
 
 ### Appendix A: Dragonfly Key Schema (Phase 4 Additions)

@@ -72,8 +72,7 @@ const DEFAULT_NODE_SIZE = 15;
  */
 export class TopologyRenderer {
   private bridge: RenderBridge;
-  private container: HTMLElement;
-  /** Shared heavy-compute thread (force layout runs here). */
+  private container: HTMLElement;  /** Shared heavy-compute thread (force layout runs here). */
   private readonly processing: ProcessingClient = getProcessingClient();
   /**
    * Monotonic token incremented on every layout request. Async results from a
@@ -93,6 +92,15 @@ export class TopologyRenderer {
 
   /** Current topology reference. */
   private currentTopology: Topology | null = null;
+
+  /**
+   * SHA-1-style fingerprint of the current topology structure (sorted node
+   * IDs + edge pairs). Layout recomputation is skipped when this matches the
+   * incoming topology — i.e. when only metric/status metadata changed but no
+   * nodes or edges were added/removed. This prevents the 5-second polling
+   * interval from triggering an expensive layout pass on every poll cycle.
+   */
+  private structureFingerprint: string = '';
 
   /** Current cluster breadcrumb for drill-down navigation. */
   private clusterStack: string[] = [];
@@ -126,14 +134,23 @@ export class TopologyRenderer {
   /**
    * Sets a complete topology. Runs hierarchical layout and renders all nodes/edges.
    *
+   * Layout recomputation is skipped when the topology structure (node IDs and
+   * edge connections) has not changed since the last call — i.e. when the REST
+   * poll returned the same graph with only metric/status deltas. In that case
+   * only the metadata map is updated and re-sent to the renderer so health
+   * status colours stay current without paying the layout cost.
+   *
    * @param topology - Full topology data
    */
   setTopology(topology: Topology): void {
     if (this.disposed) return;
 
+    const incomingFingerprint = TopologyRenderer.computeStructureFingerprint(topology);
+    const structureUnchanged = incomingFingerprint === this.structureFingerprint;
+
     this.currentTopology = topology;
 
-    // Store node metadata (fixes the metadata loss bug)
+    // Always refresh the metadata map (status, name, size can change on every poll)
     for (const node of topology.nodes) {
       this.nodeMeta.set(node.id, {
         type: node.type,
@@ -142,6 +159,16 @@ export class TopologyRenderer {
         size: this.getNodeSize(node),
       });
     }
+
+    if (structureUnchanged && this.structureFingerprint !== '') {
+      // Structure identical — push only metadata-refreshed render data so
+      // node colours and labels stay current, but skip edge redraw entirely
+      // (edges don't change on status-only polls) and don't run layout.
+      this.reEmitMetadataOnly();
+      return;
+    }
+
+    this.structureFingerprint = incomingFingerprint;
 
     // Build layout data preserving type/status
     const layoutNodes: LayoutNode[] = topology.nodes.map((n) => ({
@@ -291,9 +318,26 @@ export class TopologyRenderer {
       height,
     });
 
+    // Invalidate fingerprint — canvas dimensions changed so layout must rerun.
+    this.structureFingerprint = '';
+
     // Re-run layout if topology is loaded
     if (this.currentTopology) {
       this.setTopology(this.currentTopology);
+    }
+  }
+
+  /**
+   * Forwards the current memory budget level to the render bridge.
+   *
+   * The main thread calls this after its own MemoryBudget sensor fires.
+   * The bridge implementation propagates it into the renderer (inline or
+   * worker) so the particle system and effect manager apply degradation even
+   * when performance.memory is unavailable in the worker context.
+   */
+  sendBudgetLevel(level: 'normal' | 'soft' | 'hard'): void {
+    if (!this.disposed) {
+      this.bridge.sendBudgetLevel(level);
     }
   }
 
@@ -309,6 +353,54 @@ export class TopologyRenderer {
     this.bridge.destroy();
     this.nodeMeta.clear();
     this.currentEdges.clear();
+    this.structureFingerprint = '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private — Structure fingerprint
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Computes a deterministic string fingerprint of the topology structure
+   * (node IDs and edge source→target pairs), ignoring metric/status values.
+   *
+   * Sorted before joining so insertion order does not affect equality.
+   * Pure function — takes the topology as argument to make it testable.
+   */
+  static computeStructureFingerprint(topology: Topology): string {
+    const nodeIds = topology.nodes.map((n) => n.id).sort().join(',');
+    const edgePairs = topology.edges
+      .map((e) => `${e.sourceId}>${e.targetId}`)
+      .sort()
+      .join(',');
+    return `${nodeIds}|${edgePairs}`;
+  }
+
+  /**
+   * Re-sends node metadata (status, label, type, size) with positions preserved.
+   * Called when structure is unchanged so health glow colors stay current
+   * without rerunning layout or redrawing edges (Task 12).
+   *
+   * Edges are skipped entirely — they don't change on status-only polls.
+   */
+  private reEmitMetadataOnly(): void {
+    if (this.nodeMeta.size === 0) return;
+
+    // Build node data from stored metadata. Positions are 0,0 placeholders;
+    // the renderer preserves last-computed positions for unchanged node IDs.
+    const nodeData = Array.from(this.nodeMeta.entries()).map(([id, meta]) => ({
+      id,
+      x: -0,  // negative zero signals "use existing position"
+      y: -0,
+      type: meta.type,
+      status: meta.status,
+      label: meta.name,
+      size: meta.size,
+    }));
+
+    // Skip edges entirely — they don't change on status-only polls
+    this.bridge.updateNodes(nodeData);
+    // NO updateEdges call — single Graphics is rebuilt only on structure change
   }
 
   // ---------------------------------------------------------------------------

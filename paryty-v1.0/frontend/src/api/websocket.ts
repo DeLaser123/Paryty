@@ -1,5 +1,6 @@
 // Auto-reconnecting WebSocket client for real-time data
-// Enhanced with dedup, batching, backpressure, priority channels, connection quality
+// Enhanced with dedup, batching, backpressure, priority channels, connection quality,
+// and auth token injection.
 
 export type WsMessageHandler = (data: unknown) => void;
 export type WsStateChangeHandler = (state: WsState) => void;
@@ -84,6 +85,8 @@ export class WebSocketClient {
   private maxReconnectAttempts: number;
   private heartbeatInterval: number;
   private intentionalClose = false;
+  /** Returns the current auth token, or null if not authenticated. */
+  private tokenGetter: (() => string | null) | null = null;
 
   // === Deduplication ===
   private recentMessageIds: Set<string> = new Set();
@@ -124,6 +127,33 @@ export class WebSocketClient {
     this.maxBatchSize = config.maxBatchSize ?? 500;
   }
 
+  /**
+   * Set a function that returns the current access token.
+   * The token will be appended as a query parameter on connect.
+   */
+  setTokenGetter(fn: (() => string | null) | null): void {
+    this.tokenGetter = fn;
+  }
+
+  /**
+   * Build the WebSocket connection URL with optional auth token.
+   */
+  private buildUrl(): string {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    let baseUrl = this.url.startsWith('ws') ? this.url : `${protocol}//${window.location.host}${this.url}`;
+
+    // Append auth token as query parameter
+    if (this.tokenGetter) {
+      const token = this.tokenGetter();
+      if (token) {
+        const separator = baseUrl.includes('?') ? '&' : '?';
+        baseUrl = `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
+      }
+    }
+
+    return baseUrl;
+  }
+
   connect(): void {
     if (this.ws?.readyState === WebSocket.OPEN) return;
 
@@ -131,8 +161,7 @@ export class WebSocketClient {
     this.setState('connecting');
 
     try {
-      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const url = this.url.startsWith('ws') ? this.url : `${protocol}//${window.location.host}${this.url}`;
+      const url = this.buildUrl();
       this.ws = new WebSocket(url);
     } catch {
       this.setState('disconnected');

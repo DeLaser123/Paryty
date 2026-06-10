@@ -879,3 +879,82 @@ func TestGraph_Stats(t *testing.T) {
 		}
 	})
 }
+
+// =============================================================================
+// TestGraph_ChangesCap
+// Verify the changes buffer is capped at maxGraphChanges (5000).
+// =============================================================================
+
+func TestGraph_ChangesCap(t *testing.T) {
+	t.Parallel()
+
+	g := NewDependencyGraph(nopLogger())
+	now := time.Now()
+
+	// Add 6000 nodes - each generates a "node_added" change.
+	for i := 0; i < 6000; i++ {
+		g.AddOrUpdateNode(&GraphNode{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("Node %d", i),
+			Type:      NodeTypeService,
+			AgentID:   "agent-1",
+			FirstSeen: now,
+			LastSeen:  now,
+		})
+	}
+
+	changes := g.GetChanges()
+	if len(changes) > maxGraphChanges {
+		t.Errorf("changes count %d exceeds maxGraphChanges %d", len(changes), maxGraphChanges)
+	}
+	if len(changes) != maxGraphChanges {
+		t.Errorf("expected exactly %d changes, got %d", maxGraphChanges, len(changes))
+	}
+}
+
+// =============================================================================
+// TestGraph_OldestChangesDropped
+// When the changes buffer overflows, the oldest changes should be evicted.
+// =============================================================================
+
+func TestGraph_OldestChangesDropped(t *testing.T) {
+	t.Parallel()
+
+	g := NewDependencyGraph(nopLogger())
+	now := time.Now()
+
+	// Add 6000 nodes - each generates a "node_added" change.
+	// The first 1000 changes (node-0 through node-999) should be evicted.
+	for i := 0; i < 6000; i++ {
+		g.AddOrUpdateNode(&GraphNode{
+			ID:        fmt.Sprintf("node-%d", i),
+			Name:      fmt.Sprintf("Node %d", i),
+			Type:      NodeTypeService,
+			AgentID:   "agent-1",
+			FirstSeen: now,
+			LastSeen:  now,
+		})
+	}
+
+	changes := g.GetChanges()
+	if len(changes) == 0 {
+		t.Fatal("expected changes, got none")
+	}
+
+	// The first retained change should be "node-1000" (the oldest 1000 dropped).
+	if changes[0].Node == nil {
+		t.Fatal("first change has nil Node")
+	}
+	if changes[0].Node.ID != "node-1000" {
+		t.Errorf("first change Node.ID = %q, want %q (oldest 1000 should be dropped)", changes[0].Node.ID, "node-1000")
+	}
+
+	// The last change should be "node-5999".
+	last := changes[len(changes)-1]
+	if last.Node == nil {
+		t.Fatal("last change has nil Node")
+	}
+	if last.Node.ID != "node-5999" {
+		t.Errorf("last change Node.ID = %q, want %q", last.Node.ID, "node-5999")
+	}
+}

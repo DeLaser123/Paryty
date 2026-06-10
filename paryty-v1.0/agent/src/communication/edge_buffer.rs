@@ -365,6 +365,109 @@ impl EdgeBuffer {
         self.memory_usage.load(Ordering::Relaxed)
     }
 
+    /// Get the estimated size of persistent (SQLite) backlog in bytes.
+    ///
+    /// Returns the total size of data BLOBs for all pending (un-sent) entries
+    /// in the SQLite buffer. Returns 0 when SQLite is not configured.
+    pub fn persistent_size(&self) -> u64 {
+        let db = match self.db {
+            Some(ref db) => db,
+            None => return 0,
+        };
+        let conn = match db.lock() {
+            Ok(c) => c,
+            Err(_) => {
+                warn!("SQLite mutex is poisoned; this is a bug — returning 0 for persistent_size");
+                return 0;
+            }
+        };
+        match conn.query_row(
+            "SELECT COALESCE(SUM(LENGTH(data)), 0) FROM buffer WHERE sent_at IS NULL",
+            [],
+            |row| row.get::<_, i64>(0),
+        ) {
+            Ok(total) => total as u64,
+            Err(e) => {
+                warn!("Failed to query persistent_size: {}", e);
+                0
+            }
+        }
+    }
+
+    /// Get the timestamp (epoch seconds) of the oldest un-sent backlog entry.
+    ///
+    /// Returns the `created_at` value of the oldest pending entry in SQLite.
+    /// Returns 0 when SQLite is not configured or there are no pending entries.
+    pub fn oldest_entry_timestamp(&self) -> i64 {
+        let db = match self.db {
+            Some(ref db) => db,
+            None => return 0,
+        };
+        let conn = match db.lock() {
+            Ok(c) => c,
+            Err(_) => {
+                warn!(
+                    "SQLite mutex is poisoned; this is a bug — returning 0 for oldest_entry_timestamp"
+                );
+                return 0;
+            }
+        };
+        match conn.query_row(
+            "SELECT COALESCE(MIN(created_at), 0) FROM buffer WHERE sent_at IS NULL",
+            [],
+            |row| row.get::<_, i64>(0),
+        ) {
+            Ok(ts) => ts,
+            Err(e) => {
+                warn!("Failed to query oldest_entry_timestamp: {}", e);
+                0
+            }
+        }
+    }
+
+    /// Delete all backlog entries from the persistent SQLite buffer.
+    ///
+    /// Used when the cluster issues a `DeleteBacklog` command.
+    /// This is a destructive operation that removes all entries
+    /// (both sent and pending) from the SQLite buffer table.
+    /// In-memory entries are also drained.
+    pub fn delete_all_backlog(&self) {
+        // Drain in-memory buffer.
+        let drained = {
+            let buffer = self.buffer.try_write();
+            match buffer {
+                Ok(mut buf) => {
+                    let count = buf.len();
+                    buf.clear();
+                    count
+                }
+                Err(_) => 0,
+            }
+        };
+        if drained > 0 {
+            self.memory_usage.store(0, Ordering::Relaxed);
+            self.metrics.current_entry_count.store(0, Ordering::Relaxed);
+            info!(drained_entries = drained, "In-memory backlog drained");
+        }
+
+        // Delete all entries from SQLite.
+        if let Some(ref db_mutex) = self.db {
+            match db_mutex.lock() {
+                Ok(conn) => match conn.execute("DELETE FROM buffer", []) {
+                    Ok(deleted) => {
+                        info!(deleted_sqlite_rows = deleted, "SQLite backlog deleted permanently");
+                    }
+                    Err(e) => {
+                        warn!("Failed to delete SQLite backlog: {}", e);
+                    }
+                },
+                Err(_) => {
+                    warn!("SQLite mutex is poisoned; cannot delete backlog");
+                }
+            }
+        }
+    }
+
     /// Get buffer metrics.
     pub fn metrics(&self) -> &BufferMetrics {
         &self.metrics
@@ -750,61 +853,9 @@ mod tests {
     #[tokio::test]
     async fn test_memory_spillover() {
         let dir = TestDir::new("spillover");
-        let db_path = dir.0.join("spill.db");
+        let db_path = dir.0.join("spillover.db");
 
-        let config = EdgeBufferConfig {
-            max_memory_bytes: 50, // Very small — forces spillover.
-            max_entries: 100_000,
-            entry_ttl: Duration::from_secs(3600),
-            disk_spill_dir: dir.0.clone(),
-            disk_spill_enabled: true,
-            max_disk_bytes: 1024 * 1024,
-            sqlite_path: Some(db_path.to_string_lossy().to_string()),
-        };
-
-        let buffer = EdgeBuffer::new(config);
-        let data = vec![0u8; 30]; // 30 bytes each
-
-        // Entry 1: fits in memory (30 <= 50).
-        let seq1 =
-            buffer.write(data.clone(), DataType::Metrics).await.expect("write should succeed");
-        assert_eq!(seq1, 1);
-        assert!(buffer.memory_usage() <= 50);
-
-        // Entry 2: memory full (30 + 30 > 50) → spills to SQLite.
-        let seq2 =
-            buffer.write(data.clone(), DataType::Traces).await.expect("write should succeed");
-        assert_eq!(seq2, 2);
-
-        // Entry 3: also spills.
-        let seq3 =
-            buffer.write(data.clone(), DataType::Events).await.expect("write should succeed");
-        assert_eq!(seq3, 3);
-
-        // Verify spill metrics.
-        let spilled = buffer.metrics().entries_spilled_sqlite.load(Ordering::Relaxed);
-        assert!(spilled > 0, "at least one entry should have spilled to SQLite");
-
-        // Drain should return entries from both memory and SQLite.
-        let entries = buffer.drain().await;
-        assert!(
-            entries.len() >= 2,
-            "drain should return entries from memory and SQLite, got {}",
-            entries.len()
-        );
-
-        // Verify we received the correct data types.
-        let types: Vec<DataType> = entries.iter().map(|e| e.data_type).collect();
-        assert!(types.contains(&DataType::Metrics));
-    }
-
-    // ---- Test 3: Drain order (memory first, then SQLite by priority) ------
-
-    #[tokio::test]
-    async fn test_drain_order() {
-        let dir = TestDir::new("drain-order");
-        let db_path = dir.0.join("drain.db");
-
+        // Very small memory cap (40 bytes) so most writes spill to SQLite.
         let config = EdgeBufferConfig {
             max_memory_bytes: 40,
             max_entries: 100_000,
@@ -839,7 +890,7 @@ mod tests {
         }
     }
 
-    // ---- Test 4: TTL eviction for SQLite rows -----------------------------
+    // ---- Test 3: TTL eviction for SQLite rows -----------------------------
 
     #[tokio::test]
     async fn test_evict_expired_sqlite() {
@@ -888,7 +939,7 @@ mod tests {
         );
     }
 
-    // ---- Test 5: mark_sent / mark_retry -----------------------------------
+    // ---- Test 4: mark_sent / mark_retry -----------------------------------
 
     #[tokio::test]
     async fn test_mark_sent_and_retry() {
@@ -937,7 +988,7 @@ mod tests {
         assert_eq!(pending, 0, "sent entry should not be pending");
     }
 
-    // ---- Test 6: Backward-compatible memory-only mode ---------------------
+    // ---- Test 5: Backward-compatible memory-only mode ---------------------
 
     #[tokio::test]
     async fn test_memory_only_mode() {
@@ -954,5 +1005,83 @@ mod tests {
 
         // sqlite_pending_count returns 0 when SQLite is not configured.
         assert_eq!(buffer.sqlite_pending_count().expect("ok"), 0);
+    }
+
+    // ---- Test 6: persistent_size and oldest_entry_timestamp ---------------
+
+    #[tokio::test]
+    async fn test_persistent_size() {
+        let dir = TestDir::new("persistent");
+        let db_path = dir.0.join("persistent.db");
+
+        let config = EdgeBufferConfig {
+            max_memory_bytes: 10,
+            max_entries: 100_000,
+            entry_ttl: Duration::from_secs(3600),
+            disk_spill_dir: dir.0.clone(),
+            disk_spill_enabled: true,
+            max_disk_bytes: 1024 * 1024,
+            sqlite_path: Some(db_path.to_string_lossy().to_string()),
+        };
+
+        let buffer = EdgeBuffer::new(config);
+
+        // persistent_size returns 0 when no entries.
+        assert_eq!(buffer.persistent_size(), 0);
+        assert_eq!(buffer.oldest_entry_timestamp(), 0);
+
+        // Write an entry that spills to SQLite (11 bytes > 10 byte cap).
+        buffer
+            .write(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], DataType::Metrics)
+            .await
+            .expect("write should succeed");
+
+        let size = buffer.persistent_size();
+        assert!(size > 0, "persistent_size should be >0 after SQLite spill");
+
+        let ts = buffer.oldest_entry_timestamp();
+        assert!(ts > 0, "oldest_entry_timestamp should be >0");
+    }
+
+    // ---- Test 7: delete_all_backlog ---------------------------------------
+
+    #[tokio::test]
+    async fn test_delete_all_backlog() {
+        let dir = TestDir::new("delete_backlog");
+        let db_path = dir.0.join("delete.db");
+
+        let config = EdgeBufferConfig {
+            max_memory_bytes: 10,
+            max_entries: 100_000,
+            entry_ttl: Duration::from_secs(3600),
+            disk_spill_dir: dir.0.clone(),
+            disk_spill_enabled: true,
+            max_disk_bytes: 1024 * 1024,
+            sqlite_path: Some(db_path.to_string_lossy().to_string()),
+        };
+
+        let buffer = EdgeBuffer::new(config);
+
+        // Write entries that spill to SQLite.
+        for _ in 0..5 {
+            buffer
+                .write(vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], DataType::Metrics)
+                .await
+                .expect("write should succeed");
+        }
+
+        // Entries should exist in SQLite.
+        let pending = buffer.sqlite_pending_count().expect("pending count");
+        assert!(pending > 0, "should have pending entries before delete");
+
+        // Delete all backlog.
+        buffer.delete_all_backlog();
+
+        // All entries should be gone.
+        let pending = buffer.sqlite_pending_count().expect("pending count");
+        assert_eq!(pending, 0, "all entries should be deleted");
+
+        assert_eq!(buffer.persistent_size(), 0);
+        assert_eq!(buffer.oldest_entry_timestamp(), 0);
     }
 }

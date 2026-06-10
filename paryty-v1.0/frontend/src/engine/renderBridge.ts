@@ -61,6 +61,15 @@ export interface RenderBridge {
   onNodeHover(callback: (id: string) => void): void;
   /** Tears down the renderer and frees all resources. */
   destroy(): void;
+  /**
+   * Forwards the current memory budget level to the renderer.
+   *
+   * The MemoryBudget sensor (performance.memory) is only reliable on the
+   * main thread. The main thread owns the monitor, derives the level, and
+   * calls this method so the renderer can apply degradation regardless of
+   * whether it lives on the main thread or inside a worker.
+   */
+  sendBudgetLevel(level: 'normal' | 'soft' | 'hard'): void;
 }
 
 /** Construction parameters shared by both bridge implementations. */
@@ -129,6 +138,14 @@ export class MainThreadRenderBridge implements RenderBridge {
 
   destroy(): void {
     this.app.destroy();
+  }
+
+  sendBudgetLevel(level: 'normal' | 'soft' | 'hard'): void {
+    if (level === 'normal') {
+      this.app.recoverBudget();
+    } else {
+      this.app.applyBudget(level);
+    }
   }
 }
 
@@ -258,6 +275,10 @@ export class WorkerRenderBridge implements RenderBridge {
 
   onNodeHover(callback: (id: string) => void): void {
     this.hoverCallback = callback;
+  }
+
+  sendBudgetLevel(level: 'normal' | 'soft' | 'hard'): void {
+    this.send({ type: 'budgetLevel', level });
   }
 
   destroy(): void {

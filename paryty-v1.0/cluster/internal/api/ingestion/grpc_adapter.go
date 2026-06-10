@@ -17,6 +17,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
 	pb "github.com/paryty/paryty-v1.0/cluster/internal/proto"
+	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -25,9 +26,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
-// gRPC metadata keys.
+// gRPC metadata keys (note: tenant is set by AuthInterceptor, NOT from metadata).
 const (
-	tenantMetadataKey      = "x-tenant-id"
+	twinMetadataKey        = "x-twin-id"
 	correlationMetadataKey = "x-correlation-id"
 )
 
@@ -41,6 +42,7 @@ type contextKey string
 
 const (
 	ctxKeyTenant        contextKey = "tenant"
+	ctxKeyTwinID        contextKey = "twin_id"
 	ctxKeyCorrelationID contextKey = "correlation_id"
 )
 
@@ -51,6 +53,15 @@ func TenantFromContext(ctx context.Context) string {
 		return t
 	}
 	return "default"
+}
+
+// TwinIDFromContext extracts the twin ID stored in ctx.
+// Returns empty string if no twin ID is set.
+func TwinIDFromContext(ctx context.Context) string {
+	if id, ok := ctx.Value(ctxKeyTwinID).(string); ok {
+		return id
+	}
+	return ""
 }
 
 // CorrelationIDFromContext extracts the correlation ID stored in ctx.
@@ -65,31 +76,48 @@ func CorrelationIDFromContext(ctx context.Context) string {
 // IngestionGRPCAdapter wraps IngestionService to implement the gRPC IngestionServiceServer interface.
 type IngestionGRPCAdapter struct {
 	pb.UnimplementedIngestionServiceServer
-	svc         *IngestionService
-	logger      *zap.Logger
-	rateLimiter *RateLimiter
+	svc            *IngestionService
+	logger         *zap.Logger
+	rateLimiter    *RateLimiter
+	agentAssigner  *twin.AgentAssigner
+	backlogManager *twin.BacklogManager
+	commandManager *twin.CommandManager
 }
 
 // NewIngestionGRPCAdapter creates a new gRPC adapter for the ingestion service.
 // If rateLimiter is nil, rate limiting is disabled.
-func NewIngestionGRPCAdapter(svc *IngestionService, logger *zap.Logger, rateLimiter *RateLimiter) *IngestionGRPCAdapter {
+// If agentAssigner is nil, twin-aware registration is skipped (graceful degradation).
+func NewIngestionGRPCAdapter(
+	svc *IngestionService,
+	logger *zap.Logger,
+	rateLimiter *RateLimiter,
+	agentAssigner *twin.AgentAssigner,
+	backlogManager *twin.BacklogManager,
+	commandManager *twin.CommandManager,
+) *IngestionGRPCAdapter {
 	return &IngestionGRPCAdapter{
-		svc:         svc,
-		logger:      logger,
-		rateLimiter: rateLimiter,
+		svc:            svc,
+		logger:         logger,
+		rateLimiter:    rateLimiter,
+		agentAssigner:  agentAssigner,
+		backlogManager: backlogManager,
+		commandManager: commandManager,
 	}
 }
 
-// enrichContext extracts tenant and correlation ID from gRPC metadata
-// and stores them in the returned context. Also logs the correlation ID.
+// enrichContext enriches the context with twin ID and correlation ID from gRPC
+// metadata. The tenant MUST already be set by AuthInterceptor — enrichContext
+// MUST NOT read x-tenant-id from metadata to prevent cross-tenant injection
+// (a malicious client could supply an API key for tenant A but claim tenant B
+// via x-tenant-id).
 func (a *IngestionGRPCAdapter) enrichContext(ctx context.Context) context.Context {
-	tenant := "default"
+	twinID := ""
 	correlationID := ""
 
 	md, ok := metadata.FromIncomingContext(ctx)
 	if ok {
-		if vals := md.Get(tenantMetadataKey); len(vals) > 0 && vals[0] != "" {
-			tenant = vals[0]
+		if vals := md.Get(twinMetadataKey); len(vals) > 0 && vals[0] != "" {
+			twinID = vals[0]
 		}
 		if vals := md.Get(correlationMetadataKey); len(vals) > 0 && vals[0] != "" {
 			correlationID = vals[0]
@@ -100,7 +128,8 @@ func (a *IngestionGRPCAdapter) enrichContext(ctx context.Context) context.Contex
 		correlationID = uuid.New().String()
 	}
 
-	ctx = context.WithValue(ctx, ctxKeyTenant, tenant)
+	// Only set twin_id and correlation_id; tenant is owned by AuthInterceptor.
+	ctx = context.WithValue(ctx, ctxKeyTwinID, twinID)
 	ctx = context.WithValue(ctx, ctxKeyCorrelationID, correlationID)
 
 	return ctx
@@ -215,6 +244,66 @@ func (a *IngestionGRPCAdapter) RegisterAgent(ctx context.Context, req *pb.AgentR
 		return nil, status.Errorf(codes.Internal, "register agent: %v", err)
 	}
 
+	// ── Phase 8: Record agent registration for dashboard visibility ──
+	// Every agent registration is tracked so operators can see unassigned
+	// agents and assign them to twins.
+	if a.agentAssigner != nil {
+		if err := a.agentAssigner.UpsertAgentRegistration(ctx, req.AgentId, tenant, req.Hostname, req.ClientId); err != nil {
+			a.logger.Warn("Failed to record agent registration",
+				zap.String("agent_id", req.AgentId),
+				zap.Error(err),
+			)
+		}
+	}
+
+	// ── Phase 8: Twin-aware agent registration ──
+	// If the agent connects with a twin_id in gRPC metadata, auto-assign
+	// the agent to its twin. This is the agent-driven discovery pattern:
+	// user creates twin → gets twin_id → installs agent with twin_id →
+	// agent auto-registers to twin on first connection.
+	twinID := TwinIDFromContext(ctx)
+	// Also check proto field (agent may send twin_id in registration body).
+	if twinID == "" && req.TwinId != "" {
+		twinID = req.TwinId
+	}
+	if twinID != "" && a.agentAssigner != nil {
+		// Derive client_id and topic_prefix.
+		clientID := req.ClientId
+		if clientID == "" {
+			clientID = fmt.Sprintf("client_%s", tenant[:min(12, len(tenant))])
+		}
+		topicPrefix := fmt.Sprintf("clients.%s.twin_%s", clientID, twinID[:min(8, len(twinID))])
+
+		if _, err := a.agentAssigner.RegisterAgent(ctx, req.AgentId, twinID, tenant, clientID, topicPrefix); err != nil {
+			a.logger.Warn("Failed to auto-assign agent to twin",
+				zap.String("correlation_id", correlationID),
+				zap.String("agent_id", req.AgentId),
+				zap.String("twin_id", twinID),
+				zap.String("tenant", tenant),
+				zap.Error(err),
+			)
+			// Non-fatal: agent registration succeeds even if twin assignment fails.
+		} else {
+			a.logger.Info("Agent auto-assigned to twin",
+				zap.String("correlation_id", correlationID),
+				zap.String("agent_id", req.AgentId),
+				zap.String("twin_id", twinID),
+				zap.String("tenant", tenant),
+			)
+		}
+	}
+
+	// ── Phase 8: Resolve identity for registration response ──
+	var identityAssigned bool
+	var respTwinID, respClientID string
+	if a.agentAssigner != nil {
+		if identity, err := a.agentAssigner.GetAgentIdentity(ctx, req.AgentId); err == nil && identity.Assigned {
+			identityAssigned = true
+			respTwinID = identity.TwinID
+			respClientID = identity.ClientID
+		}
+	}
+
 	// Convert domain response to proto
 	return &pb.AgentRegistrationResponse{
 		SessionId:  agent.ID + "-" + fmt.Sprintf("%d", time.Now().UnixNano()),
@@ -228,6 +317,9 @@ func (a *IngestionGRPCAdapter) RegisterAgent(ctx context.Context, req *pb.AgentR
 			Compression:          "zstd",
 			MaxBatchSize:         100,
 			MaxBatchAgeMs:        10000,
+			IdentityAssigned:     identityAssigned,
+			TwinId:               respTwinID,
+			ClientId:             respClientID,
 		},
 	}, nil
 }
@@ -299,9 +391,44 @@ func (a *IngestionGRPCAdapter) Heartbeat(ctx context.Context, req *pb.HeartbeatR
 		return nil, status.Errorf(codes.NotFound, "heartbeat: %v", err)
 	}
 
+	// ── Phase 8: Update backlog info ──
+	if a.agentAssigner != nil && a.backlogManager != nil && req.BacklogBytes > 0 {
+		identity, err := a.agentAssigner.GetAgentIdentity(ctx, req.AgentId)
+		if err == nil && identity.Assigned {
+			if err := a.backlogManager.UpsertBacklog(ctx, req.AgentId, identity.TwinID, req.BacklogBytes, req.BacklogSinceEpoch); err != nil {
+				a.logger.Warn("Failed to update backlog info",
+					zap.String("correlation_id", correlationID),
+					zap.String("agent_id", req.AgentId),
+					zap.Error(err),
+				)
+			}
+		}
+	}
+
+	// ── Phase 8: Dequeue pending commands ──
+	var pendingCommands []*pb.AgentCommand
+	if a.commandManager != nil {
+		cmds, err := a.commandManager.DequeueCommands(ctx, req.AgentId)
+		if err != nil {
+			a.logger.Warn("Failed to dequeue commands",
+				zap.String("correlation_id", correlationID),
+				zap.String("agent_id", req.AgentId),
+				zap.Error(err),
+			)
+		} else {
+			for _, cmd := range cmds {
+				pendingCommands = append(pendingCommands, &pb.AgentCommand{
+					Type:    pb.AgentCommandType(cmd.CommandType),
+					Payload: cmd.Payload,
+				})
+			}
+		}
+	}
+
 	return &pb.HeartbeatResponse{
 		ServerTime:      timestamppb.Now(),
 		ContinueSending: true,
+		PendingCommands: pendingCommands,
 	}, nil
 }
 

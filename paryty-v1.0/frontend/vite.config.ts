@@ -1,40 +1,40 @@
-﻿import { defineConfig } from 'vite'
+﻿import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 
 // https://vitejs.dev/config/
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    host: '0.0.0.0',
-    port: 3000,
-    headers: {
-      'Cross-Origin-Opener-Policy': 'same-origin',
-      'Cross-Origin-Embedder-Policy': 'require-corp',
-    },
-    proxy: {
-      '/api': {
-        target: 'http://localhost:28082',
-        changeOrigin: true,
+export default defineConfig(({ mode }) => {
+  // Load env from frontend/.env (or parent) — VITE_API_URL / VITE_WS_URL
+  // default to 127.0.0.1:8080 matching the Go query service default port.
+  const env = loadEnv(mode, process.cwd(), '');
+  const apiTarget = env.VITE_API_URL || 'http://127.0.0.1:8080';
+  const wsTarget = env.VITE_WS_URL || 'ws://127.0.0.1:8080';
+
+  return {
+    plugins: [react()],
+    server: {
+      host: '0.0.0.0',
+      port: 3000,
+      headers: {
+        'Cross-Origin-Opener-Policy': 'same-origin',
+        'Cross-Origin-Embedder-Policy': 'require-corp',
       },
-      '/ws': {
-        target: 'ws://localhost:28082',
-        ws: true,
-      },
-    },
-  },
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
-    rollupOptions: {
-      output: {
-        manualChunks: {
-          'vendor-pixi': ['pixi.js', '@pixi/particle-emitter'],
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-charts': ['recharts'],
-          'vendor-state': ['zustand'],
-          'vendor-motion': ['framer-motion'],
+      proxy: {
+        '/api': {
+          target: apiTarget,
+          changeOrigin: true,
+        },
+        '/ws': {
+          target: wsTarget,
+          ws: true,
         },
       },
     },
-  },
+    build: {
+      outDir: 'dist',
+      sourcemap: true,
+    },
+    worker: {
+      format: 'es',
+    },
+  };
 })

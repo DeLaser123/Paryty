@@ -4,10 +4,10 @@ package stream
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
+	"github.com/paryty/paryty-v1.0/cluster/internal/pool"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.uber.org/zap"
 )
@@ -43,7 +43,10 @@ func NewProducer(cfg Config, logger *zap.Logger) (*Producer, error) {
 		// Delivery timeout for the entire produce request lifecycle.
 		kgo.ProduceRequestTimeout(30 * time.Second),
 		// Bound the in-memory record buffer to prevent unbounded memory growth.
-		kgo.MaxBufferedRecords(10000),
+		// Reduced from 10,000 to 1,000 — 1K records at ~1 KB each = 1 MB buffer.
+		// With 5ms linger time the producer flushes frequently enough.
+		// Saves up to 9 MB of buffered record memory under backpressure.
+		kgo.MaxBufferedRecords(1000),
 	}
 
 	client, err := kgo.NewClient(opts...)
@@ -56,7 +59,7 @@ func NewProducer(cfg Config, logger *zap.Logger) (*Producer, error) {
 		zap.Int("brokers", len(cfg.Brokers)),
 		zap.Bool("idempotent", true),
 		zap.String("compression", "zstd"),
-		zap.Int("max_buffered_records", 10000),
+		zap.Int("max_buffered_records", 1000),
 	)
 
 	return &Producer{
@@ -75,7 +78,7 @@ func (p *Producer) Close() {
 // This method is kept for backward compatibility with callers that do not
 // have tenant context. Prefer PublishTenant for tenant-scoped writes.
 func (p *Producer) Publish(ctx context.Context, topic string, key string, value interface{}) error {
-	data, err := json.Marshal(value)
+	data, err := pool.PooledJSONMarshal(value)
 	if err != nil {
 		return fmt.Errorf("marshal value: %w", err)
 	}
@@ -111,7 +114,7 @@ func (p *Producer) PublishTenant(ctx context.Context, topic, tenantID, agentID s
 		return fmt.Errorf("agentID must not be empty")
 	}
 
-	data, err := json.Marshal(value)
+	data, err := pool.PooledJSONMarshal(value)
 	if err != nil {
 		return fmt.Errorf("marshal value: %w", err)
 	}
@@ -162,7 +165,7 @@ func (p *Producer) PublishTenantBatch(ctx context.Context, topic string, entries
 			return fmt.Errorf("entry[%d]: agentID must not be empty", i)
 		}
 
-		data, err := json.Marshal(entry.Value)
+		data, err := pool.PooledJSONMarshal(entry.Value)
 		if err != nil {
 			return fmt.Errorf("entry[%d] marshal value: %w", i, err)
 		}
@@ -197,7 +200,7 @@ func (p *Producer) PublishBatch(ctx context.Context, topic string, messages []Me
 
 	records := make([]*kgo.Record, 0, len(messages))
 	for _, msg := range messages {
-		data, err := json.Marshal(msg.Value)
+		data, err := pool.PooledJSONMarshal(msg.Value)
 		if err != nil {
 			return fmt.Errorf("marshal value: %w", err)
 		}

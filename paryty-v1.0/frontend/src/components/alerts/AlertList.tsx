@@ -10,6 +10,7 @@
 import { memo, useCallback, useState } from 'react';
 import { useAlertsStore, type AlertGroupBy } from '../../stores/alertsStore';
 import { AlertCard } from './AlertCard';
+import { ParytySelect } from '../common/ParytySelect';
 import type { Alert, AlertState } from '../../types/alert';
 
 /**
@@ -33,25 +34,22 @@ export const AlertList = memo(function AlertList() {
   const [useGroups, setUseGroups] = useState(false);
 
   const handleFilterState = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const val = e.target.value;
+    (val: string) => {
       setFilterState(val ? (val as AlertState) : null);
     },
     [setFilterState],
   );
 
   const handleFilterSeverity = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const val = e.target.value;
+    (val: string) => {
       setFilterSeverity(val || null);
     },
     [setFilterSeverity],
   );
 
   const handleGroupBy = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const val = e.target.value as AlertGroupBy;
-      setGroupBy(val);
+    (val: string) => {
+      setGroupBy(val as AlertGroupBy);
       setUseGroups(true);
     },
     [setGroupBy],
@@ -74,40 +72,45 @@ export const AlertList = memo(function AlertList() {
     <div className="alert-list-container" data-testid="alert-list">
       {/* Filters */}
       <div className="alert-list__filters">
-        <select
+        <ParytySelect
+          options={[
+            { label: 'All states', value: '' },
+            { label: 'Firing', value: 'firing' },
+            { label: 'Pending', value: 'pending' },
+            { label: 'Resolved', value: 'resolved' },
+            { label: 'Silenced', value: 'silenced' },
+          ]}
           value={filterState ?? ''}
           onChange={handleFilterState}
-          data-testid="alert-filter-state"
-        >
-          <option value="">All states</option>
-          <option value="firing">Firing</option>
-          <option value="pending">Pending</option>
-          <option value="resolved">Resolved</option>
-          <option value="silenced">Silenced</option>
-        </select>
-        <select
+          placeholder="All states"
+          testId="alert-filter-state"
+        />
+        <ParytySelect
+          options={[
+            { label: 'All severities', value: '' },
+            { label: 'Critical', value: 'critical' },
+            { label: 'Warning', value: 'warning' },
+            { label: 'Info', value: 'info' },
+          ]}
           value={filterSeverity ?? ''}
           onChange={handleFilterSeverity}
-          data-testid="alert-filter-severity"
-        >
-          <option value="">All severities</option>
-          <option value="critical">Critical</option>
-          <option value="warning">Warning</option>
-          <option value="info">Info</option>
-        </select>
-        <select
+          placeholder="All severities"
+          testId="alert-filter-severity"
+        />
+        <ParytySelect
+          options={[
+            { label: 'Group by Severity', value: 'severity' },
+            { label: 'Group by Rule', value: 'rule' },
+            { label: 'Group by Node', value: 'node' },
+          ]}
           value={groupBy}
           onChange={handleGroupBy}
-          data-testid="alert-group-by"
-        >
-          <option value="severity">Group by Severity</option>
-          <option value="rule">Group by Rule</option>
-          <option value="node">Group by Node</option>
-        </select>
+          testId="alert-group-by"
+        />
       </div>
 
       {/* Alert list */}
-      <div className="alert-list__items aef-scroll">
+      <div className="alert-list__items aef-scroll-thin">
         {filteredAlerts.length === 0 && (
           <div className="aef-viz-well" data-testid="alert-list-empty">
             <span className="aef-viz-well__label">No alerts matching filters</span>

@@ -25,7 +25,7 @@ func newTestAdapter() *IngestionGRPCAdapter {
 	svc := &IngestionService{
 		agents: sync.Map{},
 	}
-	return NewIngestionGRPCAdapter(svc, newTestLogger(), nil)
+	return NewIngestionGRPCAdapter(svc, newTestLogger(), nil, nil, nil, nil)
 }
 
 func newTestAdapterWithRateLimit(maxPerMinute int) (*IngestionGRPCAdapter, *RateLimiter) {
@@ -33,7 +33,7 @@ func newTestAdapterWithRateLimit(maxPerMinute int) (*IngestionGRPCAdapter, *Rate
 		agents: sync.Map{},
 	}
 	rl := NewRateLimiter(maxPerMinute)
-	adapter := NewIngestionGRPCAdapter(svc, newTestLogger(), rl)
+	adapter := NewIngestionGRPCAdapter(svc, newTestLogger(), rl, nil, nil, nil)
 	return adapter, rl
 }
 
@@ -73,15 +73,19 @@ func TestEnrichContext_WithMetadata(t *testing.T) {
 	adapter := newTestAdapter()
 
 	md := metadata.Pairs(
-		tenantMetadataKey, "tenant-a",
+		twinMetadataKey, "twin-1",
 		correlationMetadataKey, "corr-42",
 	)
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
 	enriched := adapter.enrichContext(ctx)
 
-	if got := TenantFromContext(enriched); got != "tenant-a" {
-		t.Errorf("expected tenant 'tenant-a', got %q", got)
+	// enrichContext no longer sets tenant (tenant is owned by AuthInterceptor).
+	if got := TenantFromContext(enriched); got != "default" {
+		t.Errorf("expected tenant 'default' (not set by enrichContext), got %q", got)
+	}
+	if got := TwinIDFromContext(enriched); got != "twin-1" {
+		t.Errorf("expected twin 'twin-1', got %q", got)
 	}
 	if got := CorrelationIDFromContext(enriched); got != "corr-42" {
 		t.Errorf("expected correlation 'corr-42', got %q", got)
@@ -110,13 +114,17 @@ func TestEnrichContext_NoMetadata_GeneratesCorrelationID(t *testing.T) {
 func TestEnrichContext_EmptyMetadataValues_DefaultsApplied(t *testing.T) {
 	adapter := newTestAdapter()
 
-	// Empty tenant should still get default
-	md := metadata.Pairs(tenantMetadataKey, "")
+	// Empty twin_id should result in empty twin context value.
+	md := metadata.Pairs(twinMetadataKey, "")
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
 	enriched := adapter.enrichContext(ctx)
+	// Tenant is not set by enrichContext — AuthInterceptor owns it.
 	if got := TenantFromContext(enriched); got != "default" {
-		t.Errorf("expected tenant 'default' for empty value, got %q", got)
+		t.Errorf("expected tenant 'default', got %q", got)
+	}
+	if got := TwinIDFromContext(enriched); got != "" {
+		t.Errorf("expected empty twin ID for empty value, got %q", got)
 	}
 }
 
@@ -367,7 +375,7 @@ func TestNewIngestionGRPCAdapter(t *testing.T) {
 	logger := newTestLogger()
 	rl := NewRateLimiter(100)
 
-	adapter := NewIngestionGRPCAdapter(svc, logger, rl)
+	adapter := NewIngestionGRPCAdapter(svc, logger, rl, nil, nil, nil)
 
 	if adapter.svc == nil {
 		t.Fatal("adapter service is nil")
@@ -378,11 +386,14 @@ func TestNewIngestionGRPCAdapter(t *testing.T) {
 	if adapter.rateLimiter == nil {
 		t.Fatal("adapter rate limiter is nil")
 	}
+	if adapter.agentAssigner != nil {
+		t.Fatal("expected nil agent assigner")
+	}
 }
 
 func TestNewIngestionGRPCAdapter_NilRateLimiter(t *testing.T) {
 	svc := &IngestionService{agents: sync.Map{}}
-	adapter := NewIngestionGRPCAdapter(svc, newTestLogger(), nil)
+	adapter := NewIngestionGRPCAdapter(svc, newTestLogger(), nil, nil, nil, nil)
 
 	if adapter.rateLimiter != nil {
 		t.Fatal("expected nil rate limiter")
@@ -452,15 +463,19 @@ func TestSendBatch_CorrelationIDFromMetadata(t *testing.T) {
 
 	md := metadata.Pairs(
 		correlationMetadataKey, "test-corr-id-123",
-		tenantMetadataKey, "tenant-z",
+		twinMetadataKey, "twin-z",
 	)
 	ctx := metadata.NewIncomingContext(context.Background(), md)
 
 	// Test enrichment directly — enrichContext doesn't touch the service layer.
 	enriched := adapter.enrichContext(ctx)
 
-	if got := TenantFromContext(enriched); got != "tenant-z" {
-		t.Errorf("expected tenant 'tenant-z', got %q", got)
+	// enrichContext no longer reads tenant from metadata (tenant owned by AuthInterceptor).
+	if got := TenantFromContext(enriched); got != "default" {
+		t.Errorf("expected tenant 'default' (not set by enrichContext), got %q", got)
+	}
+	if got := TwinIDFromContext(enriched); got != "twin-z" {
+		t.Errorf("expected twin 'twin-z', got %q", got)
 	}
 	if got := CorrelationIDFromContext(enriched); got != "test-corr-id-123" {
 		t.Errorf("expected correlation 'test-corr-id-123', got %q", got)

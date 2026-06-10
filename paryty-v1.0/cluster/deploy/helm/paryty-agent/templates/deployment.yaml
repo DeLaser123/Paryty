@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "paryty.name" . }}-agent
+  labels:
+    {{- include "paryty.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "paryty.selectorLabels" . | nindent 6 }}
+      component: agent
+  template:
+    metadata:
+      labels:
+        {{- include "paryty.selectorLabels" . | nindent 8 }}
+        component: agent
+    spec:
+      serviceAccountName: {{ include "paryty.serviceAccountName" . }}
+      containers:
+        - name: agent
+          image: "{{ .Values.global.imageRegistry | default "ghcr.io/paryty" }}/{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.service.port }}
+          env:
+            - name: CLUSTER_ENDPOINT
+              value: {{ .Values.config.clusterEndpoint | quote }}
+            - name: LOG_LEVEL
+              value: {{ .Values.config.logLevel | quote }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}

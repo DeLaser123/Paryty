@@ -1,5 +1,6 @@
 # Paryty CD Pipeline
 # Builds and pushes container images on main branch
+# Includes: Trivy vulnerability scanning, SLSA provenance, Helm chart publishing
 
 name: CD
 
@@ -22,6 +23,12 @@ env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/paryty
 
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+  actions: read
+
 jobs:
   # ──────────────────────────────────────────────────────────────
   # Build Container Images
@@ -29,9 +36,12 @@ jobs:
   build-cluster:
     name: Build Cluster Image
     runs-on: ubuntu-latest
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
     permissions:
       contents: read
       packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -48,19 +58,25 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
       - uses: docker/build-push-action@v5
+        id: build
         with:
           context: cluster
           file: deploy/docker/Dockerfile.cluster
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
 
   build-frontend:
     name: Build Frontend Image
     runs-on: ubuntu-latest
+    outputs:
+      image-digest: ${{ steps.build.outputs.digest }}
     permissions:
       contents: read
       packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -77,12 +93,154 @@ jobs:
             type=ref,event=branch
             type=semver,pattern={{version}}
       - uses: docker/build-push-action@v5
+        id: build
         with:
           context: frontend
           file: deploy/docker/Dockerfile.frontend
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          provenance: true
+          sbom: true
+
+  # ──────────────────────────────────────────────────────────────
+  # Container Scanning with Trivy
+  # ──────────────────────────────────────────────────────────────
+  scan-cluster:
+    name: Scan Cluster Image (Trivy)
+    runs-on: ubuntu-latest
+    needs: build-cluster
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-cluster:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-cluster-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-cluster-results.sarif'
+          category: 'trivy-cluster'
+
+  scan-frontend:
+    name: Scan Frontend Image (Trivy)
+    runs-on: ubuntu-latest
+    needs: build-frontend
+    permissions:
+      contents: read
+      packages: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-frontend:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-frontend-results.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-frontend-results.sarif'
+          category: 'trivy-frontend'
+
+  # ──────────────────────────────────────────────────────────────
+  # SLSA Provenance Generation
+  # ──────────────────────────────────────────────────────────────
+  slsa-provenance:
+    name: Generate SLSA Provenance
+    runs-on: ubuntu-latest
+    needs: [build-cluster, build-frontend]
+    permissions:
+      id-token: write
+      contents: write
+      packages: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate SLSA provenance for cluster image
+        uses: slsa-framework/slsa-github-generator/.github/workflows/generator_container_slsa3.yml@v2.0.0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}-cluster
+          digest: ${{ needs.build-cluster.outputs.image-digest }}
+          registry-username: ${{ github.actor }}
+        env:
+          ACTIONS_RUNTIME_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        continue-on-error: true
+
+  # ──────────────────────────────────────────────────────────────
+  # Helm Chart Packaging and Publishing
+  # ──────────────────────────────────────────────────────────────
+  helm-package:
+    name: Package and Publish Helm Charts
+    runs-on: ubuntu-latest
+    needs: [build-cluster, build-frontend]
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.14.0'
+
+      - name: Update Helm dependencies
+        run: |
+          cd cluster/deploy/helm/paryty
+          helm dependency update
+
+      - name: Lint Helm chart
+        run: |
+          helm lint cluster/deploy/helm/paryty
+          helm lint cluster/deploy/helm/paryty-agent
+          helm lint cluster/deploy/helm/paryty-cluster
+          helm lint cluster/deploy/helm/paryty-frontend
+          helm lint cluster/deploy/helm/paryty-security
+          helm lint cluster/deploy/helm/paryty-monitoring
+          helm lint cluster/deploy/helm/paryty-storage
+
+      - name: Package Helm charts
+        run: |
+          mkdir -p helm-packages
+          helm package cluster/deploy/helm/paryty-agent --destination helm-packages
+          helm package cluster/deploy/helm/paryty-cluster --destination helm-packages
+          helm package cluster/deploy/helm/paryty-frontend --destination helm-packages
+          helm package cluster/deploy/helm/paryty-security --destination helm-packages
+          helm package cluster/deploy/helm/paryty-monitoring --destination helm-packages
+          helm package cluster/deploy/helm/paryty-storage --destination helm-packages
+          helm package cluster/deploy/helm/paryty --destination helm-packages
+
+      - name: Upload Helm packages as artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-charts
+          path: helm-packages/*.tgz
+
+      - name: Login to GitHub Container Registry (OCI)
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push Helm charts to OCI registry
+        run: |
+          for chart in helm-packages/*.tgz; do
+            chart_name=$(basename "$chart" .tgz | sed 's/-[0-9].*$//')
+            helm push "$chart" "oci://${{ env.REGISTRY }}/${{ github.repository_owner }}/helm-charts"
+          done
 
   # ──────────────────────────────────────────────────────────────
   # Deploy to Dev (Automatic on main)
@@ -90,7 +248,7 @@ jobs:
   deploy-dev:
     name: Deploy to Dev
     runs-on: ubuntu-latest
-    needs: [build-cluster, build-frontend]
+    needs: [scan-cluster, scan-frontend, slsa-provenance, helm-package]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     environment: dev
     steps:

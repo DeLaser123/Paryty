@@ -12,6 +12,8 @@ import { useLocation } from 'react-router-dom';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
 import { StatusBar } from './StatusBar';
+import { TimelineDrawerBar } from './TimelineDrawerBar';
+import { ContextMenuProvider } from './ContextMenu';
 import { useParticleStore } from '../../stores/particleStore';
 
 /** Props for the AppShell component. */
@@ -31,7 +33,9 @@ interface AppShellProps {
  * │          │                               │
  * │          │         Main Content          │
  * │          │                               │
- *          ├───────────────────────────────┤
+ * │          ├───────────────────────────────┤
+ * │          │    TimelineDrawerBar (topo)   │
+ * │          ├───────────────────────────────┤
  * │          │         StatusBar             │
  * └──────────┴───────────────────────────────┘
  * ```
@@ -39,6 +43,7 @@ interface AppShellProps {
 export function AppShell({ children }: AppShellProps) {
   const location = useLocation();
   const transportMode = useParticleStore((s) => s.transportMode);
+  const isTopology = location.pathname === '/topology';
 
   // Toggle transport mode class on #root for CSS saturation degradation
   useLayoutEffect(() => {
@@ -61,8 +66,12 @@ export function AppShell({ children }: AppShellProps) {
       <div className="app-shell__main-wrapper">
         <Header />
         <main className="app-shell__content">
-          {children}
+          <ContextMenuProvider>
+            {children}
+          </ContextMenuProvider>
         </main>
+        {/* Timeline drawer bar — retractable, only on topology page */}
+        {isTopology && <TimelineDrawerBar />}
         <StatusBar />
       </div>
     </div>

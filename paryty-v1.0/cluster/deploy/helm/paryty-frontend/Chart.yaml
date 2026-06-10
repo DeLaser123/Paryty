@@ -1,0 +1,6 @@
+apiVersion: v2
+name: paryty-frontend
+description: Paryty Frontend — web UI dashboard
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

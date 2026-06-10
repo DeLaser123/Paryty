@@ -455,6 +455,17 @@ export class InstancedNodeRenderer {
     return this.spatialIndex.getPosition(id);
   }
 
+  /**
+   * Gets the PIXI.Sprite for a node (for per-frame alpha pulsing).
+   *
+   * @param id - Node identifier
+   * @returns PIXI.Sprite or null if not found
+   */
+  getNodeSprite(id: string): PIXI.Sprite | null {
+    const pooled = this.activeSprites.get(id);
+    return pooled?.sprite ?? null;
+  }
+
   /** Returns the number of currently rendered (active) nodes. */
   get activeNodeCount(): number {
     return this.activeSprites.size;

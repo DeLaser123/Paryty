@@ -151,7 +151,7 @@ cluster:
   storage:
     hot:
       # Runtime connection config
-      addr: "host.containers.internal:6379"
+      addr: "localhost:6379"
       password: ""
       db: 0
       pool_size: 10
@@ -173,14 +173,14 @@ cluster:
       memory: "16Gi"
     warm:
       # Runtime connection config
-      addr: "host.containers.internal:8812"
-      ilp_addr: "host.containers.internal:9009"
+      addr: "localhost:8812"
+      ilp_addr: "localhost:9009"
       database: "paryty"
       username: "admin"
       password: "quest"
       max_conns: 20
       ilp:
-        addr: "host.containers.internal:9009"
+        addr: "localhost:9009"
         buffer_size: 10000
         flush_interval: "1s"
       rest:
@@ -228,7 +228,7 @@ cluster:
         size: "500Gi"
     cold:
       # Runtime connection config
-      endpoint: "host.containers.internal:8333"
+      endpoint: "localhost:8333"
       access_key: "minioadmin"
       secret_key: "minioadmin"
       use_ssl: false

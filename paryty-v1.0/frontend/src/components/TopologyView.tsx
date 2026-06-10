@@ -57,11 +57,23 @@ export default function TopologyView() {
       </div>
       <div ref={containerRef} className="topology-canvas" />
       {selectedNode && (
-        <div className="detail-panel">
-          <h3>{selectedNode.name}</h3>
-          <p>Type: {selectedNode.type}</p>
-          <p>Status: {selectedNode.status}</p>
-          <pre>{JSON.stringify(selectedNode.labels, null, 2)}</pre>
+        <div className="detail-panel aef-container-card">
+          <div className="aef-container-card__header">
+            <span className="aef-container-card__title aef-truncate">{selectedNode.name}</span>
+          </div>
+          <div className="aef-container-card__body aef-scroll-thin">
+            <div className="aef-stat-module">
+              <span className="aef-stat-module__label">Type</span>
+              <span className="aef-stat-module__value">{selectedNode.type}</span>
+            </div>
+            <div className="aef-stat-module">
+              <span className="aef-stat-module__label">Status</span>
+              <span className="aef-stat-module__value">{selectedNode.status}</span>
+            </div>
+            <pre style={{ fontFamily: 'var(--aef-font-body)', fontSize: 10, color: 'var(--aef-text-secondary)', whiteSpace: 'pre-wrap' }}>
+              {JSON.stringify(selectedNode.labels, null, 2)}
+            </pre>
+          </div>
         </div>
       )}
     </div>

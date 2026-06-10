@@ -1,0 +1,22 @@
+replicaCount: 1
+
+image:
+  repository: paryty-frontend
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 3000
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 128Mi
+
+config:
+  apiEndpoint: "http://paryty-cluster-query:8080"
+  wsEndpoint: "ws://paryty-cluster-query:8080/ws"

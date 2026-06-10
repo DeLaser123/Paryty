@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -43,7 +44,7 @@ func NewAPIKeyManager(pool *pgxpool.Pool, logger *zap.Logger) *APIKeyManager {
 // The raw key is returned exactly once ("pk_live_" + 64 hex chars). Only a
 // bcrypt hash and the first 16 characters (prefix) are persisted. The caller
 // must relay the raw key to the tenant -- it cannot be recovered later.
-func (m *APIKeyManager) GenerateKey(ctx context.Context, tenantID string) (rawKey string, keyID string, err error) {
+func (m *APIKeyManager) GenerateKey(ctx context.Context, tenantID, name string) (rawKey string, keyID string, err error) {
 	if tenantID == "" {
 		return "", "", fmt.Errorf("generate key: tenant_id must not be empty")
 	}
@@ -67,9 +68,9 @@ func (m *APIKeyManager) GenerateKey(ctx context.Context, tenantID string) (rawKe
 	keyID = uuid.New().String()
 
 	_, err = m.pool.Exec(ctx,
-		`INSERT INTO api_keys (key_id, tenant_id, key_hash, key_prefix)
-		 VALUES ($1, $2, $3, $4)`,
-		keyID, tenantID, string(hash), prefix,
+		`INSERT INTO api_keys (key_id, tenant_id, name, key_hash, key_prefix)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		keyID, tenantID, name, string(hash), prefix,
 	)
 	if err != nil {
 		return "", "", fmt.Errorf("store api key: %w", err)
@@ -78,6 +79,7 @@ func (m *APIKeyManager) GenerateKey(ctx context.Context, tenantID string) (rawKe
 	m.logger.Info("API key generated",
 		zap.String("key_id", keyID),
 		zap.String("tenant_id", tenantID),
+		zap.String("name", name),
 		zap.String("key_prefix", prefix),
 	)
 
@@ -157,7 +159,7 @@ func (m *APIKeyManager) ListKeys(ctx context.Context, tenantID string) ([]APIKey
 	}
 
 	rows, err := m.pool.Query(ctx,
-		`SELECT key_id, tenant_id, key_prefix, created_at, revoked_at
+		`SELECT key_id, tenant_id, name, key_prefix, created_at, revoked_at
 		 FROM api_keys
 		 WHERE tenant_id = $1
 		 ORDER BY created_at DESC`,
@@ -171,8 +173,15 @@ func (m *APIKeyManager) ListKeys(ctx context.Context, tenantID string) ([]APIKey
 	keys := make([]APIKey, 0)
 	for rows.Next() {
 		var k APIKey
-		if err := rows.Scan(&k.KeyID, &k.TenantID, &k.KeyPrefix, &k.CreatedAt, &k.RevokedAt); err != nil {
+		var createdAt time.Time
+		var revokedAt *time.Time
+		if err := rows.Scan(&k.KeyID, &k.TenantID, &k.Name, &k.KeyPrefix, &createdAt, &revokedAt); err != nil {
 			return nil, fmt.Errorf("scan api key: %w", err)
+		}
+		k.CreatedAt = createdAt.Format(time.RFC3339)
+		if revokedAt != nil {
+			s := revokedAt.Format(time.RFC3339)
+			k.RevokedAt = &s
 		}
 		keys = append(keys, k)
 	}

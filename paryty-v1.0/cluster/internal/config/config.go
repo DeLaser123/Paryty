@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -184,6 +185,49 @@ type DownsamplerConfig struct {
 	RunInterval time.Duration      `yaml:"run_interval"`
 }
 
+// MemoryConfig configures memory budget and circuit breaker for the pipeline.
+// These settings control bounded resource usage and prevent OOM conditions
+// in high-throughput scenarios.
+type MemoryConfig struct {
+	// MaxRAMBytes is the maximum allowed process memory in bytes.
+	// The circuit breaker opens when memory exceeds 95% of this limit.
+	// Default: 1 GB (1 << 30).
+	MaxRAMBytes int64 `yaml:"max_ram_bytes"`
+
+	// GoroutinePoolSize is the maximum number of concurrent worker goroutines.
+	// Defaults to runtime.NumCPU() * 2, capped at 64.
+	GoroutinePoolSize int `yaml:"goroutine_pool_size"`
+
+	// WindowBufferCapacity is the maximum number of values per aggregation window.
+	// Reduced from 10K to 256 to save memory (256 values × ~16 bytes = ~4KB per window).
+	// Default: 256.
+	WindowBufferCapacity int `yaml:"window_buffer_capacity"`
+
+	// EventBufferSize is the ring buffer capacity for correlator events.
+	// Sized for 30s correlation window (~1K events).
+	// Default: 1000.
+	EventBufferSize int `yaml:"event_buffer_size"`
+
+	// MaxBufferedRecords is the maximum number of records buffered in the producer.
+	// Prevents unbounded memory growth when downstream is slow.
+	// Default: 1000.
+	MaxBufferedRecords int `yaml:"max_buffered_records"`
+
+	// GraphChangesCap is the capacity of the graph changes channel.
+	// Caps topology change events to prevent memory spikes during high churn.
+	// Default: 5000.
+	GraphChangesCap int `yaml:"graph_changes_cap"`
+
+	// CircuitBreakerEnabled controls whether the memory circuit breaker is active.
+	// When enabled, the pipeline rejects new messages when memory exceeds 95% of MaxRAMBytes.
+	// Default: true (set in YAML, defaults to false in Go zero-value).
+	CircuitBreakerEnabled bool `yaml:"circuit_breaker_enabled"`
+
+	// CheckInterval is how often the memory monitor checks process memory.
+	// Default: 10s.
+	CheckInterval time.Duration `yaml:"check_interval"`
+}
+
 // ProcessingConfig holds all processing pipeline configuration.
 type ProcessingConfig struct {
 	Pipeline    PipelineConfig           `yaml:"pipeline"`
@@ -191,6 +235,7 @@ type ProcessingConfig struct {
 	Correlator  CorrelatorPipelineConfig  `yaml:"correlator"`
 	Enricher    EnricherPipelineConfig    `yaml:"enricher"`
 	Downsampler DownsamplerConfig         `yaml:"downsampler"`
+	Memory      MemoryConfig              `yaml:"memory"`
 }
 
 // Load reads a YAML file at path, applies defaults, and then applies
@@ -386,7 +431,7 @@ func applyDefaults(cfg *Config) {
 		cfg.Cluster.Processing.Correlator.GraphSnapshotInterval = 60 * time.Second
 	}
 	if cfg.Cluster.Processing.Correlator.EventBufferSize == 0 {
-		cfg.Cluster.Processing.Correlator.EventBufferSize = 10000
+		cfg.Cluster.Processing.Correlator.EventBufferSize = 1000
 	}
 	if cfg.Cluster.Processing.Correlator.CorrelationWindow == 0 {
 		cfg.Cluster.Processing.Correlator.CorrelationWindow = 30 * time.Second
@@ -415,6 +460,49 @@ func applyDefaults(cfg *Config) {
 			{SourceWindow: "5m", TargetWindow: "1h", RetentionDays: 30},
 			{SourceWindow: "1h", TargetWindow: "1d", RetentionDays: 90},
 		}
+	}
+
+	// Memory budget defaults.
+	// MaxRAMBytes: 1 GB — conservative default for pipeline.exe process memory.
+	// Allows room for OS and other processes while providing enough headroom
+	// for burst traffic.
+	if cfg.Cluster.Processing.Memory.MaxRAMBytes == 0 {
+		cfg.Cluster.Processing.Memory.MaxRAMBytes = 1 << 30 // 1 GB
+	}
+	// GoroutinePoolSize: CPU * 2, capped at 64.
+	// Balances parallelism with context-switching overhead. The cap prevents
+	// runaway goroutine creation on high-core machines.
+	if cfg.Cluster.Processing.Memory.GoroutinePoolSize == 0 {
+		cfg.Cluster.Processing.Memory.GoroutinePoolSize = runtime.NumCPU() * 2
+		if cfg.Cluster.Processing.Memory.GoroutinePoolSize > 64 {
+			cfg.Cluster.Processing.Memory.GoroutinePoolSize = 64
+		}
+	}
+	// WindowBufferCapacity: 256 values per window.
+	// 256 × ~16 bytes = ~4KB per window. With 4 window sizes × N agents,
+	// this bounds total window memory predictably.
+	if cfg.Cluster.Processing.Memory.WindowBufferCapacity == 0 {
+		cfg.Cluster.Processing.Memory.WindowBufferCapacity = 256
+	}
+	// EventBufferSize: 1000 events for correlator ring buffer.
+	// Sized for 30s correlation window — ~33 events/sec is typical load.
+	if cfg.Cluster.Processing.Memory.EventBufferSize == 0 {
+		cfg.Cluster.Processing.Memory.EventBufferSize = 1000
+	}
+	// MaxBufferedRecords: 1000 records in producer buffer.
+	// Prevents unbounded memory growth when Redpanda is slow or unavailable.
+	if cfg.Cluster.Processing.Memory.MaxBufferedRecords == 0 {
+		cfg.Cluster.Processing.Memory.MaxBufferedRecords = 1000
+	}
+	// GraphChangesCap: 5000 graph change events.
+	// Caps topology change channel to prevent memory spikes during service churn.
+	if cfg.Cluster.Processing.Memory.GraphChangesCap == 0 {
+		cfg.Cluster.Processing.Memory.GraphChangesCap = 5000
+	}
+	// CheckInterval: 10 seconds between memory checks.
+	// Frequent enough to catch memory spikes, infrequent to avoid overhead.
+	if cfg.Cluster.Processing.Memory.CheckInterval == 0 {
+		cfg.Cluster.Processing.Memory.CheckInterval = 10 * time.Second
 	}
 }
 
@@ -446,6 +534,18 @@ func applyEnvOverrides(cfg *Config) {
 
 	if v := os.Getenv("PARYTY_SEAWEEDFS_ENDPOINT"); v != "" {
 		cfg.Cluster.Storage.Cold.Endpoint = v
+	}
+
+	if v := os.Getenv("PARYTY_SEAWEEDFS_ACCESS_KEY"); v != "" {
+		cfg.Cluster.Storage.Cold.AccessKey = v
+	}
+
+	if v := os.Getenv("PARYTY_SEAWEEDFS_SECRET_KEY"); v != "" {
+		cfg.Cluster.Storage.Cold.SecretKey = v
+	}
+
+	if v := os.Getenv("PARYTY_SEAWEEDFS_USE_SSL"); v != "" {
+		cfg.Cluster.Storage.Cold.UseSSL = strings.EqualFold(v, "true") || v == "1"
 	}
 }
 

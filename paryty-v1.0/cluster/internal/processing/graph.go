@@ -19,6 +19,11 @@ import (
 // graphSnapshotKey is the Dragonfly key for persisted graph state.
 const graphSnapshotKey = "paryty:pipeline:graph:snapshot"
 
+// maxGraphChanges caps the internal graph change buffer at 5,000 entries.
+// Each GraphChange is ~200 bytes, so this limits the buffer to ~1 MB.
+// Without a cap, the slice grows unbounded between GetChanges() calls.
+const maxGraphChanges = 5000
+
 // NodeType represents the type of a node in the dependency graph.
 type NodeType string
 
@@ -116,9 +121,15 @@ func edgeKey(sourceID, targetID string) string {
 
 // recordChange appends a change record under the changes lock.
 // Caller may hold g.mu; the two locks are independent (no deadlock).
+// When the buffer reaches maxGraphChanges, the oldest change is dropped
+// to prevent unbounded memory growth.
 func (g *DependencyGraph) recordChange(c GraphChange) {
 	g.changesMu.Lock()
 	defer g.changesMu.Unlock()
+	if len(g.changes) >= maxGraphChanges {
+		// Drop oldest change to prevent unbounded growth.
+		g.changes = g.changes[1:]
+	}
 	g.changes = append(g.changes, c)
 }
 
