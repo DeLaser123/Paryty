@@ -5,19 +5,32 @@ namespace: paryty
 
 resources:
   - namespace.yaml
-  - cluster-deployment.yaml
-  - cluster-service.yaml
-  - frontend-deployment.yaml
-  - frontend-service.yaml
-  - ingestion-deployment.yaml
-  - ingestion-service.yaml
-  - query-deployment.yaml
-  - query-service.yaml
-  - aggregator-deployment.yaml
-  - correlator-deployment.yaml
-  - enricher-deployment.yaml
-  - agent-daemonset.yaml
-  - network-policy.yaml
+  - secrets/sealed-secrets.yaml
+  # Ingestion service
+  - ingestion/deployment.yaml
+  - ingestion/service.yaml
+  - ingestion/hpa.yaml
+  - ingestion/pdb.yaml
+  # Pipeline service
+  - pipeline/deployment.yaml
+  - pipeline/service.yaml
+  - pipeline/hpa.yaml
+  - pipeline/pdb.yaml
+  # Query service
+  - query/deployment.yaml
+  - query/service.yaml
+  - query/hpa.yaml
+  - query/pdb.yaml
+  # Intelligence service
+  - intelligence/deployment.yaml
+  - intelligence/service.yaml
+  - intelligence/hpa.yaml
+  - intelligence/pdb.yaml
+  # Frontend service
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - frontend/ingress.yaml
+  - frontend/pdb.yaml
 
 commonLabels:
   app.kubernetes.io/name: paryty
@@ -31,6 +44,9 @@ configMapGenerator:
       - DRAGONFLY_URL=redis://dragonfly:6379
       - QUESTDB_URL=postgres://paryty:paryty@questdb:8812/paryty
       - SEAWEEDFS_URL=http://seaweedfs:8333
-      - CLUSTER_ADDR=paryty-cluster:50051
+      - INGESTION_ADDR=paryty-ingestion:8080
+      - PIPELINE_ADDR=paryty-pipeline:8080
+      - QUERY_ADDR=paryty-query:8080
+      - INTELLIGENCE_ADDR=paryty-intelligence:50051
       - LOG_LEVEL=info
       - LOG_FORMAT=json

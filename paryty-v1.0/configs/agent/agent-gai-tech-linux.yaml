@@ -4,7 +4,7 @@
 agent:
   id: "auto"
   cluster_endpoint: "192.168.16.1:50052"
-  api_key: "pk_live_97bec08c75fc797abb9f48b361259f1cb72ef151472ce7cc598f4dc7a8bfecaf"
+  api_key: "pk_live_27e00f019ed5bdcc74e984a7ad947bf531165ff98acf6acf3d6d956e4d6ee200"
   tenant_id: "gai-tech"
   self_metrics:
     enabled: true

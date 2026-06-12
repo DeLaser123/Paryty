@@ -1,0 +1,12 @@
+# Baseline Load Test Scenario
+# 100 agents, 10 metrics per agent per second
+# Expected: Low latency, no errors
+
+name: baseline
+num_agents: 100
+metrics_per_agent: 10
+interval: 1s
+duration: 5m
+ingestion_addr: "localhost:8080"
+burst_mode: false
+burst_size: 0

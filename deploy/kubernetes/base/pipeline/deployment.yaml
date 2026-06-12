@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: paryty-pipeline
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty-pipeline
+    app.kubernetes.io/component: pipeline
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: paryty-pipeline
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: paryty-pipeline
+        app.kubernetes.io/component: pipeline
+    spec:
+      containers:
+        - name: pipeline
+          image: paryty/pipeline:latest
+          ports:
+            - containerPort: 8080
+              name: http
+              protocol: TCP
+          env:
+            - name: PARYTY_CONFIG_PATH
+              value: /etc/paryty/config.yaml
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: paryty-secrets
+                  key: database-url
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "500m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          volumeMounts:
+            - name: config
+              mountPath: /etc/paryty
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: paryty-config
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000

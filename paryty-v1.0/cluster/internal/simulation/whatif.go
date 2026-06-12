@@ -127,7 +127,7 @@ func (r *WhatIfRunner) captureBaseline(ctx context.Context, tenantID string) (*b
 
 	for _, agent := range agents {
 		for _, metricName := range metricNames {
-			pts, err := r.store.QueryMetrics(ctx, agent.ID, metricName, start, end)
+			pts, err := r.store.QueryMetrics(ctx, tenantID, agent.ID, metricName, start, end)
 			if err != nil {
 				continue
 			}
@@ -246,13 +246,13 @@ func (r *WhatIfRunner) applyHostChange(topology *models.Topology, change InfraCh
 		for i := 0; i < change.Count; i++ {
 			nodeID := fmt.Sprintf("sim-host-%s-%d", change.Target, i)
 			topology.Nodes = append(topology.Nodes, models.TopologyNode{
-				ID:        nodeID,
-				Name:      fmt.Sprintf("simulated-host-%d", i),
-				Type:      models.NodeTypeHost,
-				Health:    models.HealthStatusHealthy,
-				LastSeen:  time.Now(),
-				Labels:    map[string]string{"source": "simulation"},
-				Metadata:  map[string]string{},
+				ID:       nodeID,
+				Name:     fmt.Sprintf("simulated-host-%d", i),
+				Type:     models.NodeTypeHost,
+				Health:   models.HealthStatusHealthy,
+				LastSeen: time.Now(),
+				Labels:   map[string]string{"source": "simulation"},
+				Metadata: map[string]string{},
 			})
 		}
 	case "remove":
@@ -578,8 +578,8 @@ func (r *WhatIfRunner) findBreakingPoint(predicted map[string][]MetricPoint) *Br
 			}
 
 			return &BreakingPoint{
-				RPS:      0,
-				ErrorRate: (latest.Value - 99.0) / 100.0,
+				RPS:        0,
+				ErrorRate:  (latest.Value - 99.0) / 100.0,
 				Bottleneck: bottleneck,
 				Recommendations: []string{
 					fmt.Sprintf("Scale out %s resources to reduce utilization below 99%%", bottleneck),

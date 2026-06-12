@@ -1,0 +1,6 @@
+apiVersion: v2
+name: pipeline
+description: Paryty Pipeline Service - gRPC processing pipeline
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

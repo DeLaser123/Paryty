@@ -1,0 +1,12 @@
+# Scale Load Test Scenario
+# 10,000 agents, 10 metrics per agent per second
+# Tests system capacity under high agent count
+
+name: scale
+num_agents: 10000
+metrics_per_agent: 10
+interval: 1s
+duration: 10m
+ingestion_addr: "localhost:8080"
+burst_mode: false
+burst_size: 0

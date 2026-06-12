@@ -12,7 +12,9 @@ first training and persisted to disk via joblib.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -83,10 +85,16 @@ class AnomalyServicer:
         self._ensemble = AnomalyEnsemble(self._config)
         self._explainer = AnomalyExplainer()
 
-        # Detector caches: (tenant_id, metric_name) → detector
-        self._statistical: dict[tuple[str, str], StatisticalDetector] = {}
-        self._if_detectors: dict[tuple[str, str], IsolationForestDetector] = {}
-        self._ae_detectors: dict[tuple[str, str], AutoencoderDetector] = {}
+        # Detector caches: (tenant_id, metric_name) → detector.
+        # OrderedDict gives LRU semantics — without an eviction bound an
+        # attacker spraying unique metric names allocates detectors forever
+        # (each IF/AE detector holds model state) until the process OOMs.
+        self._statistical: OrderedDict[tuple[str, str], StatisticalDetector] = OrderedDict()
+        self._if_detectors: OrderedDict[tuple[str, str], IsolationForestDetector] = OrderedDict()
+        self._ae_detectors: OrderedDict[tuple[str, str], AutoencoderDetector] = OrderedDict()
+        self._max_detectors_per_cache = int(
+            os.getenv("ANOMALY_MAX_CACHED_DETECTORS", "1000")
+        )
 
         # Stats
         self._anomalies_detected_24h: int = 0
@@ -234,7 +242,21 @@ class AnomalyServicer:
         request: GetDetectionStatusRequest,
         context: grpc.aio.ServicerContext | None = None,
     ) -> GetDetectionStatusResponse:
-        """Get detection model status."""
+        """Get detection model status for the requesting tenant.
+
+        tenant_id is mandatory: model inventories are tenant-confidential
+        (metric names reveal infrastructure topology). An empty tenant_id
+        must never act as a wildcard across all tenants.
+        """
+        if not request.tenant_id:
+            logger.warning("detection_status_rejected", reason="missing tenant_id")
+            return GetDetectionStatusResponse(
+                models={},
+                last_training=0,
+                anomalies_detected_24h=0,
+                false_positive_rate=0.0,
+            )
+
         models: dict[str, ModelStatus] = {}
 
         # Statistical detector (always available)
@@ -247,7 +269,7 @@ class AnomalyServicer:
 
         # Isolation Forest models
         for (tenant, metric), detector in self._if_detectors.items():
-            if tenant == request.tenant_id or not request.tenant_id:
+            if tenant == request.tenant_id:
                 models[f"isolation_forest_{metric}"] = ModelStatus(
                     name=f"isolation_forest_{metric}",
                     trained=detector.is_fitted,
@@ -257,7 +279,7 @@ class AnomalyServicer:
 
         # Autoencoder models
         for (tenant, metric), detector in self._ae_detectors.items():
-            if tenant == request.tenant_id or not request.tenant_id:
+            if tenant == request.tenant_id:
                 models[f"autoencoder_{metric}"] = ModelStatus(
                     name=f"autoencoder_{metric}",
                     trained=detector.is_fitted,
@@ -411,33 +433,53 @@ class AnomalyServicer:
     # Detector management
     # ------------------------------------------------------------------
 
+    def _cache_get_or_create(self, cache: OrderedDict, key: tuple[str, str], factory):
+        """LRU lookup: refresh recency on hit, create + evict-oldest on miss."""
+        if key in cache:
+            cache.move_to_end(key)
+            return cache[key]
+        detector = factory()
+        cache[key] = detector
+        while len(cache) > self._max_detectors_per_cache:
+            evicted_key, _ = cache.popitem(last=False)
+            logger.info(
+                "detector_evicted",
+                tenant=evicted_key[0],
+                metric=evicted_key[1],
+                cache_size=len(cache),
+            )
+        return detector
+
     def _get_statistical(
         self, tenant_id: str, metric_name: str
     ) -> StatisticalDetector:
-        key = (tenant_id, metric_name)
-        if key not in self._statistical:
-            self._statistical[key] = StatisticalDetector(self._config)
-        return self._statistical[key]
+        return self._cache_get_or_create(
+            self._statistical,
+            (tenant_id, metric_name),
+            lambda: StatisticalDetector(self._config),
+        )
 
     def _get_isolation_forest(
         self, tenant_id: str, metric_name: str
     ) -> IsolationForestDetector:
-        key = (tenant_id, metric_name)
-        if key not in self._if_detectors:
-            self._if_detectors[key] = IsolationForestDetector(
+        return self._cache_get_or_create(
+            self._if_detectors,
+            (tenant_id, metric_name),
+            lambda: IsolationForestDetector(
                 n_estimators=self._config.isolation_forest.n_estimators,
                 contamination=self._config.isolation_forest.contamination,
                 max_samples=self._config.isolation_forest.max_samples,
-            )
-        return self._if_detectors[key]
+            ),
+        )
 
     def _get_autoencoder(
         self, tenant_id: str, metric_name: str
     ) -> AutoencoderDetector:
-        key = (tenant_id, metric_name)
-        if key not in self._ae_detectors:
-            self._ae_detectors[key] = AutoencoderDetector(self._config.autoencoder)
-        return self._ae_detectors[key]
+        return self._cache_get_or_create(
+            self._ae_detectors,
+            (tenant_id, metric_name),
+            lambda: AutoencoderDetector(self._config.autoencoder),
+        )
 
     # ------------------------------------------------------------------
     # Proto conversion

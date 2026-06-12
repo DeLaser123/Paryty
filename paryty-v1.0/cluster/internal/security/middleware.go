@@ -199,19 +199,24 @@ func AuditEnd(logger *AuditLogger) gin.HandlerFunc {
 // CORS Middleware
 // =============================================================================
 
-// CORS returns a Gin middleware that sets permissive CORS headers for
-// development. In production, the allowed origins should be restricted to
-// the frontend domain.
+// CORS returns a Gin middleware that sets CORS headers. With no arguments
+// (or "*") every origin is allowed WITHOUT credentials — the wildcard +
+// credentials combination is both rejected by browsers and an OWASP
+// misconfiguration. Pass explicit origins (e.g. from PARYTY_CORS_ORIGINS)
+// to enable credentialed cross-origin requests in production.
 func CORS(allowedOrigins ...string) gin.HandlerFunc {
 	if len(allowedOrigins) == 0 {
 		allowedOrigins = []string{"*"}
 	}
+	wildcard := allowedOrigins[0] == "*"
 
 	return func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
 
-		allowOrigin := "*"
-		if allowedOrigins[0] != "*" {
+		allowOrigin := ""
+		if wildcard {
+			allowOrigin = "*"
+		} else {
 			for _, o := range allowedOrigins {
 				if o == origin {
 					allowOrigin = origin
@@ -220,12 +225,17 @@ func CORS(allowedOrigins ...string) gin.HandlerFunc {
 			}
 		}
 
-		c.Header("Access-Control-Allow-Origin", allowOrigin)
-		c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID, X-API-Key")
-		c.Header("Access-Control-Expose-Headers", "X-Request-ID")
-		c.Header("Access-Control-Max-Age", "86400")
-		c.Header("Access-Control-Allow-Credentials", "true")
+		if allowOrigin != "" {
+			c.Header("Access-Control-Allow-Origin", allowOrigin)
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Request-ID")
+			c.Header("Access-Control-Expose-Headers", "X-Request-ID")
+			c.Header("Access-Control-Max-Age", "86400")
+			// Credentials are only safe with an explicit origin match.
+			if !wildcard {
+				c.Header("Access-Control-Allow-Credentials", "true")
+			}
+		}
 
 		if c.Request.Method == http.MethodOptions {
 			c.AbortWithStatus(http.StatusNoContent)
@@ -251,8 +261,8 @@ type RateLimitConfig struct {
 // DefaultRateLimitConfig returns sensible defaults for the rate limiter.
 func DefaultRateLimitConfig() RateLimitConfig {
 	return RateLimitConfig{
-		MaxRequestsPerMinute: 600,  // 10 req/s sustained
-		BurstSize:            100,  // allow bursts up to 100
+		MaxRequestsPerMinute: 600, // 10 req/s sustained
+		BurstSize:            100, // allow bursts up to 100
 	}
 }
 
@@ -298,10 +308,10 @@ func RateLimit(cfg RateLimitConfig) gin.HandlerFunc {
 // Each bucket is keyed by tenant+endpoint and holds the available tokens
 // plus the timestamp of the last refill.
 type tokenBucketLimiter struct {
-	mu       sync.Mutex
-	rate     float64 // tokens per second
-	burst    float64 // max tokens (burst size)
-	buckets  map[string]*bucketState
+	mu      sync.Mutex
+	rate    float64 // tokens per second
+	burst   float64 // max tokens (burst size)
+	buckets map[string]*bucketState
 }
 
 type bucketState struct {

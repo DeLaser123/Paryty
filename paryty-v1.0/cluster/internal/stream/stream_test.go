@@ -2,9 +2,28 @@ package stream
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 )
+
+// requireBroker skips the test when no live Redpanda broker is reachable.
+// Broker round-trip tests are environment-dependent: they exercise real
+// topic creation/deletion and belong to verification Gate 4 (integration,
+// infrastructure running), not Gate 3 (unit, no infrastructure). Without
+// this guard `go test ./...` fails on machines where Redpanda is down.
+func requireBroker(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("Skipping broker-dependent test in short mode")
+	}
+	broker := testConfig().Brokers[0]
+	conn, err := net.DialTimeout("tcp", broker, 2*time.Second)
+	if err != nil {
+		t.Skipf("Skipping: Redpanda broker %s not reachable (%v) — run with infrastructure for Gate 4", broker, err)
+	}
+	_ = conn.Close()
+}
 
 func TestNewTopicManager(t *testing.T) {
 	cfg := testConfig()
@@ -119,9 +138,7 @@ func TestNewStreamEngine_InvalidBroker(t *testing.T) {
 }
 
 func TestTopicManager_CreateAndDelete(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
+	requireBroker(t)
 
 	cfg := testConfig()
 	logger := testLogger()
@@ -165,9 +182,7 @@ func TestTopicManager_CreateAndDelete(t *testing.T) {
 }
 
 func TestTopicManager_EnsureTopic(t *testing.T) {
-	if testing.Short() {
-		t.Skip("Skipping integration test in short mode")
-	}
+	requireBroker(t)
 
 	cfg := testConfig()
 	logger := testLogger()

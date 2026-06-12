@@ -12,16 +12,17 @@ commonLabels:
   environment: staging
 
 patches:
+  # Ingestion service - moderate resources for staging
   - target:
       kind: Deployment
-      name: paryty-cluster
+      name: paryty-ingestion
     patch: |
       - op: replace
         path: /spec/replicas
         value: 2
       - op: replace
         path: /spec/template/spec/containers/0/resources/requests/cpu
-        value: 250m
+        value: 200m
       - op: replace
         path: /spec/template/spec/containers/0/resources/requests/memory
         value: 256Mi
@@ -30,7 +31,68 @@ patches:
         value: 1000m
       - op: replace
         path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 512Mi
+  # Pipeline service - moderate resources for staging
+  - target:
+      kind: Deployment
+      name: paryty-pipeline
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 500m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 512Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 2000m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
         value: 1Gi
+  # Query service - moderate resources for staging
+  - target:
+      kind: Deployment
+      name: paryty-query
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 200m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 256Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 1000m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 512Mi
+  # Intelligence service - moderate resources for staging
+  - target:
+      kind: Deployment
+      name: paryty-intelligence
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 2
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 500m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 512Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 2000m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 1Gi
+  # Frontend service - moderate resources for staging
   - target:
       kind: Deployment
       name: paryty-frontend

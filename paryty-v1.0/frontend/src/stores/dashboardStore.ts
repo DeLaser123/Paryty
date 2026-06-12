@@ -1,6 +1,32 @@
 import { create } from 'zustand';
-import type { DigitalParyty, CreateParytyDraft } from '../types/digitalParyty';
+import { getRestClient } from '../api/rest';
+import type { DigitalParyty, CreateParytyDraft, TwinDetails } from '../types/digitalParyty';
+import { backendTwinToDigitalParyty } from '../types/digitalParyty';
 import type { AbilityId } from '../types/ability';
+
+// ─── localStorage helpers ──────────────────────────────────────────────────
+
+const ACTIVE_TWIN_KEY = 'paryty_active_twin';
+
+function loadActiveTwinId(): string | null {
+  try {
+    return localStorage.getItem(ACTIVE_TWIN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveActiveTwinId(id: string | null): void {
+  try {
+    if (id) {
+      localStorage.setItem(ACTIVE_TWIN_KEY, id);
+    } else {
+      localStorage.removeItem(ACTIVE_TWIN_KEY);
+    }
+  } catch {
+    // localStorage unavailable — silent fail
+  }
+}
 
 // ─── Store Shape ────────────────────────────────────────────────────────────
 
@@ -17,6 +43,15 @@ interface DashboardState {
   /** Which wizard step (0-based) the user is on. */
   wizardStep: number;
 
+  /** Whether twin list is being fetched from backend. */
+  isLoading: boolean;
+
+  /** Error message from last fetchTwins attempt. */
+  error: string | null;
+
+  /** ID of the currently active/selected twin. */
+  activeTwinId: string | null;
+
   // ─── Actions ──────────────────────────────────────────────────────────────
 
   openWizard: () => void;
@@ -31,10 +66,19 @@ interface DashboardState {
   prevStep: () => void;
 
   /** Commits the current draft as a new DigitalParyty in the catalogue. */
-  commitDraft: () => void;
+  commitDraft: () => Promise<void>;
 
   /** Adds a new ability to an existing Digital Paryty after creation. */
   addAbility: (parytyId: string, abilityId: AbilityId) => void;
+
+  /** Fetch all twins from the backend and populate catalogue. */
+  fetchTwins: () => Promise<void>;
+
+  /** Set the active twin (persisted to localStorage). */
+  setActiveTwin: (id: string | null) => void;
+
+  /** Delete a twin by ID. */
+  deleteTwin: (id: string) => Promise<void>;
 }
 
 // ─── Initial draft ─────────────────────────────────────────────────────────
@@ -50,6 +94,9 @@ export const useDashboardStore = create<DashboardState>()((set, get) => ({
   wizardOpen: false,
   draft: emptyDraft(),
   wizardStep: 0,
+  isLoading: false,
+  error: null,
+  activeTwinId: loadActiveTwinId(),
 
   openWizard: () => set({ wizardOpen: true, draft: emptyDraft(), wizardStep: 0 }),
   closeWizard: () => set({ wizardOpen: false }),
@@ -74,19 +121,28 @@ export const useDashboardStore = create<DashboardState>()((set, get) => ({
   nextStep: () => set((s) => ({ wizardStep: s.wizardStep + 1 })),
   prevStep: () => set((s) => ({ wizardStep: Math.max(0, s.wizardStep - 1) })),
 
-  commitDraft: () => {
+  commitDraft: async () => {
     const { draft, catalogue } = get();
     const now = new Date().toISOString();
-    const next: DigitalParyty = {
-      id: `dp_${Date.now()}`,
+    
+    // Call backend API to create twin with proper UUID
+    const client = getRestClient();
+    const response = await client.post<{ data: { id: string; name: string; description: string; status: string; createdAt: string; updatedAt: string } }>('/api/v1/twins', {
       name: draft.name || 'Unnamed Digital Paryty',
-      systemLabel: draft.systemLabel || 'Unknown System',
+      description: draft.systemLabel || 'Unknown System',
+    });
+    
+    const twin = response.data;
+    const next: DigitalParyty = {
+      id: twin.id,
+      name: twin.name,
+      systemLabel: twin.description || 'Unknown System',
       health: 'unknown',
       abilities: draft.selectedAbilities.map((id) => ({ id, enabledAt: now })),
       config: { agentIds: draft.agentIds },
       summary: {},
-      createdAt: now,
-      updatedAt: now,
+      createdAt: twin.createdAt || now,
+      updatedAt: twin.updatedAt || now,
     };
     set({ catalogue: [...catalogue, next], wizardOpen: false, draft: emptyDraft(), wizardStep: 0 });
   },
@@ -103,4 +159,51 @@ export const useDashboardStore = create<DashboardState>()((set, get) => ({
         };
       }),
     })),
+
+  fetchTwins: async () => {
+    set({ isLoading: true, error: null });
+    try {
+      const client = getRestClient();
+      const response = await client.get<{ data: TwinDetails[] }>('/api/v1/twins');
+      const twins = response.data ?? [];
+      const catalogue = twins.map(backendTwinToDigitalParyty);
+      
+      // Validate activeTwinId — clear if not in results
+      const { activeTwinId } = get();
+      const validActiveId = catalogue.some((t) => t.id === activeTwinId)
+        ? activeTwinId
+        : null;
+      
+      set({
+        catalogue,
+        isLoading: false,
+        activeTwinId: validActiveId,
+      });
+      
+      if (validActiveId !== activeTwinId) {
+        saveActiveTwinId(validActiveId);
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to load twins';
+      set({ isLoading: false, error: message });
+    }
+  },
+
+  setActiveTwin: (id) => {
+    set({ activeTwinId: id });
+    saveActiveTwinId(id);
+  },
+
+  deleteTwin: async (id) => {
+    const client = getRestClient();
+    await client.delete(`/api/v1/twins/${id}`);
+    const { catalogue, activeTwinId } = get();
+    set({
+      catalogue: catalogue.filter((t) => t.id !== id),
+      activeTwinId: activeTwinId === id ? null : activeTwinId,
+    });
+    if (activeTwinId === id) {
+      saveActiveTwinId(null);
+    }
+  },
 }));

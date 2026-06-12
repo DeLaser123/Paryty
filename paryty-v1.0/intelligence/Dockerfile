@@ -19,8 +19,14 @@ RUN pip install --no-cache-dir -r requirements.txt
 # This preserves the package structure so relative imports work
 COPY . intelligence/
 
-# Create model directories
-RUN mkdir -p /data/models/forecasting /data/models/anomaly
+# Create model directories and a non-root service user. Running as root
+# would turn any container compromise (e.g. via a malicious model artifact)
+# into full container-root access.
+RUN useradd --system --no-create-home --shell /usr/sbin/nologin intelligence \
+    && mkdir -p /data/models/forecasting /data/models/anomaly \
+    && chown -R intelligence:intelligence /data /app
+
+USER intelligence
 
 # Expose gRPC port
 EXPOSE 50051

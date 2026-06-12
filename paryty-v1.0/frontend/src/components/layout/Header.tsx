@@ -18,6 +18,7 @@ import { useAlertsStore } from '../../stores/alertsStore';
 import { useTopologyStore } from '../../stores/topologyStore';
 import { useAuthStore } from '../../stores/authStore';
 import { usePlanStore } from '../../stores/planStore';
+import { useDashboardStore } from '../../stores/dashboardStore';
 import { useDropdownEdge } from '../../hooks/useDropdownEdge';
 import { Tooltip } from '../common/Tooltip';
 
@@ -62,6 +63,11 @@ export function Header() {
   const tenant = useAuthStore((s) => s.tenant);
   const planName = usePlanStore((s) => s.currentPlan?.planName);
 
+  // Active twin data (dashboard only)
+  const catalogue = useDashboardStore((s) => s.catalogue);
+  const activeTwinId = useDashboardStore((s) => s.activeTwinId);
+  const activeTwin = catalogue.find((t) => t.id === activeTwinId) ?? null;
+
   const [timeWindow, setTimeWindow] = useState<TimeOption>(DEFAULT_TIME);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -69,6 +75,7 @@ export function Header() {
 
   const pageLabel = PAGE_LABELS[location.pathname] ?? 'Paryty';
   const isTopology = location.pathname === '/topology';
+  const isDashboard = location.pathname === '/';
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -107,6 +114,12 @@ export function Header() {
           <>
             <ChevronRight size={12} className="app-topbar__breadcrumb-sep" />
             <span className="app-topbar__entity">{selectedNode.name}</span>
+          </>
+        )}
+        {isDashboard && activeTwin && (
+          <>
+            <ChevronRight size={12} className="app-topbar__breadcrumb-sep" />
+            <span className="app-topbar__entity">{activeTwin.name}</span>
           </>
         )}
       </div>

@@ -282,6 +282,24 @@ pub fn load() -> Result<Config> {
 
 /// Load configuration from a specific file path, applying env overrides and validation.
 pub fn load_from_path(config_path: &str) -> Result<Config> {
+    // The config file may contain the agent API key. On Unix, warn loudly
+    // when it is readable by group or others — a world-readable key lets any
+    // local user impersonate this agent to the cluster.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(meta) = std::fs::metadata(config_path) {
+            let mode = meta.permissions().mode();
+            if mode & 0o077 != 0 {
+                tracing::warn!(
+                    path = config_path,
+                    mode = format!("{:o}", mode & 0o777),
+                    "config file is readable by group/others; it may contain the agent API key — run: chmod 600"
+                );
+            }
+        }
+    }
+
     // Load configuration file
     let config_str = std::fs::read_to_string(config_path)
         .context(format!("Failed to read config file: {}", config_path))?;
@@ -326,6 +344,88 @@ pub fn load_from_str(yaml: &str) -> Result<Config> {
     validate(&config)?;
 
     Ok(config)
+}
+
+/// Persist a new API key to the agent config file.
+///
+/// Reads the existing YAML, updates the `agent.api_key` field, and writes it back.
+/// If the file doesn't exist, creates a minimal config with just the API key.
+pub fn persist_api_key(config_path: &str, new_key: &str) -> Result<()> {
+    use std::path::Path;
+
+    let path = Path::new(config_path);
+
+    // Read existing config or create minimal one.
+    let mut doc: serde_yaml::Value = if path.exists() {
+        let content = std::fs::read_to_string(path)
+            .context(format!("Failed to read config file: {}", config_path))?;
+        serde_yaml::from_str(&content)
+            .context(format!("Failed to parse config file: {}", config_path))?
+    } else {
+        // Create parent directories if needed.
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)
+                .context(format!("Failed to create config directory: {:?}", parent))?;
+        }
+        serde_yaml::Value::Mapping(serde_yaml::mapping::Mapping::new())
+    };
+
+    // Navigate to agent.api_key and set it.
+    let agent_key = serde_yaml::Value::String("agent".to_string());
+    let api_key_key = serde_yaml::Value::String("api_key".to_string());
+    let new_key_val = serde_yaml::Value::String(new_key.to_string());
+
+    if let serde_yaml::Value::Mapping(ref mut map) = doc {
+        // Get or create the agent mapping.
+        let agent_entry = map.entry(agent_key.clone()).or_insert_with(|| {
+            serde_yaml::Value::Mapping(serde_yaml::mapping::Mapping::new())
+        });
+        if let serde_yaml::Value::Mapping(ref mut agent_map) = agent_entry {
+            agent_map.insert(api_key_key, new_key_val);
+        }
+    }
+
+    // Write back to file.
+    let yaml_str = serde_yaml::to_string(&doc)
+        .context("Failed to serialize config to YAML")?;
+    std::fs::write(path, yaml_str)
+        .context(format!("Failed to write config file: {}", config_path))?;
+
+    // On Unix, set file permissions to 600 (owner read/write only).
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o600);
+        std::fs::set_permissions(path, perms)
+            .context(format!("Failed to set file permissions: {}", config_path))?;
+    }
+
+    Ok(())
+}
+
+/// Re-read the API key from config file or environment variable.
+///
+/// Called during key rotation recovery. Checks environment variable first,
+/// then falls back to the config file.
+pub fn reread_api_key(config_path: &str) -> Result<Option<String>> {
+    // Environment variable takes precedence.
+    if let Ok(key) = std::env::var("PARYTY_API_KEY") {
+        if !key.is_empty() {
+            return Ok(Some(key));
+        }
+    }
+
+    // Fall back to config file.
+    if std::path::Path::new(config_path).exists() {
+        let content = std::fs::read_to_string(config_path)
+            .context(format!("Failed to read config file: {}", config_path))?;
+        let config: Config = load_from_str(&content)?;
+        if !config.agent.api_key.is_empty() {
+            return Ok(Some(config.agent.api_key));
+        }
+    }
+
+    Ok(None)
 }
 
 #[cfg(test)]

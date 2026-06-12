@@ -1,0 +1,19 @@
+# Paryty Frontend — Development Dockerfile
+# Runs Vite dev server with HMR. No nginx. No static build.
+# Source code is volume-mounted at runtime for instant hot-reload.
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Install dependencies (cached layer — only rebuilds when package*.json change)
+COPY package.json package-lock.json ./
+RUN npm install
+
+# Copy source as a fallback base (volume mount overrides at runtime)
+COPY . .
+
+EXPOSE 3000
+
+# Vite dev server with HMR, bound to all interfaces
+CMD ["npm", "run", "dev"]

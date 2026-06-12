@@ -87,7 +87,9 @@ pub struct GrpcClient {
     /// When set, the API key is attached as `x-api-key` gRPC metadata
     /// on all requests. The server uses this to resolve the
     /// tenant for this agent.
-    api_key: Option<String>,
+    ///
+    /// Wrapped in `Arc<RwLock>` for atomic updates during key rotation.
+    api_key: Arc<RwLock<Option<String>>>,
     /// Optional tenant ID for multi-tenant routing.
     ///
     /// When set, the tenant ID is attached as `x-tenant-id` gRPC metadata
@@ -107,6 +109,8 @@ pub struct GrpcClient {
     /// When set, attached as `x-client-id` gRPC metadata on ALL requests.
     /// Set via `update_identity()` after registration/identity resolution.
     client_id: Arc<RwLock<Option<String>>>,
+    /// Path to the agent config file, used for runtime key refresh.
+    config_path: Arc<RwLock<String>>,
 }
 
 impl GrpcClient {
@@ -134,11 +138,12 @@ impl GrpcClient {
             metrics: Arc::new(ClientMetrics::default()),
             tx,
             rx: Arc::new(Mutex::new(rx)),
-            api_key,
+            api_key: Arc::new(RwLock::new(api_key)),
             tenant_id,
             tenant_cache: None,
             twin_id: Arc::new(RwLock::new(None)),
             client_id: Arc::new(RwLock::new(None)),
+            config_path: Arc::new(RwLock::new(String::new())),
         }
     }
 
@@ -159,11 +164,12 @@ impl GrpcClient {
             metrics: Arc::new(ClientMetrics::default()),
             tx,
             rx: Arc::new(Mutex::new(rx)),
-            api_key: None,
+            api_key: Arc::new(RwLock::new(None)),
             tenant_id: None,
             tenant_cache: None,
             twin_id: Arc::new(RwLock::new(None)),
             client_id: Arc::new(RwLock::new(None)),
+            config_path: Arc::new(RwLock::new(String::new())),
         }
     }
 
@@ -216,6 +222,54 @@ impl GrpcClient {
         self.client_id.read().await.clone()
     }
 
+    /// Set the config file path for runtime key refresh.
+    pub async fn set_config_path(&self, path: String) {
+        let mut guard = self.config_path.write().await;
+        *guard = path;
+    }
+
+    /// Update the API key atomically.
+    ///
+    /// Called during key rotation recovery. The new key takes effect on the
+    /// next gRPC request.
+    pub async fn update_api_key(&self, new_key: Option<String>) {
+        let mut guard = self.api_key.write().await;
+        *guard = new_key;
+        info!("API key updated in gRPC client");
+    }
+
+    /// Attempt to refresh the API key from config file or environment variable.
+    ///
+    /// Called when an `UNAUTHENTICATED` error is detected. Returns `true` if
+    /// the key was successfully refreshed (new key loaded), `false` otherwise.
+    pub async fn refresh_api_key(&self) -> bool {
+        use crate::config;
+
+        let config_path = self.config_path.read().await.clone();
+        let new_key = match config::reread_api_key(&config_path) {
+            Ok(Some(key)) => key,
+            Ok(None) => {
+                warn!("No API key found in config file or environment during refresh");
+                return false;
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to re-read API key from config");
+                return false;
+            }
+        };
+
+        // Check if the key actually changed.
+        let current = self.api_key.read().await;
+        if current.as_deref() == Some(new_key.as_str()) {
+            info!("API key refresh: key unchanged, no update needed");
+            return false;
+        }
+        drop(current);
+
+        self.update_api_key(Some(new_key)).await;
+        true
+    }
+
     /// Attach identity metadata (x-twin-id, x-client-id) to a tonic request.
     ///
     /// Called internally before every RPC. If identity is not assigned,
@@ -256,6 +310,28 @@ impl GrpcClient {
         }
     }
 
+    /// Attach API key metadata (x-api-key) to a tonic request.
+    ///
+    /// Called internally before every RPC. If no API key is configured,
+    /// this is a no-op.
+    fn attach_api_key_metadata<T>(&self, request: &mut tonic::Request<T>) {
+        if let Ok(guard) = self.api_key.try_read() {
+            if let Some(ref api_key) = *guard {
+                match MetadataValue::try_from(api_key.as_str()) {
+                    Ok(value) => {
+                        request.metadata_mut().insert("x-api-key", value);
+                    }
+                    Err(e) => {
+                        warn!(
+                            error = %e,
+                            "Invalid API key format — skipping x-api-key metadata"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     /// Resolve identity via the TwinService gRPC call.
     ///
     /// Called after registration to discover the assigned twin/client ID.
@@ -275,14 +351,11 @@ impl GrpcClient {
 
         let mut twin_client = TwinServiceClient::new(channel);
 
-        let request = tonic::Request::new(ResolveIdentityRequest {
-            agent_id: agent_id.to_string(),
-        });
+        let request =
+            tonic::Request::new(ResolveIdentityRequest { agent_id: agent_id.to_string() });
 
-        let response = twin_client
-            .resolve_identity(request)
-            .await
-            .context("ResolveIdentity RPC failed")?;
+        let response =
+            twin_client.resolve_identity(request).await.context("ResolveIdentity RPC failed")?;
 
         let resp = response.into_inner();
 
@@ -398,20 +471,7 @@ impl GrpcClient {
         let mut request = tonic::Request::new(registration);
 
         // Attach API key as gRPC metadata if configured.
-        if let Some(ref api_key) = self.api_key {
-            match MetadataValue::try_from(api_key.as_str()) {
-                Ok(value) => {
-                    request.metadata_mut().insert("x-api-key", value);
-                    debug!("Attached x-api-key metadata to registration request");
-                }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        "Invalid API key format — skipping x-api-key metadata"
-                    );
-                }
-            }
-        }
+        self.attach_api_key_metadata(&mut request);
 
         // Attach tenant ID as gRPC metadata if configured.
         if let Some(ref tenant_id) = self.tenant_id {
@@ -473,20 +533,7 @@ impl GrpcClient {
         let mut request = tonic::Request::new(batch);
 
         // Attach API key as gRPC metadata if configured.
-        if let Some(ref api_key) = self.api_key {
-            match MetadataValue::try_from(api_key.as_str()) {
-                Ok(value) => {
-                    request.metadata_mut().insert("x-api-key", value);
-                    debug!("Attached x-api-key metadata to send_batch request");
-                }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        "Invalid API key format — skipping x-api-key metadata for send_batch"
-                    );
-                }
-            }
-        }
+        self.attach_api_key_metadata(&mut request);
 
         // Attach tenant ID as gRPC metadata if configured.
         if let Some(ref tenant_id) = self.tenant_id {
@@ -528,20 +575,7 @@ impl GrpcClient {
         let mut tonic_request = tonic::Request::new(request);
 
         // Attach API key as gRPC metadata if configured.
-        if let Some(ref api_key) = self.api_key {
-            match MetadataValue::try_from(api_key.as_str()) {
-                Ok(value) => {
-                    tonic_request.metadata_mut().insert("x-api-key", value);
-                    debug!("Attached x-api-key metadata to heartbeat request");
-                }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        "Invalid API key format — skipping x-api-key metadata for heartbeat"
-                    );
-                }
-            }
-        }
+        self.attach_api_key_metadata(&mut tonic_request);
 
         // Attach tenant ID as gRPC metadata if configured.
         if let Some(ref tenant_id) = self.tenant_id {
@@ -596,20 +630,7 @@ impl GrpcClient {
         let mut request = tonic::Request::new(stream);
 
         // Attach API key as gRPC metadata if configured.
-        if let Some(ref api_key) = self.api_key {
-            match MetadataValue::try_from(api_key.as_str()) {
-                Ok(value) => {
-                    request.metadata_mut().insert("x-api-key", value);
-                    debug!("Attached x-api-key metadata to report_network_events request");
-                }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        "Invalid API key format — skipping x-api-key metadata for report_network_events"
-                    );
-                }
-            }
-        }
+        self.attach_api_key_metadata(&mut request);
 
         // Attach tenant ID as gRPC metadata if configured.
         if let Some(ref tenant_id) = self.tenant_id {
@@ -665,20 +686,7 @@ impl GrpcClient {
         let mut request = tonic::Request::new(outbound);
 
         // Attach API key as gRPC metadata if configured.
-        if let Some(ref api_key) = self.api_key {
-            match MetadataValue::try_from(api_key.as_str()) {
-                Ok(value) => {
-                    request.metadata_mut().insert("x-api-key", value);
-                    debug!("Attached x-api-key metadata to stream request");
-                }
-                Err(e) => {
-                    warn!(
-                        error = %e,
-                        "Invalid API key format — skipping x-api-key metadata for stream"
-                    );
-                }
-            }
-        }
+        self.attach_api_key_metadata(&mut request);
 
         // Attach tenant ID as gRPC metadata if configured.
         if let Some(ref tenant_id) = self.tenant_id {
@@ -756,6 +764,7 @@ impl Clone for GrpcClient {
             tenant_cache: None, // Cache is not cloned — set explicitly on the clone if needed.
             twin_id: Arc::clone(&self.twin_id),
             client_id: Arc::clone(&self.client_id),
+            config_path: self.config_path.clone(),
         }
     }
 }
@@ -884,15 +893,15 @@ mod tests {
     }
 
     /// Verify that api_key is None when constructed via with_endpoint.
-    #[test]
-    fn test_api_key_none_by_default_in_with_endpoint() {
+    #[tokio::test]
+    async fn test_api_key_none_by_default_in_with_endpoint() {
         let client = GrpcClient::with_endpoint("http://localhost:50051");
-        assert!(client.api_key.is_none());
+        assert!(client.api_key.read().await.is_none());
     }
 
     /// Verify that the client from Config extracts the api_key.
-    #[test]
-    fn test_api_key_extracted_from_config() {
+    #[tokio::test]
+    async fn test_api_key_extracted_from_config() {
         let config = crate::config::Config {
             agent: crate::config::AgentConfig {
                 id: "test-agent".to_string(),
@@ -957,7 +966,8 @@ mod tests {
         };
 
         let client = GrpcClient::new(&config);
-        assert_eq!(client.api_key.as_deref(), Some("secret-api-key"));
+        let guard = client.api_key.read().await;
+        assert_eq!(guard.as_deref(), Some("secret-api-key"));
     }
 
     /// Verify that clone does not carry tenant_cache but shares identity.

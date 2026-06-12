@@ -297,8 +297,10 @@ type warmQuestDBAdapter struct {
 
 // QueryAggregated queries aggregated metrics from QuestDB.
 // Empty agentID or metricName act as wildcards (no filter).
+// The empty tenant is intentional: the downsampler is an internal
+// maintenance process that compacts data across ALL tenants.
 func (a *warmQuestDBAdapter) QueryAggregated(ctx context.Context, agentID string, metricName string, window time.Duration, start, end time.Time) ([]models.AggregatedMetric, error) {
-	return a.warm.QueryAggregatedMetrics(ctx, agentID, metricName, window, start, end)
+	return a.warm.QueryAggregatedMetrics(ctx, "", agentID, metricName, window, start, end)
 }
 
 // StoreAggregated stores aggregated metrics in QuestDB.

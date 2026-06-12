@@ -157,6 +157,14 @@ var createPhase8Tables = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_agent_registrations_tenant ON agent_registrations(tenant_id)`,
 
+	// ALTER statements for agent metadata columns (idempotent).
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS name TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS os TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS arch TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS cloud_provider TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS location TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'deployed', 'inactive'))`,
+
 	// agent_backlogs — tracks historical backlog per agent for operator approval.
 	`CREATE TABLE IF NOT EXISTS agent_backlogs (
 		agent_id TEXT PRIMARY KEY,
@@ -251,6 +259,21 @@ var createPhase8Tables = []string{
 		CREATE POLICY tenant_isolation_agent_registrations ON agent_registrations
 			USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
 	END $$`,
+
+	// Enable RLS on audit_log
+	`DO $$
+	BEGIN
+		ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY;
+	EXCEPTION WHEN duplicate_object THEN NULL;
+	END $$`,
+
+	// Create RLS policy for audit_log
+	`DO $$
+	BEGIN
+		DROP POLICY IF EXISTS tenant_isolation_audit_log ON audit_log;
+		CREATE POLICY tenant_isolation_audit_log ON audit_log
+			USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+	END $$`,
 }
 
 // EnsurePhase8Tables creates all Phase 8 multi-tenancy tables and indexes if
@@ -261,5 +284,65 @@ func EnsurePhase8Tables(ctx context.Context, pool *pgxpool.Pool) error {
 			return fmt.Errorf("execute Phase 8 DDL: %w", err)
 		}
 	}
+	return nil
+}
+
+// EnsureRLSPolicies ensures that Row-Level Security policies are properly
+// configured on all tenant-scoped tables. This function is idempotent and
+// safe to call on every startup.
+//
+// RLS policies enforce tenant isolation at the database level, providing
+// defense-in-depth against cross-tenant data leaks.
+func EnsureRLSPolicies(ctx context.Context, pool *pgxpool.Pool) error {
+	// Enable RLS on all tenant-scoped tables
+	enableRLSStatements := []string{
+		`ALTER TABLE paryty_twins ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE agent_assignments ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE api_keys ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE agent_registrations ENABLE ROW LEVEL SECURITY`,
+		`ALTER TABLE audit_log ENABLE ROW LEVEL SECURITY`,
+	}
+
+	for _, stmt := range enableRLSStatements {
+		// Use DO blocks to handle cases where RLS is already enabled
+		doStmt := fmt.Sprintf(`DO $$
+BEGIN
+	%s;
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$`, stmt)
+		if _, err := pool.Exec(ctx, doStmt); err != nil {
+			return fmt.Errorf("enable RLS: %w", err)
+		}
+	}
+
+	// Create RLS policies for each table
+	policyStatements := []string{
+		`DROP POLICY IF EXISTS tenant_isolation_paryty_twins ON paryty_twins`,
+		`CREATE POLICY tenant_isolation_paryty_twins ON paryty_twins
+			USING (tenant_id = current_setting('app.current_tenant_id')::uuid)`,
+
+		`DROP POLICY IF EXISTS tenant_isolation_agent_assignments ON agent_assignments`,
+		`CREATE POLICY tenant_isolation_agent_assignments ON agent_assignments
+			USING (tenant_id = current_setting('app.current_tenant_id')::uuid)`,
+
+		`DROP POLICY IF EXISTS tenant_isolation_api_keys ON api_keys`,
+		`CREATE POLICY tenant_isolation_api_keys ON api_keys
+			USING (tenant_id = current_setting('app.current_tenant_id')::uuid)`,
+
+		`DROP POLICY IF EXISTS tenant_isolation_agent_registrations ON agent_registrations`,
+		`CREATE POLICY tenant_isolation_agent_registrations ON agent_registrations
+			USING (tenant_id = current_setting('app.current_tenant_id')::uuid)`,
+
+		`DROP POLICY IF EXISTS tenant_isolation_audit_log ON audit_log`,
+		`CREATE POLICY tenant_isolation_audit_log ON audit_log
+			USING (tenant_id = current_setting('app.current_tenant_id')::uuid)`,
+	}
+
+	for _, stmt := range policyStatements {
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("create RLS policy: %w", err)
+		}
+	}
+
 	return nil
 }

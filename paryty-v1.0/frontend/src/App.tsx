@@ -40,7 +40,7 @@ function AuthenticatedLayout() {
  * - `/twins/:id/settings` → TwinSettingsPage (ProtectedRoute)
  */
 
-import { BrowserRouter as Router, Routes, Route, Outlet } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Outlet, Navigate } from 'react-router-dom';
 import { Suspense, lazy } from 'react';
 import { AppShell } from './components/layout/AppShell';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
@@ -63,23 +63,24 @@ const IntelView = lazy(() => import('./components/intel/IntelView'));
 const LoginPage = lazy(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
 const RegisterPage = lazy(() => import('./pages/RegisterPage').then((m) => ({ default: m.RegisterPage })));
 const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
-const TwinCreatePage = lazy(() => import('./pages/TwinCreatePage').then((m) => ({ default: m.TwinCreatePage })));
 const TwinDetailPage = lazy(() => import('./pages/TwinDetailPage').then((m) => ({ default: m.TwinDetailPage })));
 const TwinSettingsPage = lazy(() => import('./pages/TwinSettingsPage').then((m) => ({ default: m.TwinSettingsPage })));
+const AgentsPage = lazy(() => import('./pages/AgentsPage'));
 
 /** Loading fallback for Suspense boundaries. */
 function LoadingFallback() {
   return (
-    <div style={{
-      flex: 1,
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontFamily: 'var(--aef-font-body)',
-      fontSize: 12,
-      color: 'var(--aef-text-secondary)',
-    }}>
-      Loading…
+    <div className="loading-fallback">
+      <div className="loading-fallback__brand">
+        <div className="loading-fallback__logo">P</div>
+        <div className="loading-fallback__text">Paryty</div>
+      </div>
+      <div className="loading-fallback__progress">
+        <div className="aef-progress-track">
+          <div className="aef-progress-fill loading-fallback__progress-fill" />
+        </div>
+      </div>
+      <div className="loading-fallback__message">Initializing workspace…</div>
     </div>
   );
 }
@@ -106,7 +107,8 @@ function App() {
                 <Route path="/metrics" element={<MetricsView />} />
                 <Route path="/alerts" element={<AlertView />} />
                 <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/twins/new" element={<TwinCreatePage />} />
+                <Route path="/agents" element={<AgentsPage />} />
+                <Route path="/twins/new" element={<Navigate to="/?new=true" replace />} />
                 <Route path="/twins/:id" element={<TwinDetailPage />} />
                 <Route path="/twins/:id/settings" element={<TwinSettingsPage />} />
 

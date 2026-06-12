@@ -30,12 +30,16 @@ func NewSSEHandler(store *storage.Store, logger *zap.Logger, kafkaBrokers []stri
 }
 
 // HandleTimeline handles SSE timeline replay.
+// Requires JWT auth; tenant scope comes from the validated claims.
 func (h *SSEHandler) HandleTimeline(c *gin.Context) {
+	if _, ok := requireTenant(c); !ok {
+		return
+	}
+
 	// Set SSE headers
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*")
 
 	startStr := c.DefaultQuery("start", time.Now().Add(-1*time.Hour).Format(time.RFC3339))
 	endStr := c.DefaultQuery("end", time.Now().Format(time.RFC3339))
@@ -95,14 +99,18 @@ func (h *SSEHandler) HandleTimeline(c *gin.Context) {
 }
 
 // HandleMetricsStream handles SSE metrics streaming.
+// Requires JWT auth (header or token query param via GinJWTAuthFlexible);
+// tenant scope comes from the validated claims.
 func (h *SSEHandler) HandleMetricsStream(c *gin.Context) {
 	agentID := c.Param("agent_id")
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*")
 
 	ctx := c.Request.Context()
 	flusher, ok := c.Writer.(http.Flusher)
@@ -132,14 +140,17 @@ func (h *SSEHandler) HandleMetricsStream(c *gin.Context) {
 
 // HandleEventStream handles SSE streaming of Paryty events from Redpanda.
 // Route: GET /api/v1/events/stream
+// Requires JWT auth; tenant scope comes from the validated claims.
 func (h *SSEHandler) HandleEventStream(c *gin.Context) {
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 	topic := "paryty." + tenant + ".events"
 
 	c.Header("Content-Type", "text/event-stream")
 	c.Header("Cache-Control", "no-cache")
 	c.Header("Connection", "keep-alive")
-	c.Header("Access-Control-Allow-Origin", "*")
 
 	ctx := c.Request.Context()
 	flusher, ok := c.Writer.(http.Flusher)

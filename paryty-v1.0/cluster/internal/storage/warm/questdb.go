@@ -387,12 +387,12 @@ var createTableStatements = []string{
 // ---- Metric Operations (PG INSERT — fallback path) ----
 
 // InsertMetric inserts a single metric into QuestDB.
-func (c *Client) InsertMetric(ctx context.Context, m *models.Metric) error {
-	query := `INSERT INTO metrics (agent_id, name, labels, value, type, timestamp)
-		VALUES ($1, $2, $3, $4, $5, $6)`
+func (c *Client) InsertMetric(ctx context.Context, tenant string, m *models.Metric) error {
+	query := `INSERT INTO metrics (agent_id, tenant_id, name, labels, value, type, timestamp)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)`
 
 	_, err := c.pool.Exec(ctx, query,
-		m.AgentID, m.Name, m.Labels, m.Value, m.Type, m.Timestamp)
+		m.AgentID, tenant, m.Name, m.Labels, m.Value, m.Type, m.Timestamp)
 	if err != nil {
 		return fmt.Errorf("insert metric: %w", err)
 	}
@@ -673,13 +673,22 @@ func (c *Client) InsertNetworkEvents(batch *pb.NetworkEventBatch, tenant string)
 // ---- Query Operations ----
 
 // QueryMetrics queries metrics within a time range.
-func (c *Client) QueryMetrics(ctx context.Context, agentID string, metricName string, start, end time.Time) ([]models.Metric, error) {
+// QueryMetrics queries metrics within a time range, scoped to the given
+// tenant. An empty tenant skips the tenant filter and is reserved for
+// internal maintenance paths — user-facing callers MUST pass the
+// authenticated tenant (multi-tenant isolation requirement).
+func (c *Client) QueryMetrics(ctx context.Context, tenant, agentID, metricName string, start, end time.Time) ([]models.Metric, error) {
 	query := `SELECT agent_id, name, labels, value, type, timestamp
 		FROM metrics
-		WHERE agent_id = $1 AND name = $2 AND timestamp >= $3 AND timestamp <= $4
-		ORDER BY timestamp DESC`
+		WHERE agent_id = $1 AND name = $2 AND timestamp >= $3 AND timestamp <= $4`
+	args := []any{agentID, metricName, start, end}
+	if tenant != "" {
+		query += " AND tenant_id = $5"
+		args = append(args, tenant)
+	}
+	query += " ORDER BY timestamp DESC"
 
-	rows, err := c.pool.Query(ctx, query, agentID, metricName, start, end)
+	rows, err := c.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query metrics: %w", err)
 	}
@@ -696,12 +705,19 @@ func (c *Client) QueryMetrics(ctx context.Context, agentID string, metricName st
 	return metrics, rows.Err()
 }
 
-// QueryEvents queries system events from the events table within a time range.
-func (c *Client) QueryEvents(ctx context.Context, agentID, category, severity string, start, end time.Time, limit int) ([]models.Event, error) {
+// QueryEvents queries system events from the events table within a time
+// range, scoped to the given tenant (empty tenant = no filter, internal use
+// only).
+func (c *Client) QueryEvents(ctx context.Context, tenant, agentID, category, severity string, start, end time.Time, limit int) ([]models.Event, error) {
 	where := "WHERE timestamp >= $1 AND timestamp <= $2"
 	args := []interface{}{start, end}
 	argIdx := 3
 
+	if tenant != "" {
+		where += fmt.Sprintf(" AND tenant_id = $%d", argIdx)
+		args = append(args, tenant)
+		argIdx++
+	}
 	if agentID != "" {
 		where += fmt.Sprintf(" AND agent_id = $%d", argIdx)
 		args = append(args, agentID)
@@ -783,14 +799,20 @@ func (c *Client) WriteAggregatedMetric(ctx context.Context, tenant string, m *mo
 	return nil
 }
 
-// QueryAggregatedMetrics queries aggregated metrics.
-func (c *Client) QueryAggregatedMetrics(ctx context.Context, agentID string, metricName string, window time.Duration, start, end time.Time) ([]models.AggregatedMetric, error) {
+// QueryAggregatedMetrics queries aggregated metrics, scoped to the given
+// tenant (empty tenant = no filter, internal maintenance only).
+func (c *Client) QueryAggregatedMetrics(ctx context.Context, tenant, agentID, metricName string, window time.Duration, start, end time.Time) ([]models.AggregatedMetric, error) {
 	query := `SELECT agent_id, name, labels, window, agg_type, value, timestamp
 		FROM aggregated_metrics
-		WHERE agent_id = $1 AND name = $2 AND window = $3 AND timestamp >= $4 AND timestamp <= $5
-		ORDER BY timestamp DESC`
+		WHERE agent_id = $1 AND name = $2 AND window = $3 AND timestamp >= $4 AND timestamp <= $5`
+	args := []any{agentID, metricName, window, start, end}
+	if tenant != "" {
+		query += " AND tenant_id = $6"
+		args = append(args, tenant)
+	}
+	query += " ORDER BY timestamp DESC"
 
-	rows, err := c.pool.Query(ctx, query, agentID, metricName, window, start, end)
+	rows, err := c.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query aggregated: %w", err)
 	}
@@ -809,29 +831,39 @@ func (c *Client) QueryAggregatedMetrics(ctx context.Context, agentID string, met
 
 // ---- Trace Operations ----
 
-// InsertSpan inserts a trace span into QuestDB.
-func (c *Client) InsertSpan(ctx context.Context, span *models.Span) error {
-	query := `INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, service_name, start_time, end_time, duration, status)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+// InsertSpan inserts a trace span into QuestDB with its owning tenant.
+// The tenant_id column is mandatory for trace-level tenant isolation —
+// spans written without it can never be tenant-filtered on read.
+func (c *Client) InsertSpan(ctx context.Context, tenant string, span *models.Span) error {
+	query := `INSERT INTO spans (trace_id, span_id, parent_span_id, name, kind, service_name, tenant_id, start_time, end_time, duration, status)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`
 
 	_, err := c.pool.Exec(ctx, query,
 		span.TraceID, span.SpanID, span.ParentSpanID, span.Name, span.Kind,
-		span.ServiceName, span.StartTime, span.EndTime, span.Duration, span.Status)
+		span.ServiceName, tenant, span.StartTime, span.EndTime, span.Duration, span.Status)
 	if err != nil {
 		return fmt.Errorf("insert span: %w", err)
 	}
 	return nil
 }
 
-// QueryTraces queries traces within a time range.
-func (c *Client) QueryTraces(ctx context.Context, service string, start, end time.Time, limit int) ([]models.Trace, error) {
+// QueryTraces queries traces within a time range, scoped to the given
+// tenant (empty tenant = no filter, internal use only).
+func (c *Client) QueryTraces(ctx context.Context, tenant, service string, start, end time.Time, limit int) ([]models.Trace, error) {
 	query := `SELECT DISTINCT trace_id
 		FROM spans
-		WHERE service_name = $1 AND start_time >= $2 AND start_time <= $3
-		ORDER BY start_time DESC
-		LIMIT $4`
+		WHERE service_name = $1 AND start_time >= $2 AND start_time <= $3`
+	args := []any{service, start, end}
+	argIdx := 4
+	if tenant != "" {
+		query += fmt.Sprintf(" AND tenant_id = $%d", argIdx)
+		args = append(args, tenant)
+		argIdx++
+	}
+	query += fmt.Sprintf(` ORDER BY start_time DESC LIMIT $%d`, argIdx)
+	args = append(args, limit)
 
-	rows, err := c.pool.Query(ctx, query, service, start, end, limit)
+	rows, err := c.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query traces: %w", err)
 	}
@@ -849,7 +881,7 @@ func (c *Client) QueryTraces(ctx context.Context, service string, start, end tim
 	// Fetch spans for each trace.
 	var traces []models.Trace
 	for _, traceID := range traceIDs {
-		trace, err := c.getTrace(ctx, traceID)
+		trace, err := c.getTrace(ctx, tenant, traceID)
 		if err != nil {
 			continue
 		}
@@ -858,13 +890,18 @@ func (c *Client) QueryTraces(ctx context.Context, service string, start, end tim
 	return traces, nil
 }
 
-func (c *Client) getTrace(ctx context.Context, traceID string) (*models.Trace, error) {
+func (c *Client) getTrace(ctx context.Context, tenant, traceID string) (*models.Trace, error) {
 	query := `SELECT trace_id, span_id, parent_span_id, name, kind, service_name, start_time, end_time, duration, status
 		FROM spans
-		WHERE trace_id = $1
-		ORDER BY start_time`
+		WHERE trace_id = $1`
+	args := []any{traceID}
+	if tenant != "" {
+		query += " AND tenant_id = $2"
+		args = append(args, tenant)
+	}
+	query += " ORDER BY start_time"
 
-	rows, err := c.pool.Query(ctx, query, traceID)
+	rows, err := c.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("query spans: %w", err)
 	}
@@ -892,32 +929,38 @@ func (c *Client) getTrace(ctx context.Context, traceID string) (*models.Trace, e
 
 // ---- Network Event Query Operations ----
 
-// queryTCPClause builds a dynamic WHERE clause for agent_id filtering.
-// Returns the base query and args slice.
-func queryTCPClause(agentID string, start, end time.Time, limit int) (string, []any) {
-	if agentID != "" {
-		return `SELECT timestamp, agent_id, event_type, source_ip, source_port,
-			destination_ip, destination_port, state, bytes_sent, bytes_received,
-			pid, process_name
-		FROM tcp_events
-		WHERE agent_id = $1 AND timestamp >= $2 AND timestamp <= $3
-		ORDER BY timestamp DESC
-		LIMIT $4`,
-			[]any{agentID, start, end, limit}
+// networkEventClause builds a parameterized WHERE/ORDER/LIMIT tail for the
+// network event tables, filtering by tenant and optionally by agent.
+// Returns the SQL tail (starting at "WHERE") and the args slice.
+// Empty tenant skips the tenant filter (internal use only).
+func networkEventClause(tenant, agentID string, start, end time.Time, limit int) (string, []any) {
+	where := "WHERE timestamp >= $1 AND timestamp <= $2"
+	args := []any{start, end}
+	argIdx := 3
+
+	if tenant != "" {
+		where += fmt.Sprintf(" AND tenant_id = $%d", argIdx)
+		args = append(args, tenant)
+		argIdx++
 	}
-	return `SELECT timestamp, agent_id, event_type, source_ip, source_port,
-		destination_ip, destination_port, state, bytes_sent, bytes_received,
-		pid, process_name
-	FROM tcp_events
-	WHERE timestamp >= $1 AND timestamp <= $2
-	ORDER BY timestamp DESC
-	LIMIT $3`,
-		[]any{start, end, limit}
+	if agentID != "" {
+		where += fmt.Sprintf(" AND agent_id = $%d", argIdx)
+		args = append(args, agentID)
+		argIdx++
+	}
+
+	where += fmt.Sprintf(" ORDER BY timestamp DESC LIMIT $%d", argIdx)
+	args = append(args, limit)
+	return where, args
 }
 
-// QueryTCPEvents queries TCP network events from QuestDB.
-func (c *Client) QueryTCPEvents(ctx context.Context, agentID string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
-	query, args := queryTCPClause(agentID, start, end, limit)
+// QueryTCPEvents queries TCP network events from QuestDB, scoped to tenant.
+func (c *Client) QueryTCPEvents(ctx context.Context, tenant, agentID string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
+	clause, args := networkEventClause(tenant, agentID, start, end, limit)
+	query := `SELECT timestamp, agent_id, event_type, source_ip, source_port,
+		destination_ip, destination_port, state, bytes_sent, bytes_received,
+		pid, process_name
+	FROM tcp_events ` + clause
 
 	rows, err := c.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -961,27 +1004,11 @@ func (c *Client) QueryTCPEvents(ctx context.Context, agentID string, start, end 
 	return results, rows.Err()
 }
 
-// queryDNSClause builds a dynamic WHERE clause for agent_id filtering.
-func queryDNSClause(agentID string, start, end time.Time, limit int) (string, []any) {
-	if agentID != "" {
-		return `SELECT timestamp, agent_id, query_name, query_type, latency_ms, pid
-		FROM dns_events
-		WHERE agent_id = $1 AND timestamp >= $2 AND timestamp <= $3
-		ORDER BY timestamp DESC
-		LIMIT $4`,
-			[]any{agentID, start, end, limit}
-	}
-	return `SELECT timestamp, agent_id, query_name, query_type, latency_ms, pid
-	FROM dns_events
-	WHERE timestamp >= $1 AND timestamp <= $2
-	ORDER BY timestamp DESC
-	LIMIT $3`,
-		[]any{start, end, limit}
-}
-
-// QueryDNSEvents queries DNS network events from QuestDB.
-func (c *Client) QueryDNSEvents(ctx context.Context, agentID string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
-	query, args := queryDNSClause(agentID, start, end, limit)
+// QueryDNSEvents queries DNS network events from QuestDB, scoped to tenant.
+func (c *Client) QueryDNSEvents(ctx context.Context, tenant, agentID string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
+	clause, args := networkEventClause(tenant, agentID, start, end, limit)
+	query := `SELECT timestamp, agent_id, query_name, query_type, latency_ms, pid
+	FROM dns_events ` + clause
 
 	rows, err := c.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1004,41 +1031,24 @@ func (c *Client) QueryDNSEvents(ctx context.Context, agentID string, start, end 
 			return nil, fmt.Errorf("scan dns event: %w", err)
 		}
 		results = append(results, map[string]interface{}{
-			"type":        "dns",
-			"timestamp":   ts.UnixMilli(),
-			"agent_id":    agentIDVal,
-			"query_name":  nullStringVal(queryName),
-			"query_type":  nullStringVal(queryType),
-			"latency_ms":  nullFloat64Val(latencyMs),
-			"pid":         nullInt32Val(pid),
+			"type":       "dns",
+			"timestamp":  ts.UnixMilli(),
+			"agent_id":   agentIDVal,
+			"query_name": nullStringVal(queryName),
+			"query_type": nullStringVal(queryType),
+			"latency_ms": nullFloat64Val(latencyMs),
+			"pid":        nullInt32Val(pid),
 		})
 	}
 	return results, rows.Err()
 }
 
-// queryHTTPClause builds a dynamic WHERE clause for agent_id filtering.
-func queryHTTPClause(agentID string, start, end time.Time, limit int) (string, []any) {
-	if agentID != "" {
-		return `SELECT timestamp, agent_id, method, path, status_code, latency_ms,
-			source_ip, destination_ip, destination_port, host, pid
-		FROM http_events
-		WHERE agent_id = $1 AND timestamp >= $2 AND timestamp <= $3
-		ORDER BY timestamp DESC
-		LIMIT $4`,
-			[]any{agentID, start, end, limit}
-	}
-	return `SELECT timestamp, agent_id, method, path, status_code, latency_ms,
+// QueryHTTPEvents queries HTTP network events from QuestDB, scoped to tenant.
+func (c *Client) QueryHTTPEvents(ctx context.Context, tenant, agentID string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
+	clause, args := networkEventClause(tenant, agentID, start, end, limit)
+	query := `SELECT timestamp, agent_id, method, path, status_code, latency_ms,
 		source_ip, destination_ip, destination_port, host, pid
-	FROM http_events
-	WHERE timestamp >= $1 AND timestamp <= $2
-	ORDER BY timestamp DESC
-	LIMIT $3`,
-		[]any{start, end, limit}
-}
-
-// QueryHTTPEvents queries HTTP network events from QuestDB.
-func (c *Client) QueryHTTPEvents(ctx context.Context, agentID string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
-	query, args := queryHTTPClause(agentID, start, end, limit)
+	FROM http_events ` + clause
 
 	rows, err := c.pool.Query(ctx, query, args...)
 	if err != nil {
@@ -1078,35 +1088,36 @@ func (c *Client) QueryHTTPEvents(ctx context.Context, agentID string, start, end
 	return results, rows.Err()
 }
 
-// QueryNetworkEvents queries network events from the appropriate QuestDB table(s).
-// If eventType is empty, all three tables are queried and results are merged.
-func (c *Client) QueryNetworkEvents(ctx context.Context, agentID, eventType string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
+// QueryNetworkEvents queries network events from the appropriate QuestDB
+// table(s), scoped to tenant. If eventType is empty, all three tables are
+// queried and results are merged.
+func (c *Client) QueryNetworkEvents(ctx context.Context, tenant, agentID, eventType string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
 	switch eventType {
 	case "tcp":
-		return c.QueryTCPEvents(ctx, agentID, start, end, limit)
+		return c.QueryTCPEvents(ctx, tenant, agentID, start, end, limit)
 	case "dns":
-		return c.QueryDNSEvents(ctx, agentID, start, end, limit)
+		return c.QueryDNSEvents(ctx, tenant, agentID, start, end, limit)
 	case "http":
-		return c.QueryHTTPEvents(ctx, agentID, start, end, limit)
+		return c.QueryHTTPEvents(ctx, tenant, agentID, start, end, limit)
 	case "":
 		// Query all tables and merge results.
 		var all []map[string]interface{}
 
-		tcpEvents, err := c.QueryTCPEvents(ctx, agentID, start, end, limit)
+		tcpEvents, err := c.QueryTCPEvents(ctx, tenant, agentID, start, end, limit)
 		if err != nil {
 			slog.Warn("query tcp events failed", "error", err)
 		} else {
 			all = append(all, tcpEvents...)
 		}
 
-		dnsEvents, err := c.QueryDNSEvents(ctx, agentID, start, end, limit)
+		dnsEvents, err := c.QueryDNSEvents(ctx, tenant, agentID, start, end, limit)
 		if err != nil {
 			slog.Warn("query dns events failed", "error", err)
 		} else {
 			all = append(all, dnsEvents...)
 		}
 
-		httpEvents, err := c.QueryHTTPEvents(ctx, agentID, start, end, limit)
+		httpEvents, err := c.QueryHTTPEvents(ctx, tenant, agentID, start, end, limit)
 		if err != nil {
 			slog.Warn("query http events failed", "error", err)
 		} else {

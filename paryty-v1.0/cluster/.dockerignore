@@ -1,0 +1,9 @@
+*.log
+*.exe
+coverage*
+*.out
+bin/
+fix-podman.sh
+kill-infra.sh
+test_proc.sh
+start_query.ps1

@@ -77,8 +77,50 @@ func GinJWTAuth(tm *TokenManager) gin.HandlerFunc {
 	}
 }
 
-// GinOptionalAuth is like GinJWTAuth but does NOT abort if no token is present.
-// If a valid token IS present, the claims are injected. If not, the request
+// GinJWTAuthFlexible validates a Bearer access token from the Authorization
+// header OR, when no header is present, from the "token" query parameter.
+//
+// The query-parameter path exists exclusively for browser streaming APIs
+// (WebSocket upgrade, EventSource/SSE) that cannot set custom request
+// headers. Regular REST endpoints MUST use GinJWTAuth instead so tokens
+// never appear in access logs via URLs.
+func GinJWTAuthFlexible(tm *TokenManager) gin.HandlerFunc {
+	headerAuth := GinJWTAuth(tm)
+	return func(c *gin.Context) {
+		if c.GetHeader("Authorization") != "" {
+			headerAuth(c)
+			return
+		}
+
+		tokenStr := strings.TrimSpace(c.Query("token"))
+		if tokenStr == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error":   "UNAUTHENTICATED",
+				"message": "Provide a Bearer token or 'token' query parameter.",
+			})
+			return
+		}
+
+		claims, err := tm.ValidateAccess(tokenStr)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+				"error":   "UNAUTHENTICATED",
+				"message": "Invalid or expired token.",
+			})
+			return
+		}
+
+		c.Set(string(plan.CtxTenantID), claims.TenantID)
+		c.Set(string(plan.CtxPlanName), claims.PlanName)
+		c.Set(string(plan.CtxUserID), claims.Subject)
+		c.Set(string(plan.CtxUserRole), claims.Role)
+		c.Set(string(plan.CtxPermissions), claims.Permissions)
+
+		c.Next()
+	}
+}
+
+// GinOptionalAuth is like GinJWTAuth but does NOT abort if no token is present.// If a valid token IS present, the claims are injected. If not, the request
 // continues anonymously. This is useful for public endpoints that have
 // optional personalization.
 func GinOptionalAuth(tm *TokenManager) gin.HandlerFunc {

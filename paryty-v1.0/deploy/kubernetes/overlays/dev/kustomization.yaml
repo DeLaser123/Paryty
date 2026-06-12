@@ -12,9 +12,30 @@ commonLabels:
   environment: dev
 
 patches:
+  # Ingestion service - minimal resources for dev
   - target:
       kind: Deployment
-      name: paryty-cluster
+      name: paryty-ingestion
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 50m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 64Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 200m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 128Mi
+  # Pipeline service - minimal resources for dev
+  - target:
+      kind: Deployment
+      name: paryty-pipeline
     patch: |
       - op: replace
         path: /spec/replicas
@@ -30,7 +51,48 @@ patches:
         value: 500m
       - op: replace
         path: /spec/template/spec/containers/0/resources/limits/memory
-        value: 512Mi
+        value: 256Mi
+  # Query service - minimal resources for dev
+  - target:
+      kind: Deployment
+      name: paryty-query
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 50m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 64Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 200m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 128Mi
+  # Intelligence service - minimal resources for dev
+  - target:
+      kind: Deployment
+      name: paryty-intelligence
+    patch: |
+      - op: replace
+        path: /spec/replicas
+        value: 1
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/cpu
+        value: 100m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/requests/memory
+        value: 128Mi
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/cpu
+        value: 500m
+      - op: replace
+        path: /spec/template/spec/containers/0/resources/limits/memory
+        value: 256Mi
+  # Frontend service - minimal resources for dev
   - target:
       kind: Deployment
       name: paryty-frontend
@@ -50,6 +112,47 @@ patches:
       - op: replace
         path: /spec/template/spec/containers/0/resources/limits/memory
         value: 128Mi
+  # Disable HPAs in dev
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: paryty-ingestion
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: paryty-pipeline
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: paryty-query
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
+  - target:
+      kind: HorizontalPodAutoscaler
+      name: paryty-intelligence
+    patch: |
+      - op: replace
+        path: /spec/minReplicas
+        value: 1
+      - op: replace
+        path: /spec/maxReplicas
+        value: 2
 
 configMapGenerator:
   - name: paryty-config-override

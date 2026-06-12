@@ -5,9 +5,8 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ mode }) => {
   // Load env from frontend/.env (or parent) — VITE_API_URL / VITE_WS_URL
   // default to 127.0.0.1:8080 matching the Go query service default port.
-  const env = loadEnv(mode, process.cwd(), '');
-  const apiTarget = env.VITE_API_URL || 'http://127.0.0.1:8080';
-  const wsTarget = env.VITE_WS_URL || 'ws://127.0.0.1:8080';
+  const apiTarget = process.env.VITE_API_URL || 'http://127.0.0.1:8080';
+  const wsTarget = process.env.VITE_WS_URL || 'ws://127.0.0.1:8080';
 
   return {
     plugins: [react()],

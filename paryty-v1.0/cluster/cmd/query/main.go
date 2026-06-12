@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -68,6 +69,46 @@ func buildPermissionsFromRole(role string) map[string]bool {
 		permissions["twins:read"] = true
 	}
 	return permissions
+}
+
+// loadEventConsumerTenants returns the tenant IDs whose Redpanda event
+// topics should be consumed for WebSocket fanout. Active tenants come from
+// the control plane when PostgreSQL is configured; otherwise the
+// PARYTY_WS_TENANTS env var (comma-separated) is used, defaulting to
+// "default" for single-tenant development setups.
+func loadEventConsumerTenants(ctx context.Context, cpPool *pgxpool.Pool, logger *zap.Logger) []string {
+	if cpPool != nil {
+		rows, err := cpPool.Query(ctx, `SELECT tenant_id FROM tenants WHERE status = 'active'`)
+		if err == nil {
+			defer rows.Close()
+			var tenants []string
+			for rows.Next() {
+				var id string
+				if err := rows.Scan(&id); err == nil && id != "" {
+					tenants = append(tenants, id)
+				}
+			}
+			if rows.Err() == nil && len(tenants) > 0 {
+				return tenants
+			}
+		} else {
+			logger.Warn("Failed to enumerate tenants from control plane; falling back to PARYTY_WS_TENANTS", zap.Error(err))
+		}
+	}
+
+	if v := os.Getenv("PARYTY_WS_TENANTS"); v != "" {
+		var tenants []string
+		for _, t := range strings.Split(v, ",") {
+			if trimmed := strings.TrimSpace(t); trimmed != "" {
+				tenants = append(tenants, trimmed)
+			}
+		}
+		if len(tenants) > 0 {
+			return tenants
+		}
+	}
+
+	return []string{"default"}
 }
 
 // contextString safely extracts a string value from a Gin context.
@@ -201,10 +242,17 @@ func main() {
 	logger.Info("Plan engine initialized", zap.Int("plans", len(plansCfg.Plans)))
 
 	// Initialize JWT token manager.
+	// Production deployments MUST set PARYTY_JWT_SECRET. The insecure
+	// development fallback is only used when PARYTY_DEV_MODE=true — a
+	// missing secret in production is a fatal misconfiguration, not a
+	// warning, because every access token would be forgeable.
 	jwtSecret := os.Getenv("PARYTY_JWT_SECRET")
 	if jwtSecret == "" {
+		if os.Getenv("PARYTY_DEV_MODE") != "true" {
+			logger.Fatal("PARYTY_JWT_SECRET is required in production (set PARYTY_DEV_MODE=true for local development)")
+		}
 		jwtSecret = "paryty-dev-jwt-secret-change-in-production-min-32-bytes!!"
-		logger.Warn("Using default JWT secret â€” set PARYTY_JWT_SECRET in production!")
+		logger.Warn("DEV MODE: using built-in JWT secret — never run this configuration in production")
 	}
 	tokenManager, err := auth.NewTokenManager([]byte(jwtSecret))
 	if err != nil {
@@ -242,8 +290,20 @@ func main() {
 	queryService.SetDB(cpPool)
 	queryService.SetPlanEngine(planEngine)
 
-	// Create WebSocket handler
-	wsHandler := api.NewWebSocketHandler(store, logger)
+	// Parse the shared origin allow-list once — it governs both HTTP CORS
+	// and WebSocket upgrade origin checks. PARYTY_CORS_ORIGINS is
+	// comma-separated; empty means allow-all without credentials (dev).
+	var corsOrigins []string
+	if v := os.Getenv("PARYTY_CORS_ORIGINS"); v != "" {
+		for _, o := range strings.Split(v, ",") {
+			if trimmed := strings.TrimSpace(o); trimmed != "" {
+				corsOrigins = append(corsOrigins, trimmed)
+			}
+		}
+	}
+
+	// Create WebSocket handler. Origin allow-list mirrors HTTP CORS config.
+	wsHandler := api.NewWebSocketHandler(store, logger, corsOrigins)
 
 	// Create SSE handler
 	sseHandler := api.NewSSEHandler(store, logger, cfg.Cluster.Stream.Brokers)
@@ -254,23 +314,25 @@ func main() {
 	// Create Gin router
 	router := gin.New()
 	router.Use(gin.Recovery())
-	// Phase 8 middleware chain: CORS â†’ RequestID â†’ AuditBegin
-	router.Use(security.CORS())
+	// Phase 8 middleware chain: CORS → RequestID → AuditBegin
+	router.Use(security.CORS(corsOrigins...))
 	router.Use(security.RequestID())
 	router.Use(security.AuditBegin(auditLogger))
 
-	// Health check endpoint
-	router.GET("/health", func(c *gin.Context) {
+	// Health check endpoints (public — liveness probes cannot authenticate).
+	healthHandler := func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"status":  "healthy",
 			"service": "paryty-query",
 			"cache":   "connected",
 		})
-	})
+	}
+	router.GET("/health", healthHandler)
+	router.GET("/api/v1/health", healthHandler)
 
-	// Register real query routes (rest.go: RegisterRoutes)
-	root := router.Group("")
-	queryService.RegisterRoutes(root)
+	// NOTE: query data routes (topology/metrics/traces/agents/timeline) are
+	// registered on the JWT-protected group below — they expose tenant data
+	// and MUST never be mounted on an unauthenticated group.
 
 	// â”€â”€ Phase 8: Register Auth Routes (PostgreSQL-backed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -278,7 +340,7 @@ func main() {
 	public := router.Group("/api/v1/auth")
 
 	if cpPool != nil {
-		authHandler := auth.NewAuthHandler(tokenManager, cpPool, planEngine)
+		authHandler := auth.NewAuthHandler(tokenManager, cpPool, planEngine, logger)
 		authAdapter := auth.NewAuthRESTAdapter(authHandler, cpPool, planEngine)
 
 		public.POST("/register", authAdapter.Register)
@@ -335,6 +397,10 @@ func main() {
 	authd.Use(auth.GinJWTAuth(tokenManager))
 	authd.Use(plan.GinPlanInfoInjector(planEngine))
 	authd.Use(security.RateLimit(security.DefaultRateLimitConfig()))
+
+	// Register query data routes (rest.go) on the JWT-protected group.
+	// Tenant scope for every handler is derived from JWT claims.
+	queryService.RegisterRoutes(authd)
 	{
 		authd.GET("/me", func(c *gin.Context) {
 			uid := contextString(c, string(plan.CtxUserID))
@@ -499,15 +565,18 @@ func main() {
 
 	logger.Info("Phase 8 auth routes registered")
 
-	// Wire WebSocket endpoint
-	router.GET("/ws", wsHandler.HandleWebSocket)
+	// Wire WebSocket endpoint. GinJWTAuthFlexible accepts the token as a
+	// query parameter because the browser WebSocket API cannot set headers.
+	router.GET("/ws", auth.GinJWTAuthFlexible(tokenManager), wsHandler.HandleWebSocket)
 
-	// Wire SSE endpoints
-	router.GET("/api/v1/timeline/replay", sseHandler.HandleTimeline)
-	router.GET("/api/v1/metrics/:agent_id/stream", sseHandler.HandleMetricsStream)
-	router.GET("/api/v1/events/stream", sseHandler.HandleEventStream)
+	// Wire SSE endpoints — same flexible auth (EventSource cannot set headers).
+	sseAuth := auth.GinJWTAuthFlexible(tokenManager)
+	router.GET("/api/v1/timeline/replay", sseAuth, sseHandler.HandleTimeline)
+	router.GET("/api/v1/metrics/:agent_id/stream", sseAuth, sseHandler.HandleMetricsStream)
+	router.GET("/api/v1/events/stream", sseAuth, sseHandler.HandleEventStream)
 
-	// Wire intelligence API handlers (Phase 6)
+	// Wire intelligence API handlers (Phase 6) — JWT-protected and plan-gated:
+	// intelligence results are tenant-confidential and a paid-plan feature.
 	intelCfg := api.NewIntelConfigFromEnv()
 	intelHandlers, err := api.NewIntelHandlers(intelCfg, logger)
 	if err != nil {
@@ -517,9 +586,13 @@ func main() {
 		)
 		// Non-fatal: the rest of the query service works without intelligence.
 	} else {
-		intelHandlers.RegisterRoutes(root)
+		intelGroup := router.Group("/api/v1")
+		intelGroup.Use(auth.GinJWTAuth(tokenManager))
+		intelGroup.Use(plan.GinPlanInfoInjector(planEngine))
+		intelGroup.Use(plan.GinFeatureGate(planEngine, "paryty_intel"))
+		intelHandlers.RegisterRoutes(intelGroup)
 		defer intelHandlers.Close()
-		logger.Info("Intelligence API routes registered",
+		logger.Info("Intelligence API routes registered (JWT + paryty_intel feature gate)",
 			zap.String("address", intelCfg.Address),
 		)
 	}
@@ -532,8 +605,10 @@ func main() {
 
 	logger.Info("All query routes registered")
 
-	// Start Redpanda event consumers for WebSocket fanout (all active tenants)
-	tenants := []string{"default", "gai-tech", "tenant1", "tenant-b"}
+	// Start Redpanda event consumers for WebSocket fanout.
+	// Tenants are enumerated from the control plane when available;
+	// otherwise PARYTY_WS_TENANTS (comma-separated) provides the list.
+	tenants := loadEventConsumerTenants(ctx, cpPool, logger)
 	for _, t := range tenants {
 		tenant := t // capture loop variable
 		go func() {

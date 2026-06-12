@@ -24,10 +24,20 @@ import (
 // (10K → 256 values per window).
 // =============================================================================
 
-func TestWindowBuffer_100KAgents_MemoryLoad(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
+// allocDelta returns the heap growth between two MemStats.Alloc readings.
+// Alloc values are uint64 and the heap can SHRINK between readings (GC may
+// reclaim allocations made by earlier tests in the same binary); naive
+// subtraction then underflows to a near-2^64 garbage value. A shrinking
+// heap means the workload added no net memory, so the delta is 0.
+func allocDelta(before, after uint64) uint64 {
+	if after < before {
+		return 0
 	}
+	return after - before
+}
+
+func TestWindowBuffer_100KAgents_MemoryLoad(t *testing.T) {
+	skipIfLoadTestInfeasible(t)
 
 	const agentCount = 100_000
 	const windowsPerAgent = 4 // 1m, 5m, 1h, 1d
@@ -62,7 +72,7 @@ func TestWindowBuffer_100KAgents_MemoryLoad(t *testing.T) {
 	runtime.GC()
 	var memAfter runtime.MemStats
 	runtime.ReadMemStats(&memAfter)
-	deltaAlloc := memAfter.Alloc - baselineAlloc
+	deltaAlloc := allocDelta(baselineAlloc, memAfter.Alloc)
 	memoryPerWindow := deltaAlloc / uint64(windowCount)
 
 	t.Logf("=== Window Buffer Memory Load Results ===")
@@ -103,9 +113,7 @@ func TestWindowBuffer_100KAgents_MemoryLoad(t *testing.T) {
 // =============================================================================
 
 func TestWindowBuffer_100KAgents_MemoryWithWindowStateManager(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
-	}
+	skipIfLoadTestInfeasible(t)
 
 	wm := NewWindowStateManager(WindowManagerConfig{
 		GracePeriod: 5 * time.Minute,
@@ -141,7 +149,7 @@ func TestWindowBuffer_100KAgents_MemoryWithWindowStateManager(t *testing.T) {
 	runtime.GC()
 	var memAfter runtime.MemStats
 	runtime.ReadMemStats(&memAfter)
-	deltaAlloc := memAfter.Alloc - baselineAlloc
+	deltaAlloc := allocDelta(baselineAlloc, memAfter.Alloc)
 
 	t.Logf("=== WindowStateManager Memory Results ===")
 	t.Logf("Agents: %d, Values per agent: %d", agentCount, valuesPerAgent)
@@ -219,9 +227,7 @@ func TestWindowBuffer_100KAgents_EvictionAtCapacity(t *testing.T) {
 // =============================================================================
 
 func TestPercentile_100KAgents_PerformanceLoad(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
-	}
+	skipIfLoadTestInfeasible(t)
 
 	const agentCount = 100_000
 	const windowsPerAgent = 4
@@ -316,9 +322,7 @@ func TestPercentile_100KAgents_CorrectnessUnderLoad(t *testing.T) {
 // =============================================================================
 
 func TestWindowStateManager_100KAgents_GetClosedWindows(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
-	}
+	skipIfLoadTestInfeasible(t)
 
 	const agentCount = 100_000
 
@@ -434,9 +438,7 @@ func TestWindowBuffer_100KAgents_ConcurrentAddValue(t *testing.T) {
 // =============================================================================
 
 func TestWindowBuffer_100KAgents_SnapshotPerformance(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
-	}
+	skipIfLoadTestInfeasible(t)
 
 	const agentCount = 100_000
 

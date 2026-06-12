@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
 	pb "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
@@ -773,4 +774,40 @@ func firstOrEmpty(ss []string) string {
 		return ss[0]
 	}
 	return ""
+}
+
+// RLSTenantInterceptor is a gRPC unary interceptor that sets the PostgreSQL
+// session variable `app.current_tenant_id` for every authenticated request.
+// This enables Row-Level Security policies to enforce tenant isolation at
+// the database level.
+//
+// This interceptor MUST be applied after the AuthInterceptor to ensure the
+// tenant ID is available in the context.
+func RLSTenantInterceptor(db *pgxpool.Pool) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		if db == nil {
+			return handler(ctx, req)
+		}
+
+		tenant := TenantFromContext(ctx)
+		if tenant == "" || tenant == "default" {
+			// No tenant context, continue (auth interceptor will handle rejection)
+			return handler(ctx, req)
+		}
+
+		// Set the PostgreSQL session variable for RLS
+		// SET LOCAL does not support parameterized queries, so we use fmt.Sprintf.
+		// The tenant ID comes from a validated API key, so this is safe.
+		_, err := db.Exec(ctx, fmt.Sprintf("SET LOCAL app.current_tenant_id = '%s'", tenant))
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to set RLS tenant context: %v", err)
+		}
+
+		return handler(ctx, req)
+	}
 }

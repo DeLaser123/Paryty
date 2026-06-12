@@ -20,7 +20,7 @@ import { useAuthStore } from '../stores/authStore';
 import { usePlanStore } from '../stores/planStore';
 import { useToastStore } from '../stores/toastStore';
 import { getRestClient } from '../api/rest';
-import type { ApiKey, CreateApiKeyResponse } from '../types/apiKeys';
+import type { ApiKey, CreateApiKeyResponse, RotateApiKeyResponse } from '../types/apiKeys';
 import type { SubUser, CreateSubUserParams } from '../types/auth';
 import { ParytySelect } from '../components/common/ParytySelect';
 
@@ -330,6 +330,20 @@ function ApiKeysTab() {
     }
   }, [client, addToast]);
 
+  const handleRotate = useCallback(async (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to rotate the key "${name}"? The old key will be invalidated immediately.`)) {
+      return;
+    }
+    try {
+      const result = await client.put<RotateApiKeyResponse>(`/api/v1/api-keys/${id}/rotate`);
+      setNewKey({ ...result, name, createdAt: new Date().toISOString() });
+      addToast({ type: 'success', message: 'API key rotated. Copy the new key now — it won\'t be shown again.' });
+      fetchKeys();
+    } catch {
+      addToast({ type: 'error', message: 'Failed to rotate API key.' });
+    }
+  }, [client, addToast, fetchKeys]);
+
   const handleCopy = useCallback(async (key: string) => {
     try {
       await navigator.clipboard.writeText(key);
@@ -349,7 +363,7 @@ function ApiKeysTab() {
         <div className="aef-container-card" style={{ marginBottom: 'var(--aef-space-4)', borderColor: 'var(--aef-accent)' }}>
           <div className="aef-container-card__body">
             <p style={{ fontFamily: 'var(--aef-font-body)', fontSize: 12, color: 'var(--aef-accent)', fontWeight: 600 }}>
-              Key created! Copy it now — it won&apos;t be shown again.
+              {newKey.name ? 'Key rotated!' : 'Key created!'} Copy it now — it won&apos;t be shown again.
             </p>
             <div style={{
               display: 'flex', alignItems: 'center', gap: 'var(--aef-space-2)',
@@ -376,24 +390,32 @@ function ApiKeysTab() {
       )}
 
       {/* Create form */}
-      <div style={{ display: 'flex', gap: 'var(--aef-space-2)', marginBottom: 'var(--aef-space-4)' }}>
-        <input
-          className="dp-field__input"
-          type="text"
-          placeholder="Key name (e.g. CI/CD Pipeline)"
-          value={keyName}
-          onChange={(e) => setKeyName(e.target.value)}
-          style={{ flex: 1 }}
-          data-testid="api-key-name"
-        />
-        <button
-          className="aef-btn aef-btn-active"
-          onClick={handleCreate}
-          disabled={isCreating || !keyName.trim()}
-          data-testid="create-api-key"
-        >
-          <Plus size={14} /> Create
-        </button>
+      <div className="aef-container-card" style={{ marginBottom: 'var(--aef-space-4)' }}>
+        <div className="aef-container-card__header">
+          <Key size={14} />
+          <span className="aef-container-card__title">Create API Key</span>
+        </div>
+        <div className="aef-container-card__body">
+          <div style={{ display: 'flex', gap: 'var(--aef-space-2)' }}>
+            <input
+              className="dp-field__input"
+              type="text"
+              placeholder="Key name (e.g. CI/CD Pipeline)"
+              value={keyName}
+              onChange={(e) => setKeyName(e.target.value)}
+              style={{ flex: 1 }}
+              data-testid="api-key-name"
+            />
+            <button
+              className="aef-btn aef-btn-active"
+              onClick={handleCreate}
+              disabled={isCreating || !keyName.trim()}
+              data-testid="create-api-key"
+            >
+              <Plus size={14} /> Create
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Key list */}
@@ -402,32 +424,61 @@ function ApiKeysTab() {
           No API keys yet. Create one to access the Paryty API.
         </p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--aef-space-2)' }}>
-          {keys.map((key) => (
-            <div key={key.id} className="dp-confirm-row" style={{ justifyContent: 'space-between', alignItems: 'center' }}>
-              <div>
-                <span style={{ fontSize: 12, fontFamily: 'var(--aef-font-body)', color: 'var(--aef-text-primary)' }}>
-                  {key.name}
-                </span>
-                <span style={{ fontSize: 11, color: 'var(--aef-text-secondary)', marginLeft: 'var(--aef-space-2)' }}>
-                  {key.prefix}…
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 'var(--aef-space-2)', alignItems: 'center' }}>
-                <span style={{ fontSize: 11, color: 'var(--aef-text-secondary)' }}>
-                  {new Date(key.createdAt).toLocaleDateString()}
-                </span>
-                <button
-                  className="aef-btn aef-btn-inactive"
-                  onClick={() => handleDelete(key.id)}
-                  aria-label={`Delete key ${key.name}`}
-                  style={{ padding: '2px 6px' }}
-                >
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            </div>
-          ))}
+        <div className="aef-table-card">
+          <div className="aef-table-card__header">
+            <span>API Keys</span>
+            <span className="aef-badge">{keys.length}</span>
+          </div>
+          <div className="aef-table-card__body">
+            <table className="aef-table">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Prefix</th>
+                  <th>Created</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {keys.map((key) => (
+                  <tr key={key.id}>
+                    <td>
+                      <span className="aef-text-primary">{key.name}</span>
+                    </td>
+                    <td>
+                      <code className="aef-text-secondary">{key.prefix}…</code>
+                    </td>
+                    <td>
+                      <span className="aef-text-secondary">
+                        {new Date(key.createdAt).toLocaleDateString()}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 'var(--aef-space-1)' }}>
+                        <button
+                          className="aef-btn aef-btn-inactive"
+                          onClick={() => handleRotate(key.id, key.name)}
+                          aria-label={`Rotate key ${key.name}`}
+                          style={{ padding: '2px 6px' }}
+                          title="Rotate key"
+                        >
+                          <ArrowUpRight size={12} />
+                        </button>
+                        <button
+                          className="aef-btn aef-btn-inactive"
+                          onClick={() => handleDelete(key.id)}
+                          aria-label={`Delete key ${key.name}`}
+                          style={{ padding: '2px 6px' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
     </div>
@@ -452,8 +503,9 @@ function UsersTab() {
 
   const fetchSubUsers = useCallback(async () => {
     try {
-      const data = await client.get<SubUser[]>('/api/v1/users');
-      setSubUsers(data);
+      // BUGFIX: /api/v1/users returns {data: [...]} (envelope), not a raw array.
+      const resp = await client.get<{ data: SubUser[] }>('/api/v1/users');
+      setSubUsers(resp.data ?? []);
     } catch {
       // Ignore
     }

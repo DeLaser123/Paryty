@@ -135,8 +135,13 @@ func (c *Client) SetTopology(ctx context.Context, tenant string, topo *models.To
 
 // GetTopology retrieves the current topology for a tenant.
 func (c *Client) GetTopology(ctx context.Context, tenant string) (*models.Topology, error) {
+	// BUGFIX: redis.Nil means no topology stored yet — return nil (not an error)
+	// so callers can distinguish "no data" from a real storage failure.
 	data, err := c.rdb.Get(ctx, topologyKey(tenant)).Bytes()
 	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get topology: %w", err)
 	}
 	var topo models.Topology
@@ -159,8 +164,12 @@ func (c *Client) SetLatestMetrics(ctx context.Context, tenant, agentID string, b
 
 // GetLatestMetrics retrieves the latest metrics for a tenant's agent.
 func (c *Client) GetLatestMetrics(ctx context.Context, tenant, agentID string) (*models.MetricBatch, error) {
+	// BUGFIX: redis.Nil means no metrics stored for this agent yet.
 	data, err := c.rdb.Get(ctx, metricsKey(tenant, agentID)).Bytes()
 	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get metrics: %w", err)
 	}
 	var batch models.MetricBatch
@@ -218,8 +227,14 @@ func (c *Client) SetActiveAlerts(ctx context.Context, tenant string, alerts []mo
 
 // GetActiveAlerts retrieves the current active alerts for a tenant.
 func (c *Client) GetActiveAlerts(ctx context.Context, tenant string) ([]models.Alert, error) {
+	// BUGFIX: redis.Nil means the key doesn't exist — no alerts have been
+	// stored yet. Return an empty list instead of an error to prevent 500s
+	// on the /api/v1/alerts endpoint when the system is freshly started.
 	data, err := c.rdb.Get(ctx, alertsKey(tenant)).Bytes()
 	if err != nil {
+		if err == redis.Nil {
+			return []models.Alert{}, nil
+		}
 		return nil, fmt.Errorf("get alerts: %w", err)
 	}
 	var alerts []models.Alert
@@ -242,8 +257,12 @@ func (c *Client) SetAgentState(ctx context.Context, tenant string, agent *models
 
 // GetAgentState retrieves the state of an agent for a tenant.
 func (c *Client) GetAgentState(ctx context.Context, tenant, agentID string) (*models.AgentInfo, error) {
+	// BUGFIX: redis.Nil means this agent has no stored state yet.
 	data, err := c.rdb.Get(ctx, agentStateKey(tenant, agentID)).Bytes()
 	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get agent: %w", err)
 	}
 	var agent models.AgentInfo
@@ -300,8 +319,12 @@ func (c *Client) SetHealthReport(ctx context.Context, tenant string, report *mod
 
 // GetHealthReport retrieves a health report for a tenant's agent.
 func (c *Client) GetHealthReport(ctx context.Context, tenant, agentID string) (*models.HealthReport, error) {
+	// BUGFIX: redis.Nil means no health report stored for this agent yet.
 	data, err := c.rdb.Get(ctx, healthKey(tenant, agentID)).Bytes()
 	if err != nil {
+		if err == redis.Nil {
+			return nil, nil
+		}
 		return nil, fmt.Errorf("get health: %w", err)
 	}
 	var report models.HealthReport

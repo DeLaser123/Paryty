@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -200,4 +201,96 @@ func (a *AgentAssigner) ListUnassignedAgents(ctx context.Context, tenantID strin
 		agents = append(agents, info)
 	}
 	return agents, nil
+}
+
+// AgentInfo holds detailed info for an agent.
+type AgentInfo struct {
+	AgentID       string  `json:"agent_id"`
+	Name          string  `json:"name"`
+	Hostname      string  `json:"hostname"`
+	Status        string  `json:"status"`
+	OS            string  `json:"os"`
+	Arch          string  `json:"arch"`
+	CloudProvider string  `json:"cloud_provider"`
+	Location      string  `json:"location"`
+	AssignedTwin  *string `json:"assigned_twin"`
+	FirstSeen     string  `json:"first_seen"`
+	LastSeen      string  `json:"last_seen"`
+}
+
+// CreateAgent registers a new agent for the tenant. Generates a unique agent ID.
+// Returns the created agent info or an error.
+func (a *AgentAssigner) CreateAgent(ctx context.Context, tenantID, name string) (*AgentInfo, error) {
+	// Generate a unique agent ID.
+	agentID := "agent-" + uuid.New().String()[:8]
+
+	_, err := a.db.Exec(ctx, `
+		INSERT INTO agent_registrations (agent_id, tenant_id, name, status)
+		VALUES ($1, $2, $3, 'pending')
+	`, agentID, tenantID, name)
+	if err != nil {
+		return nil, fmt.Errorf("create agent: %w", err)
+	}
+
+	return &AgentInfo{
+		AgentID: agentID,
+		Name:    name,
+		Status:  "pending",
+	}, nil
+}
+
+// ListAllAgents returns all agents for a tenant with metadata and assignment info.
+func (a *AgentAssigner) ListAllAgents(ctx context.Context, tenantID string) ([]AgentInfo, error) {
+	rows, err := a.db.Query(ctx, `
+		SELECT r.agent_id, r.name, r.hostname, r.status, r.os, r.arch,
+		       r.cloud_provider, r.location, a.twin_id,
+		       r.first_seen, r.last_seen
+		FROM agent_registrations r
+		LEFT JOIN agent_assignments a ON a.agent_id = r.agent_id
+		WHERE r.tenant_id = $1
+		ORDER BY r.last_seen DESC
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("list all agents: %w", err)
+	}
+	defer rows.Close()
+
+	var agents []AgentInfo
+	for rows.Next() {
+		var info AgentInfo
+		var twinID *string
+		var firstSeen, lastSeen time.Time
+		if err := rows.Scan(&info.AgentID, &info.Name, &info.Hostname, &info.Status,
+			&info.OS, &info.Arch, &info.CloudProvider, &info.Location,
+			&twinID, &firstSeen, &lastSeen); err != nil {
+			return nil, fmt.Errorf("scan agent: %w", err)
+		}
+		info.AssignedTwin = twinID
+		info.FirstSeen = firstSeen.Format(time.RFC3339)
+		info.LastSeen = lastSeen.Format(time.RFC3339)
+		agents = append(agents, info)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate agents: %w", err)
+	}
+	return agents, nil
+}
+
+// DeleteAgent soft-deletes an agent by removing its registration and assignments.
+func (a *AgentAssigner) DeleteAgent(ctx context.Context, agentID, tenantID string) error {
+	// Remove assignment first.
+	_, err := a.db.Exec(ctx, `DELETE FROM agent_assignments WHERE agent_id = $1`, agentID)
+	if err != nil {
+		return fmt.Errorf("delete agent assignment: %w", err)
+	}
+
+	// Remove registration.
+	tag, err := a.db.Exec(ctx, `DELETE FROM agent_registrations WHERE agent_id = $1 AND tenant_id = $2`, agentID, tenantID)
+	if err != nil {
+		return fmt.Errorf("delete agent: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("agent %s not found", agentID)
+	}
+	return nil
 }

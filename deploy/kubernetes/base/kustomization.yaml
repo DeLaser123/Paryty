@@ -1,0 +1,24 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - namespace.yaml
+  - ingestion/deployment.yaml
+  - ingestion/service.yaml
+  - ingestion/hpa.yaml
+  - pipeline/deployment.yaml
+  - pipeline/service.yaml
+  - pipeline/hpa.yaml
+  - query/deployment.yaml
+  - query/service.yaml
+  - query/hpa.yaml
+  - intelligence/deployment.yaml
+  - intelligence/service.yaml
+  - intelligence/hpa.yaml
+  - frontend/deployment.yaml
+  - frontend/service.yaml
+  - frontend/ingress.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: paryty
+  app.kubernetes.io/managed-by: kustomize

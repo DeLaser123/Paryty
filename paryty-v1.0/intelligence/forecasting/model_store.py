@@ -19,6 +19,8 @@ from typing import Any
 import joblib
 import structlog
 
+from ..security import sanitize_filename_component
+
 logger = structlog.get_logger(__name__)
 
 
@@ -155,16 +157,27 @@ class ForecastModelStore:
 
     @staticmethod
     def _filename(model_name: str, metric_name: str) -> str:
-        return f"{model_name}_{metric_name}.joblib"
+        # metric_name arrives from the network (RPC request); sanitize both
+        # components so crafted names cannot escape the model directory.
+        return (
+            f"{sanitize_filename_component(model_name)}_"
+            f"{sanitize_filename_component(metric_name)}.joblib"
+        )
 
     @staticmethod
     def _versioned_filename(
         model_name: str, metric_name: str, version: int
     ) -> str:
-        return f"{model_name}_{metric_name}_v{version}.joblib"
+        return (
+            f"{sanitize_filename_component(model_name)}_"
+            f"{sanitize_filename_component(metric_name)}_v{version}.joblib"
+        )
 
     def _next_version(self, model_name: str, metric_name: str) -> int:
-        pattern = f"{model_name}_{metric_name}_v*.joblib"
+        pattern = (
+            f"{sanitize_filename_component(model_name)}_"
+            f"{sanitize_filename_component(metric_name)}_v*.joblib"
+        )
         existing = list(self._base_dir.glob(pattern))
         versions: list[int] = []
         for p in existing:

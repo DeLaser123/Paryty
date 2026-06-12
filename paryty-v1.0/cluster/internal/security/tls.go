@@ -104,3 +104,13 @@ func LoadTLSFromEnv() (*tls.Config, error) {
 
 	return ServerTLS(certFile, keyFile, clientCAFile)
 }
+
+// RequireMTLS returns true if PARYTY_TLS_CERT_FILE and PARYTY_TLS_CA_FILE are set.
+// This is the enforcement gate — if true, all connections must use mTLS.
+//
+// In production, this should return true to ensure encrypted and authenticated
+// communication between agents and the cluster.
+func RequireMTLS() bool {
+	return os.Getenv("PARYTY_TLS_CERT_FILE") != "" &&
+		os.Getenv("PARYTY_TLS_CA_FILE") != ""
+}

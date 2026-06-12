@@ -67,17 +67,18 @@ export const useTwinStore = create<TwinState>()((set, get) => ({
     try {
       const client = getRestClient();
 
-      // Fetch assigned agents for this twin
-      const assigned = await client.get<TwinAgentInfo[]>(
+      // BUGFIX: Both endpoints return {data: [...]} (envelope), not raw arrays.
+      // Type responses correctly and extract .data to avoid runtime crashes.
+      const assignedResp = await client.get<{ data: TwinAgentInfo[] }>(
         `/api/v1/twins/${encodeURIComponent(twinId)}/agents`,
       );
 
       // Fetch unassigned agents available for assignment
-      const unassigned = await client.get<TwinAgentInfo[]>(
+      const unassignedResp = await client.get<{ data: TwinAgentInfo[] }>(
         '/api/v1/agents?unassigned=true',
       );
 
-      set({ assignedAgents: assigned, unassignedAgents: unassigned, isLoading: false });
+      set({ assignedAgents: assignedResp.data ?? [], unassignedAgents: unassignedResp.data ?? [], isLoading: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch agents';
       set({ error: message, isLoading: false });

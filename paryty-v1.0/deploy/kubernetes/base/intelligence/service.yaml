@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: paryty-intelligence
+  labels:
+    app.kubernetes.io/component: intelligence
+spec:
+  ports:
+    - port: 50051
+      name: grpc
+      targetPort: grpc
+    - port: 8080
+      name: http
+      targetPort: http
+  selector:
+    app.kubernetes.io/component: intelligence

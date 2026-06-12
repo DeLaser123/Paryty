@@ -44,3 +44,25 @@ export interface HealthReport {
   components: Record<string, string>;
   timestamp: Timestamp;
 }
+
+/** Agent management info from `GET /api/v1/agents/all`. */
+export interface AgentManagementInfo {
+  agent_id: string;
+  name: string;
+  hostname: string;
+  status: string; // pending | deployed | inactive
+  os: string;
+  arch: string;
+  cloud_provider: string;
+  location: string;
+  assigned_twin: string | null;
+  first_seen: string;
+  last_seen: string;
+}
+
+/** Response from `POST /api/v1/agents`. */
+export interface CreateAgentResponse {
+  agent_id: string;
+  name: string;
+  status: string;
+}

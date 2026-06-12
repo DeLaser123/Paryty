@@ -21,6 +21,17 @@ import (
 // AlertState represents the current state of an alert in the state machine.
 type AlertState string
 
+// Sentinel errors for alert lifecycle operations. Callers (REST handlers)
+// use errors.Is to map these to 404/409 responses without importing redis.
+var (
+	// ErrAlertNotFound indicates the alert does not exist or its state has expired.
+	ErrAlertNotFound = errors.New("alert not found")
+
+	// ErrInvalidTransition indicates the requested state change violates the
+	// alert state machine (e.g. resolved → acknowledged).
+	ErrInvalidTransition = errors.New("invalid alert state transition")
+)
+
 const (
 	// AlertStateFiring indicates an active, unresolved alert.
 	AlertStateFiring AlertState = "firing"
@@ -163,6 +174,9 @@ func (a *AlertOps) TransitionAlert(ctx context.Context, tenant, alertID string, 
 	// Retrieve the current state.
 	currentState, err := a.GetAlertState(ctx, tenant, alertID)
 	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return fmt.Errorf("%w: %s", ErrAlertNotFound, alertID)
+		}
 		return fmt.Errorf("get current state: %w", err)
 	}
 
@@ -178,7 +192,7 @@ func (a *AlertOps) TransitionAlert(ctx context.Context, tenant, alertID string, 
 
 	// Validate the transition.
 	if !isTransitionAllowed(currentState, newState) {
-		return fmt.Errorf("invalid transition: %s → %s", currentState, newState)
+		return fmt.Errorf("%w: %s → %s", ErrInvalidTransition, currentState, newState)
 	}
 
 	// Determine TTL based on new state.

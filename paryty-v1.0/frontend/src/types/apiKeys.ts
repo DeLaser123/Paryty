@@ -19,3 +19,9 @@ export interface CreateApiKeyResponse {
   prefix: string;
   createdAt: string;
 }
+
+export interface RotateApiKeyResponse {
+  id: string;
+  key: string; // New full key — shown once!
+  prefix: string;
+}

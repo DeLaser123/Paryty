@@ -71,7 +71,7 @@ func (cp *CapacityPlanner) PlanCapacity(ctx context.Context, tenantID string) (*
 		var latestValue float64
 
 		for _, agent := range agents {
-			pts, err := cp.store.QueryMetrics(ctx, agent.ID, resource, start, end)
+			pts, err := cp.store.QueryMetrics(ctx, tenantID, agent.ID, resource, start, end)
 			if err != nil {
 				continue
 			}

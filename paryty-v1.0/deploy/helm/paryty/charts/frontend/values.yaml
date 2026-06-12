@@ -1,0 +1,43 @@
+replicaCount: 2
+image:
+  repository: paryty/paryty-frontend
+  tag: latest
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  http:
+    port: 3000
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+pdb:
+  enabled: true
+  minAvailable: 1
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  hosts:
+    - host: paryty.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: paryty-frontend-tls
+      hosts:
+        - paryty.example.com
+nodeSelector: {}
+tolerations: []
+affinity: {}

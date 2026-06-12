@@ -158,7 +158,16 @@ class ForecastingServicer:
         request: GetModelAccuracyRequest,
         context: grpc.aio.ServicerContext | None = None,
     ) -> GetModelAccuracyResponse:
-        """Return model accuracy metrics."""
+        """Return model accuracy metrics for the requesting tenant.
+
+        tenant_id is mandatory — an empty tenant_id must never act as a
+        wildcard that leaks every tenant's model metadata (metric names,
+        accuracies, training timestamps reveal infrastructure details).
+        """
+        if not request.tenant_id:
+            logger.warning("model_accuracy_rejected", reason="missing tenant_id")
+            return GetModelAccuracyResponse(models={})
+
         models: dict[str, ModelInfo] = {}
 
         if request.metric_name:
@@ -175,7 +184,7 @@ class ForecastingServicer:
                 )
         else:
             for (tenant_id, metric_name), ensemble in self._ensembles.items():
-                if tenant_id == request.tenant_id or not request.tenant_id:
+                if tenant_id == request.tenant_id:
                     acc = ensemble.get_accuracy()
                     models[metric_name] = ModelInfo(
                         best_model="ensemble",

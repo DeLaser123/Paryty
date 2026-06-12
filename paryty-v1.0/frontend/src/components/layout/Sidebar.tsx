@@ -24,6 +24,7 @@ import {
   PanelLeftOpen,
   ChevronRight,
   UserCircle2,
+  Server,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../../stores/authStore';
@@ -116,6 +117,7 @@ export function Sidebar({ activePath }: SidebarProps) {
       { label: 'Topology',  icon: <Globe size={16} />,           path: '/topology' },
       { label: 'Metrics',   icon: <BarChart2 size={16} />,       path: '/metrics' },
       { label: 'Alerts',    icon: <AlertTriangle size={16} />,   path: '/alerts' },
+      { label: 'Agents',    icon: <Server size={16} />,          path: '/agents' },
     ];
     if (hasIntelFeature) {
       items.push({ label: 'Paryty-Intel', icon: <Brain size={16} />, path: '/intel', feature: 'paryty_intel' });

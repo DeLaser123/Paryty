@@ -11,6 +11,7 @@ import { createContext, useContext, useEffect, type ReactNode } from 'react';
 import { useAuthStore } from '../../stores/authStore';
 import { getRestClient } from '../../api/rest';
 import { getWsClient } from '../../api/websocket';
+import { setSseTokenGetter } from '../../api/sse';
 
 // ─── Context ──────────────────────────────────────────────────────────
 
@@ -57,10 +58,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
     const ws = getWsClient();
     ws.setTokenGetter(() => useAuthStore.getState().accessToken);
 
+    // SSE clients read the token through a module-level getter because
+    // EventSource cannot set request headers.
+    setSseTokenGetter(() => useAuthStore.getState().accessToken);
+
     return () => {
       client.setTokenGetter(null);
       client.setAuthRefreshCallback(null);
       ws.setTokenGetter(null);
+      setSseTokenGetter(null);
     };
   }, []);
 

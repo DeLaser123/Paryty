@@ -5,6 +5,29 @@ import type { TimelineSpeed } from '../types/timeline';
 
 export type SseEventHandler = (event: MessageEvent) => void;
 
+// ─── Auth token wiring ─────────────────────────────────────────
+
+/**
+ * Module-level access token getter for all SSE connections.
+ *
+ * EventSource cannot set request headers, so the cluster's SSE endpoints
+ * authenticate via a `token` query parameter (validated by the same JWT
+ * middleware as Bearer headers). Wired by AuthProvider on mount.
+ */
+let sseTokenGetter: (() => string | null) | null = null;
+
+export function setSseTokenGetter(fn: (() => string | null) | null): void {
+  sseTokenGetter = fn;
+}
+
+/** Appends the current access token (if any) as a `token` query parameter. */
+function withAuthToken(url: string): string {
+  const token = sseTokenGetter?.() ?? null;
+  if (!token) return url;
+  const separator = url.includes('?') ? '&' : '?';
+  return `${url}${separator}token=${encodeURIComponent(token)}`;
+}
+
 export interface SseConfig {
   url: string;
   withCredentials?: boolean;
@@ -26,7 +49,7 @@ export class SSEClient {
   connect(): void {
     if (this.source) this.close();
 
-    this.source = new EventSource(this.url, {
+    this.source = new EventSource(withAuthToken(this.url), {
       withCredentials: this.withCredentials,
     });
 

@@ -58,7 +58,7 @@ func (m *mockPipelineStore) SetTopology(_ context.Context, _ string, topo *model
 	return m.setTopologyErr
 }
 
-func (m *mockPipelineStore) StoreSpan(_ context.Context, span *models.Span) error {
+func (m *mockPipelineStore) StoreSpan(_ context.Context, _ string, span *models.Span) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.storeSpanCalls++
@@ -186,14 +186,14 @@ func newTestPipeline(t *testing.T, store *mockPipelineStore, producer *mockPipel
 
 	// Use default memory config for tests.
 	memConfig := config.MemoryConfig{
-		MaxRAMBytes:          1 << 30, // 1 GB
-		GoroutinePoolSize:    4,
-		WindowBufferCapacity: 256,
-		EventBufferSize:      1000,
-		MaxBufferedRecords:   1000,
-		GraphChangesCap:      5000,
+		MaxRAMBytes:           1 << 30, // 1 GB
+		GoroutinePoolSize:     4,
+		WindowBufferCapacity:  256,
+		EventBufferSize:       1000,
+		MaxBufferedRecords:    1000,
+		GraphChangesCap:       5000,
 		CircuitBreakerEnabled: false, // Disabled in tests.
-		CheckInterval:        10 * time.Second,
+		CheckInterval:         10 * time.Second,
 	}
 
 	return NewPipeline(

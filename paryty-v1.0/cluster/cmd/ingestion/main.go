@@ -20,11 +20,13 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/config"
 	"github.com/paryty/paryty-v1.0/cluster/internal/controlplane"
 	pb "github.com/paryty/paryty-v1.0/cluster/internal/proto"
+	"github.com/paryty/paryty-v1.0/cluster/internal/security"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
 	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	_ "google.golang.org/grpc/encoding/gzip" // Register Gzip decompressor for incoming agent requests.
 	"google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -121,9 +123,11 @@ func main() {
 	var agentAssigner *twin.AgentAssigner
 	var backlogManager *twin.BacklogManager
 	var commandManager *twin.CommandManager
+	var cpPool *pgxpool.Pool
 
 	if dbURL != "" {
-		cpPool, err := pgxpool.New(ctx, dbURL)
+		var err error
+		cpPool, err = pgxpool.New(ctx, dbURL)
 		if err != nil {
 			logger.Fatal("Failed to create control plane pool", zap.Error(err))
 		}
@@ -147,9 +151,36 @@ func main() {
 
 	// Create gRPC server with auth interceptors (Phase 8).
 	var grpcOpts []grpc.ServerOption
+
+	// Check if mTLS is required
+	if security.RequireMTLS() {
+		logger.Info("mTLS required — loading TLS configuration")
+		tlsConfig, err := security.LoadTLSFromEnv()
+		if err != nil {
+			logger.Fatal("Failed to load TLS configuration", zap.Error(err))
+		}
+		if tlsConfig == nil {
+			logger.Fatal("mTLS required but TLS configuration is nil")
+		}
+		grpcOpts = append(grpcOpts, grpc.Creds(credentials.NewTLS(tlsConfig)))
+		logger.Info("mTLS enabled for gRPC server")
+	} else {
+		logger.Warn("mTLS disabled — set PARYTY_TLS_CERT_FILE and PARYTY_TLS_CA_FILE to enable")
+	}
+
 	if apiKeyManager != nil {
+		// Chain auth interceptor with RLS tenant interceptor
+		var unaryInterceptors []grpc.UnaryServerInterceptor
+		unaryInterceptors = append(unaryInterceptors, api.AuthInterceptor(apiKeyManager))
+
+		// Add RLS tenant interceptor if database is available
+		if cpPool != nil {
+			unaryInterceptors = append(unaryInterceptors, api.RLSTenantInterceptor(cpPool))
+			logger.Info("RLS tenant interceptor enabled")
+		}
+
 		grpcOpts = append(grpcOpts,
-			grpc.UnaryInterceptor(api.AuthInterceptor(apiKeyManager)),
+			grpc.ChainUnaryInterceptor(unaryInterceptors...),
 			grpc.StreamInterceptor(api.StreamAuthInterceptor(apiKeyManager)),
 		)
 		logger.Info("API key auth interceptors enabled")

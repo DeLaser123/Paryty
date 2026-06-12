@@ -275,8 +275,21 @@ impl HealthPoller {
             Err(e) => return (HealthStatus::Unhealthy, Some(format!("Invalid URL: {}", e))),
         };
 
-        let host = parsed.host_str().unwrap_or("localhost");
-        let port = parsed.port_or_known_default().unwrap_or(80);
+        // A URL without a resolvable host or port is a misconfiguration.
+        // Silently defaulting (e.g. to localhost:80) would report the health
+        // of the WRONG endpoint — fail the check loudly instead.
+        let Some(host) = parsed.host_str() else {
+            return (
+                HealthStatus::Unhealthy,
+                Some(format!("health check URL has no host: {}", url)),
+            );
+        };
+        let Some(port) = parsed.port_or_known_default() else {
+            return (
+                HealthStatus::Unhealthy,
+                Some(format!("health check URL has no port and unknown scheme: {}", url)),
+            );
+        };
         let path = parsed.path();
 
         let addr = format!("{}:{}", host, port);

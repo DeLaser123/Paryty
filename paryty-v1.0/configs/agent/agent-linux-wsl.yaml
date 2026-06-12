@@ -1,6 +1,6 @@
 agent:
   id: "auto"
-  cluster_endpoint: "192.168.16.1:50052"
+  cluster_endpoint: "10.255.255.254:50052"
   api_key: ""
   self_metrics:
     enabled: true

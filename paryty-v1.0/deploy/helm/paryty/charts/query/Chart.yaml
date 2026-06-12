@@ -1,0 +1,6 @@
+apiVersion: v2
+name: query
+description: Paryty Query Service - HTTP query API
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

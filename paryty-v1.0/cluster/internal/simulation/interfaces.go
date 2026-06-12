@@ -404,8 +404,9 @@ type StorageReader interface {
 	GetAllAgentStates(ctx context.Context, tenant string) ([]models.AgentInfo, error)
 	// GetActiveAlerts retrieves active alerts from hot storage.
 	GetActiveAlerts(ctx context.Context, tenant string) ([]models.Alert, error)
-	// QueryMetrics queries metrics from warm storage within a time range.
-	QueryMetrics(ctx context.Context, agentID string, metricName string, start, end time.Time) ([]models.Metric, error)
+	// QueryMetrics queries metrics from warm storage within a time range,
+	// scoped to the given tenant.
+	QueryMetrics(ctx context.Context, tenant, agentID, metricName string, start, end time.Time) ([]models.Metric, error)
 }
 
 // SimulationEngine manages the lifecycle of what-if simulation scenarios.

@@ -39,11 +39,11 @@
   border-width: 0;
 }
 
-.aef-text-xs { font-size: 9px; }
-.aef-text-sm { font-size: 11px; }
+.aef-text-xs { font-size: 10px; }
+.aef-text-sm { font-size: 12px; }
 .aef-text-base { font-size: 12px; }
 .aef-text-lg { font-size: 14px; }
-.aef-text-xl { font-size: 15px; }
+.aef-text-xl { font-size: 16px; }
 
 .aef-text-secondary { color: var(--aef-text-secondary); }
 .aef-text-primary { color: var(--aef-text-primary); }

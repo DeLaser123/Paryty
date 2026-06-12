@@ -1,0 +1,37 @@
+apiVersion: v2
+name: paryty
+description: Paryty V1.0 - Infrastructure Monitoring Platform
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - monitoring
+  - infrastructure
+  - observability
+home: https://paryty.io
+sources:
+  - https://github.com/paryty/paryty-v1.0
+maintainers:
+  - name: Paryty Team
+    email: team@paryty.io
+dependencies:
+  - name: ingestion
+    version: "1.0.0"
+    repository: "file://charts/ingestion"
+    condition: ingestion.enabled
+  - name: pipeline
+    version: "1.0.0"
+    repository: "file://charts/pipeline"
+    condition: pipeline.enabled
+  - name: query
+    version: "1.0.0"
+    repository: "file://charts/query"
+    condition: query.enabled
+  - name: intelligence
+    version: "1.0.0"
+    repository: "file://charts/intelligence"
+    condition: intelligence.enabled
+  - name: frontend
+    version: "1.0.0"
+    repository: "file://charts/frontend"
+    condition: frontend.enabled

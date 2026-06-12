@@ -83,9 +83,12 @@ func (h *IntelHandlers) Close() {
 	}
 }
 
-// RegisterRoutes registers all intelligence API routes on the given Gin router.
+// RegisterRoutes registers all intelligence API routes on the given Gin
+// router group. The group MUST already be rooted at /api/v1 and protected
+// by JWT middleware — intelligence results are tenant-confidential and the
+// /intel feature is plan-gated upstream.
 func (h *IntelHandlers) RegisterRoutes(rg *gin.RouterGroup) {
-	intel := rg.Group("/api/v1/intel")
+	intel := rg.Group("/intel")
 	{
 		// Forecasting
 		intel.POST("/forecast", h.handleForecast)
@@ -150,18 +153,18 @@ func (h *IntelHandlers) handleForecast(c *gin.Context) {
 	points := make([]gin.H, 0, len(resp.Points))
 	for _, p := range resp.Points {
 		points = append(points, gin.H{
-			"timestamp": p.Timestamp,
-			"value":     p.PredictedValue,
+			"timestamp":  p.Timestamp,
+			"value":      p.PredictedValue,
 			"lowerBound": p.LowerBound,
 			"upperBound": p.UpperBound,
 		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"metricName":        resp.MetricName,
-		"agentId":           resp.ServiceID,
-		"tenantId":          "default",
-		"points":            points,
+		"metricName": resp.MetricName,
+		"agentId":    resp.ServiceID,
+		"tenantId":   "default",
+		"points":     points,
 		"modelInfo": gin.H{
 			"bestModel":       resp.Model,
 			"weights":         gin.H{resp.Model: 1.0},
@@ -222,17 +225,17 @@ func (h *IntelHandlers) handleForecastBatch(c *gin.Context) {
 		points := make([]gin.H, 0, len(r.Points))
 		for _, p := range r.Points {
 			points = append(points, gin.H{
-				"timestamp": p.Timestamp,
-				"value":     p.PredictedValue,
+				"timestamp":  p.Timestamp,
+				"value":      p.PredictedValue,
 				"lowerBound": p.LowerBound,
 				"upperBound": p.UpperBound,
 			})
 		}
 		results = append(results, gin.H{
-			"metricName":        r.MetricName,
-			"agentId":           r.ServiceID,
-			"tenantId":          "default",
-			"points":            points,
+			"metricName": r.MetricName,
+			"agentId":    r.ServiceID,
+			"tenantId":   "default",
+			"points":     points,
 			"modelInfo": gin.H{
 				"bestModel":       r.Model,
 				"weights":         gin.H{r.Model: 1.0},
@@ -395,9 +398,9 @@ func (h *IntelHandlers) handleAnomalyStatus(c *gin.Context) {
 				"lastUpdated": resp.LastTraining,
 			},
 		},
-		"lastTraining":          resp.LastTraining,
-		"anomaliesDetected24h":  int(resp.DetectionRate * 24),
-		"falsePositiveRate":     0.05,
+		"lastTraining":         resp.LastTraining,
+		"anomaliesDetected24h": int(resp.DetectionRate * 24),
+		"falsePositiveRate":    0.05,
 	})
 }
 
@@ -431,11 +434,11 @@ func (h *IntelHandlers) handleExplainAnomaly(c *gin.Context) {
 
 	// Build proper Anomaly from the response and request context
 	anomaly := intelligence.Anomaly{
-		ID:         anomalyID,
-		MetricName: req.MetricName,
-		ServiceID:  req.AgentId,
-		Timestamp:  time.Unix(req.Timestamp, 0),
-		Severity:   "medium",
+		ID:          anomalyID,
+		MetricName:  req.MetricName,
+		ServiceID:   req.AgentId,
+		Timestamp:   time.Unix(req.Timestamp, 0),
+		Severity:    "medium",
 		Description: resp.RootCause,
 	}
 

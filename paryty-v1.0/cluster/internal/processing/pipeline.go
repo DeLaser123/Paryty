@@ -32,7 +32,7 @@ import (
 type PipelineStore interface {
 	StoreMetricBatch(ctx context.Context, tenant string, batch *models.MetricBatch) error
 	SetTopology(ctx context.Context, tenant string, topo *models.Topology) error
-	StoreSpan(ctx context.Context, span *models.Span) error
+	StoreSpan(ctx context.Context, tenant string, span *models.Span) error
 	StoreEvents(ctx context.Context, events []models.Event) error
 	StoreAggregatedMetric(ctx context.Context, tenant string, m *models.AggregatedMetric) error
 }
@@ -227,18 +227,18 @@ func (m *MemoryMonitor) GetStats() MemoryStats {
 //
 // Thread-safe. All public methods are safe for concurrent use.
 type Pipeline struct {
-	config         PipelineConfig
-	aggregator     *Aggregator
-	correlator     *Correlator
-	enricher       *Enricher
-	downsampler    *Downsampler
-	store          PipelineStore
-	producer       PipelineProducer
-	consumer       PipelineConsumer
-	dragonfly      DragonflyClient
-	logger         *zap.Logger
-	tenant         string
-	memoryMonitor  *MemoryMonitor
+	config        PipelineConfig
+	aggregator    *Aggregator
+	correlator    *Correlator
+	enricher      *Enricher
+	downsampler   *Downsampler
+	store         PipelineStore
+	producer      PipelineProducer
+	consumer      PipelineConsumer
+	dragonfly     DragonflyClient
+	logger        *zap.Logger
+	tenant        string
+	memoryMonitor *MemoryMonitor
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -517,7 +517,7 @@ func (p *Pipeline) processMessage(ctx context.Context, topic, key string, value 
 			enriched := p.enricher.EnrichSpan(ctx, &span, agentInfo)
 			span = *enriched
 		}
-		return p.store.StoreSpan(ctx, &span)
+		return p.store.StoreSpan(ctx, tenant, &span)
 
 	case strings.HasSuffix(topic, "events"):
 		var events []models.Event

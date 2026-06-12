@@ -1441,7 +1441,7 @@ mod tests {
     #[test]
     fn detect_single_byte_payload() {
         let inspector = DbInspector::new();
-        assert_eq!(inspector.detect_protocol(&[b'Q'], PG_PORT), DbProtocol::Unknown);
+        assert_eq!(inspector.detect_protocol(b"Q", PG_PORT), DbProtocol::Unknown);
     }
 
     // -----------------------------------------------------------------------

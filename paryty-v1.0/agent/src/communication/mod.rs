@@ -159,6 +159,14 @@ impl Client {
         })
     }
 
+    /// Set the config file path for runtime key refresh.
+    ///
+    /// This path is used by `GrpcClient::refresh_api_key()` to re-read the
+    /// API key from the config file when an UNAUTHENTICATED error is detected.
+    pub async fn set_config_path(&self, path: String) {
+        self.grpc.set_config_path(path).await;
+    }
+
     // ── Identity ───────────────────────────────────────────────────────
 
     /// Resolve identity after registration by calling the ResolveIdentity
@@ -347,19 +355,43 @@ impl Client {
                         break;
                     }
                     Err(e) => {
-                        attempt += 1;
-                        let delay = std::time::Duration::from_secs(1)
-                            .mul_f64(2.0_f64.powi(attempt.min(5) as i32));
-                        let delay = delay.min(std::time::Duration::from_secs(30));
-                        warn!(
-                            attempt = attempt,
-                            retry_in = ?delay,
-                            error = %e,
-                            "Registration failed — will retry with backoff"
-                        );
-                        tokio::select! {
-                            _ = cancel.cancelled() => break,
-                            _ = tokio::time::sleep(delay) => {}
+                        // Check if this is an authentication error
+                        let error_msg = e.to_string().to_lowercase();
+                        if error_msg.contains("unauthenticated") || error_msg.contains("unauthorized") {
+                            warn!(error = %e, "Registration failed with auth error — attempting key refresh");
+                            
+                            // Attempt to refresh the API key from config/env
+                            let key_refreshed = client.grpc.refresh_api_key().await;
+                            
+                            if key_refreshed {
+                                info!("API key refreshed from config, retrying registration immediately");
+                                // Don't increment attempt counter for auth errors with successful refresh
+                                continue;
+                            } else {
+                                warn!("API key refresh failed — agent will not be able to register");
+                                // Use longer backoff for auth errors when key cannot be refreshed
+                                let delay = std::time::Duration::from_secs(60);
+                                tokio::select! {
+                                    _ = cancel.cancelled() => break,
+                                    _ = tokio::time::sleep(delay) => {}
+                                }
+                            }
+                        } else {
+                            // Normal retry with exponential backoff for non-auth errors
+                            attempt += 1;
+                            let delay = std::time::Duration::from_secs(1)
+                                .mul_f64(2.0_f64.powi(attempt.min(5) as i32));
+                            let delay = delay.min(std::time::Duration::from_secs(30));
+                            warn!(
+                                attempt = attempt,
+                                retry_in = ?delay,
+                                error = %e,
+                                "Registration failed — will retry with backoff"
+                            );
+                            tokio::select! {
+                                _ = cancel.cancelled() => break,
+                                _ = tokio::time::sleep(delay) => {}
+                            }
                         }
                     }
                 }
@@ -936,7 +968,18 @@ impl Client {
                                 }
                             }
                             Err(e) => {
-                                warn!("Heartbeat failed: {}", e);
+                                let error_msg = e.to_string().to_lowercase();
+                                if error_msg.contains("unauthenticated") || error_msg.contains("unauthorized") {
+                                    warn!(error = %e, "Heartbeat failed with auth error — attempting key refresh");
+                                    let key_refreshed = client.grpc.refresh_api_key().await;
+                                    if key_refreshed {
+                                        info!("API key refreshed from config after heartbeat auth error");
+                                    } else {
+                                        warn!("API key refresh failed after heartbeat auth error");
+                                    }
+                                } else {
+                                    warn!("Heartbeat failed: {}", e);
+                                }
                             }
                         }
                     }
@@ -1280,7 +1323,18 @@ impl Client {
                                 info!("Reconnected to cluster");
 
                                 if let Err(e) = client.register_on_connect().await {
-                                    warn!("Re-registration after reconnect failed: {}", e);
+                                    let error_msg = e.to_string().to_lowercase();
+                                    if error_msg.contains("unauthenticated") || error_msg.contains("unauthorized") {
+                                        warn!(error = %e, "Re-registration after reconnect failed with auth error — attempting key refresh");
+                                        let key_refreshed = client.grpc.refresh_api_key().await;
+                                        if key_refreshed {
+                                            info!("API key refreshed from config after re-registration auth error");
+                                        } else {
+                                            warn!("API key refresh failed after re-registration auth error");
+                                        }
+                                    } else {
+                                        warn!("Re-registration after reconnect failed: {}", e);
+                                    }
                                 }
 
                                 if let Err(e) = client.flush_buffer().await {

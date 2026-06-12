@@ -16,6 +16,13 @@ Environment Variables:
     INTELLIGENCE_PORT: gRPC port (default: 50051)
     INTELLIGENCE_HOST: Bind host (default: [::])
     LOG_LEVEL: Logging level (default: INFO)
+    INTELLIGENCE_TLS_CERT: Path to the server certificate (PEM)
+    INTELLIGENCE_TLS_KEY: Path to the server private key (PEM)
+    INTELLIGENCE_TLS_CLIENT_CA: Path to the CA bundle for client cert
+        verification — presence enables mutual TLS (cluster↔intelligence
+        communication is mTLS per the architecture)
+    PARYTY_DEV_MODE: "true" permits plaintext gRPC for local development.
+        Without it, missing TLS material is a fatal misconfiguration.
 """
 
 from __future__ import annotations
@@ -154,6 +161,58 @@ def _configure_logging(log_level: str = "INFO") -> None:
     )
 
 
+def _build_server_credentials() -> grpc.ServerCredentials | None:
+    """Build TLS credentials from environment configuration.
+
+    Returns:
+        ServerCredentials when INTELLIGENCE_TLS_CERT/KEY are set — with
+        client certificate verification (mTLS) when
+        INTELLIGENCE_TLS_CLIENT_CA is also set. Returns None when no TLS
+        material is configured.
+
+    Raises:
+        RuntimeError: when TLS is not configured and PARYTY_DEV_MODE is not
+        "true". The architecture mandates mTLS for cluster↔intelligence
+        traffic; silently serving plaintext in production would expose
+        tenant metric data on the network.
+    """
+    cert_path = os.getenv("INTELLIGENCE_TLS_CERT", "")
+    key_path = os.getenv("INTELLIGENCE_TLS_KEY", "")
+    client_ca_path = os.getenv("INTELLIGENCE_TLS_CLIENT_CA", "")
+
+    if cert_path and key_path:
+        with open(cert_path, "rb") as f:
+            cert_chain = f.read()
+        with open(key_path, "rb") as f:
+            private_key = f.read()
+
+        if client_ca_path:
+            with open(client_ca_path, "rb") as f:
+                client_ca = f.read()
+            logger.info("tls_configured", mode="mTLS (client certs required)")
+            return grpc.ssl_server_credentials(
+                [(private_key, cert_chain)],
+                root_certificates=client_ca,
+                require_client_auth=True,
+            )
+
+        logger.info("tls_configured", mode="server-side TLS")
+        return grpc.ssl_server_credentials([(private_key, cert_chain)])
+
+    if os.getenv("PARYTY_DEV_MODE", "").lower() == "true":
+        logger.warning(
+            "tls_disabled",
+            reason="PARYTY_DEV_MODE=true — plaintext gRPC; never run this in production",
+        )
+        return None
+
+    raise RuntimeError(
+        "TLS is required: set INTELLIGENCE_TLS_CERT/INTELLIGENCE_TLS_KEY "
+        "(and INTELLIGENCE_TLS_CLIENT_CA for mTLS), or PARYTY_DEV_MODE=true "
+        "for local development"
+    )
+
+
 async def serve(
     port: int | None = None,
     host: str | None = None,
@@ -208,7 +267,11 @@ async def serve(
     )
 
     listen_addr = f"{actual_host}:{actual_port}"
-    server.add_insecure_port(listen_addr)
+    credentials = _build_server_credentials()
+    if credentials is not None:
+        server.add_secure_port(listen_addr, credentials)
+    else:
+        server.add_insecure_port(listen_addr)
 
     logger.info("intelligence_service_ready", address=listen_addr)
 

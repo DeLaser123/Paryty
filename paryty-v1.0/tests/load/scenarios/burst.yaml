@@ -1,0 +1,12 @@
+# Burst Traffic Load Test Scenario
+# 1,000 agents, 100 metrics per agent per second
+# Tests rate limiting and burst handling
+
+name: burst
+num_agents: 1000
+metrics_per_agent: 100
+interval: 1s
+duration: 5m
+ingestion_addr: "localhost:8080"
+burst_mode: true
+burst_size: 100

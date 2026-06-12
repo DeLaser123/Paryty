@@ -60,6 +60,11 @@
   --aef-statusbar-height: 28px;
   --aef-z-sidebar: 100;
   --aef-z-header: 90;
+  
+  /* Global overlay z-index hierarchy: tooltip > modal > dropdown */
+  --aef-z-dropdown: 8000;
+  --aef-z-modal-overlay: 9000;
+  --aef-z-tooltip: 9999;
   --aef-canvas-bg: #000000;
   --aef-panel-width: 320px;
 

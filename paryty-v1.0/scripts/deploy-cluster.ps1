@@ -83,8 +83,7 @@ Wait-ForService -Name "QuestDB" -Url "http://localhost:9000/status" -TimeoutSec 
 Wait-ForService -Name "SeaweedFS" -Url "http://localhost:9333/cluster/status" -TimeoutSec 30
 
 if (-not $InfraOnly) {
-    # Wait for Paryty services
-    Wait-ForService -Name "Ingestion" -Url "http://localhost:8080/health" -TimeoutSec 30
+    # Wait for Paryty services (ports from docker-compose.dev.yaml)
     Wait-ForService -Name "Query" -Url "http://localhost:8082/health" -TimeoutSec 30
     Wait-ForService -Name "Frontend" -Url "http://localhost:3000" -TimeoutSec 30
 }

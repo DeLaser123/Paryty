@@ -23,10 +23,22 @@ import (
 // Verifies total memory stays within budget and per-agent memory is bounded.
 // =============================================================================
 
-func TestPipeline_100KAgents_MemoryLoad(t *testing.T) {
+// skipIfLoadTestInfeasible skips heavy load tests in short mode and under
+// the race detector. Race instrumentation slows 1M-message workloads by
+// 5-20x, exceeding the 10-minute test timeout without exposing any defect
+// the smaller -race integration tests would miss.
+func skipIfLoadTestInfeasible(t *testing.T) {
+	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping load test in short mode")
 	}
+	if raceEnabled {
+		t.Skip("skipping load test under race detector (5-20x slowdown exceeds test timeout)")
+	}
+}
+
+func TestPipeline_100KAgents_MemoryLoad(t *testing.T) {
+	skipIfLoadTestInfeasible(t)
 
 	store := &mockPipelineStore{}
 	producer := &mockPipelineProducer{}
@@ -107,9 +119,7 @@ func TestPipeline_100KAgents_MemoryLoad(t *testing.T) {
 // =============================================================================
 
 func TestPipeline_100KAgents_ThroughputLoad(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
-	}
+	skipIfLoadTestInfeasible(t)
 
 	store := &mockPipelineStore{}
 	producer := &mockPipelineProducer{}
@@ -166,9 +176,7 @@ func TestPipeline_100KAgents_ThroughputLoad(t *testing.T) {
 // =============================================================================
 
 func TestPipeline_100KAgents_GoroutineLoad(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
-	}
+	skipIfLoadTestInfeasible(t)
 
 	store := &mockPipelineStore{}
 	p := newTestPipeline(t, store, nil, nil)
@@ -217,9 +225,7 @@ func TestPipeline_100KAgents_GoroutineLoad(t *testing.T) {
 // =============================================================================
 
 func TestPipeline_100KAgents_ConcurrentThroughputLoad(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
-	}
+	skipIfLoadTestInfeasible(t)
 
 	store := &mockPipelineStore{}
 	producer := &mockPipelineProducer{}
@@ -293,9 +299,7 @@ func TestPipeline_100KAgents_ConcurrentThroughputLoad(t *testing.T) {
 // =============================================================================
 
 func TestPipeline_100KAgents_MemoryMonitorStress(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping load test in short mode")
-	}
+	skipIfLoadTestInfeasible(t)
 
 	p := newTestPipeline(t, nil, nil, nil)
 	ctx := context.Background()

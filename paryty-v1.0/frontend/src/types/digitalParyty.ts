@@ -87,3 +87,46 @@ export interface TwinAgentInfo {
   os: string;
   arch: string;
 }
+
+// ─── Status Mapping ────────────────────────────────────────────────────────
+
+/**
+ * Map backend twin status string to frontend HealthStatus.
+ * Backend uses: active, degraded, pending, inactive
+ * Frontend uses: healthy, degraded, unhealthy, unknown
+ */
+function mapTwinStatus(backendStatus: string): HealthStatus {
+  switch (backendStatus) {
+    case 'active':
+      return 'healthy';
+    case 'degraded':
+      return 'degraded';
+    case 'pending':
+      return 'unknown';
+    case 'inactive':
+      return 'unhealthy';
+    default:
+      return 'unknown';
+  }
+}
+
+/**
+ * Convert a backend TwinDetails response to the frontend DigitalParyty type.
+ * Used when loading twins from the API (GET /api/v1/twins).
+ */
+export function backendTwinToDigitalParyty(twin: TwinDetails): DigitalParyty {
+  return {
+    id: twin.id,
+    name: twin.name,
+    systemLabel: twin.description || 'Unknown System',
+    health: mapTwinStatus(twin.status),
+    abilities: [], // Backend doesn't track abilities; populated locally
+    config: {
+      agentIds: twin.config?.agentIds ?? [],
+      tenantLabel: twin.config?.tenantLabel,
+    },
+    summary: {},
+    createdAt: twin.createdAt,
+    updatedAt: twin.updatedAt,
+  };
+}

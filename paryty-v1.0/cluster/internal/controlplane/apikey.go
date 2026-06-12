@@ -190,3 +190,44 @@ func (m *APIKeyManager) ListKeys(ctx context.Context, tenantID string) ([]APIKey
 	}
 	return keys, nil
 }
+
+// RotateKey generates a new raw key for an existing API key ID.
+// The old key hash is replaced in-place with the new hash and prefix.
+// Returns the new raw key (shown once) or an error if the key doesn't exist.
+func (m *APIKeyManager) RotateKey(ctx context.Context, keyID string) (rawKey string, err error) {
+	if keyID == "" {
+		return "", fmt.Errorf("rotate key: key_id must not be empty")
+	}
+
+	// Generate new 32 random bytes -> 64 hex chars.
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate random bytes: %w", err)
+	}
+	rawKey = rawKeyPrefix + hex.EncodeToString(b)
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(rawKey), bcrypt.DefaultCost)
+	if err != nil {
+		return "", fmt.Errorf("bcrypt hash: %w", err)
+	}
+
+	prefix := rawKey[:16]
+
+	tag, err := m.pool.Exec(ctx,
+		`UPDATE api_keys SET key_hash = $1, key_prefix = $2
+		 WHERE key_id = $3 AND revoked_at IS NULL`,
+		string(hash), prefix, keyID,
+	)
+	if err != nil {
+		return "", fmt.Errorf("rotate key %s: %w", keyID, err)
+	}
+	if tag.RowsAffected() == 0 {
+		return "", fmt.Errorf("rotate key %s: not found or revoked", keyID)
+	}
+
+	m.logger.Info("API key rotated",
+		zap.String("key_id", keyID),
+		zap.String("new_prefix", prefix),
+	)
+	return rawKey, nil
+}

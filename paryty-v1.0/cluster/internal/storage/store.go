@@ -226,6 +226,10 @@ type Store struct {
 	queryOptimizer QueryDownsampler
 	retentionMgr   RetentionRunner
 
+	// alertOps drives the alert lifecycle state machine on the hot tier
+	// (acknowledge/silence/resolve transitions). Always initialized in New.
+	alertOps *hot.AlertOps
+
 	// Phase D: Async cold writer. Bounded channel decouples cold store writes
 	// from the processing pipeline, preventing cold store latency from blocking
 	// ingestion goroutines. Each blocked goroutine holds ~8 KB of stack; under
@@ -283,6 +287,7 @@ func New(ctx context.Context, cfg Config) (*Store, error) {
 		hotBreaker:  newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
 		warmBreaker: newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
 		coldBreaker: newCircuitBreaker(defaultFailureThreshold, defaultCooldown),
+		alertOps:    hotClient.AlertOps(nil),
 		coldWriteCh: coldWriteCh,
 		coldCtx:     coldCtx,
 		coldCancel:  coldCancel,
@@ -508,8 +513,10 @@ func (s *Store) SetLatestMetrics(ctx context.Context, tenant, agentID string, ba
 	return s.hot.SetLatestMetrics(ctx, tenant, agentID, batch)
 }
 
-// getLatestMetricsFromWarm queries QuestDB for the most recent metrics for an agent.
-// This is the fallback path when the hot tier is unavailable.
+// getLatestMetricsFromWarm queries QuestDB for the most recent metrics for an
+// agent, scoped to the owning tenant. This is the fallback path when the hot
+// tier is unavailable — it must apply the same tenant isolation the hot tier
+// enforces through key namespacing.
 func (s *Store) getLatestMetricsFromWarm(ctx context.Context, tenant, agentID string) (*models.MetricBatch, error) {
 	batch := &models.MetricBatch{
 		AgentID: agentID,
@@ -518,10 +525,10 @@ func (s *Store) getLatestMetricsFromWarm(ctx context.Context, tenant, agentID st
 	// Query the latest CPU metric.
 	cpuQuery := `SELECT timestamp, total_usage_pct, per_core_pct, load_avg_1, load_avg_5, load_avg_15,
 		frequency_mhz, context_switches, physical_cores, logical_cores, model_name, vendor_id
-		FROM cpu_metrics WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT 1`
+		FROM cpu_metrics WHERE agent_id = $1 AND tenant_id = $2 ORDER BY timestamp DESC LIMIT 1`
 	var cpu models.CPUMetrics
 	var perCorePctStr string
-	err := s.warm.Pool().QueryRow(ctx, cpuQuery, agentID).Scan(
+	err := s.warm.Pool().QueryRow(ctx, cpuQuery, agentID, tenant).Scan(
 		&cpu.Timestamp, &cpu.TotalUsagePct, &perCorePctStr,
 		&cpu.LoadAvg1m, &cpu.LoadAvg5m, &cpu.LoadAvg15m,
 		&cpu.FrequencyMHz, &cpu.ContextSwitches,
@@ -540,10 +547,10 @@ func (s *Store) getLatestMetricsFromWarm(ctx context.Context, tenant, agentID st
 		swap_total_bytes, swap_used_bytes,
 		pressure_some_avg10, pressure_some_avg60, pressure_some_avg300,
 		pressure_full_avg10, pressure_full_avg60, pressure_full_avg300
-		FROM memory_metrics WHERE agent_id = $1 ORDER BY timestamp DESC LIMIT 1`
+		FROM memory_metrics WHERE agent_id = $1 AND tenant_id = $2 ORDER BY timestamp DESC LIMIT 1`
 	var mem models.MemoryMetrics
 	var pSome10, pSome60, pSome300, pFull10, pFull60, pFull300 float64
-	err = s.warm.Pool().QueryRow(ctx, memQuery, agentID).Scan(
+	err = s.warm.Pool().QueryRow(ctx, memQuery, agentID, tenant).Scan(
 		&mem.Timestamp, &mem.TotalBytes, &mem.UsedBytes, &mem.AvailableBytes, &mem.CachedBytes,
 		&mem.SwapTotalBytes, &mem.SwapUsedBytes,
 		&pSome10, &pSome60, &pSome300, &pFull10, &pFull60, &pFull300,
@@ -562,10 +569,12 @@ func (s *Store) getLatestMetricsFromWarm(ctx context.Context, tenant, agentID st
 	return batch, nil
 }
 
-// getAllAgentsFromWarm queries QuestDB for distinct agent IDs and returns AgentInfo stubs.
-func (s *Store) getAllAgentsFromWarm(ctx context.Context) ([]models.AgentInfo, error) {
-	query := `SELECT DISTINCT agent_id FROM cpu_metrics ORDER BY agent_id`
-	rows, err := s.warm.Pool().Query(ctx, query)
+// getAllAgentsFromWarm queries QuestDB for the tenant's distinct agent IDs
+// and returns AgentInfo stubs. The tenant filter is mandatory: without it
+// the hot-tier fallback would expose every tenant's agent inventory.
+func (s *Store) getAllAgentsFromWarm(ctx context.Context, tenant string) ([]models.AgentInfo, error) {
+	query := `SELECT DISTINCT agent_id FROM cpu_metrics WHERE tenant_id = $1 ORDER BY agent_id`
+	rows, err := s.warm.Pool().Query(ctx, query, tenant)
 	if err != nil {
 		return nil, fmt.Errorf("query agents from warm: %w", err)
 	}
@@ -585,9 +594,12 @@ func (s *Store) getAllAgentsFromWarm(ctx context.Context) ([]models.AgentInfo, e
 	return agents, rows.Err()
 }
 
-// QueryMetrics queries metrics from warm storage within a time range.
-func (s *Store) QueryMetrics(ctx context.Context, agentID string, metricName string, start, end time.Time) ([]models.Metric, error) {
-	return s.warm.QueryMetrics(ctx, agentID, metricName, start, end)
+// QueryMetrics queries metrics from warm storage within a time range,
+// scoped to the given tenant. Tenant scoping at the storage layer is the
+// architecture's last line of defense against cross-tenant reads — callers
+// must pass the authenticated tenant from JWT claims.
+func (s *Store) QueryMetrics(ctx context.Context, tenant, agentID, metricName string, start, end time.Time) ([]models.Metric, error) {
+	return s.warm.QueryMetrics(ctx, tenant, agentID, metricName, start, end)
 }
 
 // ---- Alert Operations (Hot Tier) ----
@@ -600,6 +612,14 @@ func (s *Store) SetActiveAlerts(ctx context.Context, tenant string, alerts []mod
 // GetActiveAlerts retrieves active alerts from hot storage.
 func (s *Store) GetActiveAlerts(ctx context.Context, tenant string) ([]models.Alert, error) {
 	return s.hot.GetActiveAlerts(ctx, tenant)
+}
+
+// AcknowledgeAlert transitions an alert to the acknowledged state for the
+// given tenant. Returns hot.ErrAlertNotFound if the alert does not exist
+// (or its state expired) and hot.ErrInvalidTransition if the alert is in a
+// state that cannot be acknowledged (e.g. resolved).
+func (s *Store) AcknowledgeAlert(ctx context.Context, tenant, alertID, reason string) error {
+	return s.alertOps.TransitionAlert(ctx, tenant, alertID, hot.AlertStateAcknowledged, reason)
 }
 
 // ---- Agent Operations (Hot Tier) ----
@@ -624,8 +644,8 @@ func (s *Store) GetAllAgentStates(ctx context.Context, tenant string) ([]models.
 	if err != nil {
 		slog.Warn("hot tier get all agents failed, falling back to warm", "error", err)
 	}
-	// Fallback: query QuestDB for distinct agent IDs.
-	return s.getAllAgentsFromWarm(ctx)
+	// Fallback: query QuestDB for the tenant's distinct agent IDs.
+	return s.getAllAgentsFromWarm(ctx, tenant)
 }
 
 // ---- Health Operations (Hot Tier) ----
@@ -642,14 +662,14 @@ func (s *Store) GetHealthReport(ctx context.Context, tenant, agentID string) (*m
 
 // ---- Trace Operations (Multi-Tier) ----
 
-// StoreSpan stores a trace span in warm storage.
-func (s *Store) StoreSpan(ctx context.Context, span *models.Span) error {
-	return s.warm.InsertSpan(ctx, span)
+// StoreSpan stores a trace span in warm storage under the owning tenant.
+func (s *Store) StoreSpan(ctx context.Context, tenant string, span *models.Span) error {
+	return s.warm.InsertSpan(ctx, tenant, span)
 }
 
-// QueryTraces queries traces from warm storage.
-func (s *Store) QueryTraces(ctx context.Context, service string, start, end time.Time, limit int) ([]models.Trace, error) {
-	return s.warm.QueryTraces(ctx, service, start, end, limit)
+// QueryTraces queries traces from warm storage, scoped to the given tenant.
+func (s *Store) QueryTraces(ctx context.Context, tenant, service string, start, end time.Time, limit int) ([]models.Trace, error) {
+	return s.warm.QueryTraces(ctx, tenant, service, start, end, limit)
 }
 
 // StoreTrace stores a trace in cold storage for archival.
@@ -664,9 +684,10 @@ func (s *Store) StoreEvents(ctx context.Context, events []models.Event) error {
 	return s.cold.StoreEvents(ctx, events)
 }
 
-// QueryEvents queries system events from the events table within a time range.
-func (s *Store) QueryEvents(ctx context.Context, agentID, category, severity string, start, end time.Time, limit int) ([]models.Event, error) {
-	return s.warm.QueryEvents(ctx, agentID, category, severity, start, end, limit)
+// QueryEvents queries system events from the events table within a time
+// range, scoped to the given tenant.
+func (s *Store) QueryEvents(ctx context.Context, tenant, agentID, category, severity string, start, end time.Time, limit int) ([]models.Event, error) {
+	return s.warm.QueryEvents(ctx, tenant, agentID, category, severity, start, end, limit)
 }
 
 // GetDistinctMetricNames returns all distinct metric names from the warm store.
@@ -720,26 +741,29 @@ func (s *Store) StoreAggregatedMetric(ctx context.Context, tenant string, m *mod
 	return nil
 }
 
-// QueryAggregatedMetrics queries aggregated metrics from warm storage.
-func (s *Store) QueryAggregatedMetrics(ctx context.Context, agentID string, metricName string, window time.Duration, start, end time.Time) ([]models.AggregatedMetric, error) {
-	return s.warm.QueryAggregatedMetrics(ctx, agentID, metricName, window, start, end)
+// QueryAggregatedMetrics queries aggregated metrics from warm storage,
+// scoped to the given tenant.
+func (s *Store) QueryAggregatedMetrics(ctx context.Context, tenant, agentID, metricName string, window time.Duration, start, end time.Time) ([]models.AggregatedMetric, error) {
+	return s.warm.QueryAggregatedMetrics(ctx, tenant, agentID, metricName, window, start, end)
 }
 
 // ---- Network Event Query Operations (Warm Tier) ----
 
-// QueryNetworkEvents queries network events from warm storage (QuestDB).
-// Delegates to the warm client with circuit breaker protection.
-// If eventType is empty, all event types (tcp, dns, http) are queried and merged.
-func (s *Store) QueryNetworkEvents(ctx context.Context, agentID, eventType string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
+// QueryNetworkEvents queries network events from warm storage (QuestDB),
+// scoped to the given tenant. Delegates to the warm client with circuit
+// breaker protection. If eventType is empty, all event types (tcp, dns,
+// http) are queried and merged.
+func (s *Store) QueryNetworkEvents(ctx context.Context, tenant, agentID, eventType string, start, end time.Time, limit int) ([]map[string]interface{}, error) {
 	if !s.warmBreaker.Allow() {
 		return nil, fmt.Errorf("warm store circuit breaker open")
 	}
 
-	events, err := s.warm.QueryNetworkEvents(ctx, agentID, eventType, start, end, limit)
+	events, err := s.warm.QueryNetworkEvents(ctx, tenant, agentID, eventType, start, end, limit)
 	if err != nil {
 		s.warmBreaker.RecordFailure()
 		slog.Error("warm store network event query failed",
 			"error", err,
+			"tenant", tenant,
 			"agent_id", agentID,
 			"event_type", eventType,
 		)

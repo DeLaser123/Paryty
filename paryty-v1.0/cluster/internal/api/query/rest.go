@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -18,20 +19,21 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
 	"github.com/paryty/paryty-v1.0/cluster/internal/plan"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
+	"github.com/paryty/paryty-v1.0/cluster/internal/storage/hot"
 	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
 	"go.uber.org/zap"
 )
 
 // QueryService handles query API requests.
 type QueryService struct {
-	store          *storage.Store
-	logger         *zap.Logger
-	apiKeyManager  *controlplane.APIKeyManager // nil if control plane not configured
-	agentAssigner  *twin.AgentAssigner         // nil if control plane not configured
-	authHandler    interface{}                  // Phase 8: auth.AuthHandler (interface to avoid import cycles)
-	twinAPI        TwinAPI                     // Phase 8: TwinService for agent/twin management
-	db             *pgxpool.Pool       // Phase 8: PostgreSQL control plane pool
-	planEngine     *plan.PlanEngine    // Phase 8: Plan engine for plan operations
+	store         *storage.Store
+	logger        *zap.Logger
+	apiKeyManager *controlplane.APIKeyManager // nil if control plane not configured
+	agentAssigner *twin.AgentAssigner         // nil if control plane not configured
+	authHandler   interface{}                 // Phase 8: auth.AuthHandler (interface to avoid import cycles)
+	twinAPI       TwinAPI                     // Phase 8: TwinService for agent/twin management
+	db            *pgxpool.Pool               // Phase 8: PostgreSQL control plane pool
+	planEngine    *plan.PlanEngine            // Phase 8: Plan engine for plan operations
 }
 
 // TwinAPI defines the twin management operations needed by the REST layer.
@@ -58,22 +60,30 @@ func NewQueryService(store *storage.Store, apiKeyManager *controlplane.APIKeyMan
 	}
 }
 
-// tenantFromRequest extracts the tenant from the X-Tenant-ID header.
-// Returns "default" if the header is not set.
-func tenantFromRequest(c *gin.Context) string {
-	if t := c.GetHeader("X-Tenant-ID"); t != "" {
-		return t
+// requireTenant returns the authenticated tenant for the request, sourced
+// exclusively from JWT claims injected by auth.GinJWTAuth. The client-supplied
+// X-Tenant-ID header is intentionally NOT trusted — honoring it would let any
+// caller read another tenant's data. If no tenant context exists the request
+// is rejected with 401 and ("", false) is returned.
+func requireTenant(c *gin.Context) (string, bool) {
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{
+			"error":   "UNAUTHENTICATED",
+			"message": "Missing tenant context",
+		})
+		return "", false
 	}
-	return "default"
+	return tenantID, true
 }
 
-// RegisterRoutes registers query API routes.
-func (s *QueryService) RegisterRoutes(r *gin.RouterGroup) {
-	api := r.Group("/api/v1")
+// RegisterRoutes registers query API routes on the given router group.
+// The group MUST already be rooted at /api/v1 and protected by JWT
+// middleware (auth.GinJWTAuth) — every handler derives its tenant scope
+// from JWT claims. Health endpoints are registered separately in main.go
+// because liveness probes must stay public.
+func (s *QueryService) RegisterRoutes(api *gin.RouterGroup) {
 	{
-		// Health
-		api.GET("/health", s.HealthCheck)
-
 		// Topology
 		api.GET("/topology", s.GetTopology)
 		api.GET("/topology/cluster/:cluster_id", s.GetClusterTopology)
@@ -156,29 +166,29 @@ type FrontendTopology struct {
 }
 
 type FrontendTopologyNode struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Type        string            `json:"type"`
-	Status      string            `json:"status"`
-	Labels      map[string]string `json:"labels"`
-	Metadata    map[string]string `json:"metadata"`
-	LastSeen    time.Time         `json:"lastSeen"`
-	IPAddress   string            `json:"ip_address,omitempty"`
-	Port        uint32            `json:"port,omitempty"`
+	ID        string            `json:"id"`
+	Name      string            `json:"name"`
+	Type      string            `json:"type"`
+	Status    string            `json:"status"`
+	Labels    map[string]string `json:"labels"`
+	Metadata  map[string]string `json:"metadata"`
+	LastSeen  time.Time         `json:"lastSeen"`
+	IPAddress string            `json:"ip_address,omitempty"`
+	Port      uint32            `json:"port,omitempty"`
 }
 
 type FrontendTopologyEdge struct {
-	ID         string            `json:"id"`
-	SourceID   string            `json:"sourceId"`
-	TargetID   string            `json:"targetId"`
-	Type       string            `json:"type"`
-	Protocol   string            `json:"protocol"`
-	Labels     map[string]string `json:"labels"`
-	LatencyMs  float64           `json:"latencyMs"`
-	BytesPerSec float64          `json:"bytesPerSec"`
-	ErrorRate  float64           `json:"errorRate"`
-	Metadata   map[string]string `json:"metadata"`
-	LastSeen   time.Time         `json:"lastSeen"`
+	ID          string            `json:"id"`
+	SourceID    string            `json:"sourceId"`
+	TargetID    string            `json:"targetId"`
+	Type        string            `json:"type"`
+	Protocol    string            `json:"protocol"`
+	Labels      map[string]string `json:"labels"`
+	LatencyMs   float64           `json:"latencyMs"`
+	BytesPerSec float64           `json:"bytesPerSec"`
+	ErrorRate   float64           `json:"errorRate"`
+	Metadata    map[string]string `json:"metadata"`
+	LastSeen    time.Time         `json:"lastSeen"`
 }
 
 // toFrontendTopology converts a models.Topology to the frontend-compatible format.
@@ -233,8 +243,8 @@ func toFrontendTopology(topo *models.Topology) *FrontendTopology {
 	}
 }
 
-// GetTopology returns the current topology in frontend-compatible format.
-// When no X-Tenant-ID header is set, aggregates topology from all active tenants.
+// GetTopology returns the current topology in frontend-compatible format,
+// scoped to the authenticated tenant (from JWT claims).
 //
 // Query parameters:
 //
@@ -252,77 +262,27 @@ func (s *QueryService) GetTopology(c *gin.Context) {
 
 	includeProcesses := strings.EqualFold(c.DefaultQuery("include_processes", "false"), "true")
 
-	tenant := tenantFromRequest(c)
-
-	// If a specific tenant is requested, return its topology directly.
-	if tenant != "default" {
-		topo, err := s.store.GetTopology(ctx, tenant)
-		if err != nil {
-			c.JSON(http.StatusOK, &FrontendTopology{
-				Nodes:     []FrontendTopologyNode{},
-				Edges:     []FrontendTopologyEdge{},
-				Timestamp: time.Now(),
-				Version:   "0",
-			})
-			return
-		}
-		ft := toFrontendTopology(topo)
-		if !includeProcesses {
-			ft = filterOutProcessNodes(ft)
-		}
-		c.JSON(http.StatusOK, ft)
+	// Tenant scope comes exclusively from JWT claims — never from headers.
+	tenant, ok := requireTenant(c)
+	if !ok {
 		return
 	}
 
-	// Default tenant: aggregate topology from all active tenants.
-	// First, discover active tenants by listing agents.
-	activeTenants := s.discoverTenants(ctx)
-
-	merged := &FrontendTopology{
-		Nodes:     []FrontendTopologyNode{},
-		Edges:     []FrontendTopologyEdge{},
-		Timestamp: time.Now(),
-		Version:   "0",
+	topo, err := s.store.GetTopology(ctx, tenant)
+	if err != nil || topo == nil {
+		c.JSON(http.StatusOK, &FrontendTopology{
+			Nodes:     []FrontendTopologyNode{},
+			Edges:     []FrontendTopologyEdge{},
+			Timestamp: time.Now(),
+			Version:   "0",
+		})
+		return
 	}
-
-	seenNodeIDs := make(map[string]bool)
-	maxVersion := uint64(0)
-
-	for _, t := range activeTenants {
-		topo, err := s.store.GetTopology(ctx, t)
-		if err != nil || topo == nil {
-			continue
-		}
-		ft := toFrontendTopology(topo)
-		if !includeProcesses {
-			ft = filterOutProcessNodes(ft)
-		}
-		for _, node := range ft.Nodes {
-			if !seenNodeIDs[node.ID] {
-				seenNodeIDs[node.ID] = true
-				merged.Nodes = append(merged.Nodes, node)
-			}
-		}
-		for _, edge := range ft.Edges {
-			merged.Edges = append(merged.Edges, edge)
-		}
-		if topo.Version > maxVersion {
-			maxVersion = topo.Version
-		}
-		if topo.Timestamp.After(merged.Timestamp) {
-			merged.Timestamp = topo.Timestamp
-		}
+	ft := toFrontendTopology(topo)
+	if !includeProcesses {
+		ft = filterOutProcessNodes(ft)
 	}
-
-	merged.Version = fmt.Sprintf("%d", maxVersion)
-	c.JSON(http.StatusOK, merged)
-}
-
-// discoverTenants returns a list of active tenant IDs.
-// In production this would scan DragonflyDB keys.
-// For now returns known tenants including gai-tech.
-func (s *QueryService) discoverTenants(_ context.Context) []string {
-	return []string{"tenant1", "tenant-b", "gai-tech", "default"}
+	c.JSON(http.StatusOK, ft)
 }
 
 // filterOutProcessNodes removes process-type nodes and any edges that connect
@@ -386,7 +346,10 @@ func (s *QueryService) GetClusterTopology(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 	topo, err := s.store.GetTopology(ctx, tenant)
 	if err != nil || topo == nil {
 		c.JSON(http.StatusOK, &FrontendTopology{
@@ -450,18 +413,18 @@ func (s *QueryService) SearchNodes(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	// Aggregate across all tenants for search
-	activeTenants := s.discoverTenants(ctx)
+	// Search is scoped to the authenticated tenant only.
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 
 	seenIDs := make(map[string]bool)
 	results := make([]FrontendTopologyNode, 0)
 	lowerQuery := strings.ToLower(query)
 
-	for _, tenant := range activeTenants {
-		topo, err := s.store.GetTopology(ctx, tenant)
-		if err != nil || topo == nil {
-			continue
-		}
+	topo, err := s.store.GetTopology(ctx, tenant)
+	if err == nil && topo != nil {
 		ft := toFrontendTopology(topo)
 		for _, node := range ft.Nodes {
 			if seenIDs[node.ID] {
@@ -476,10 +439,6 @@ func (s *QueryService) SearchNodes(c *gin.Context) {
 				results = append(results, node)
 			}
 		}
-	}
-
-	if results == nil {
-		results = []FrontendTopologyNode{}
 	}
 
 	c.JSON(http.StatusOK, results)
@@ -501,7 +460,10 @@ func (s *QueryService) GetMetrics(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 	batch, err := s.store.GetLatestMetrics(ctx, tenant, agentID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -526,10 +488,15 @@ func (s *QueryService) GetAggregatedMetrics(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
+
 	end := time.Now()
 	start := end.Add(-24 * time.Hour)
 
-	metrics, err := s.store.QueryAggregatedMetrics(ctx, agentID, metricName, window, start, end)
+	metrics, err := s.store.QueryAggregatedMetrics(ctx, tenant, agentID, metricName, window, start, end)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -560,7 +527,12 @@ func (s *QueryService) QueryTraces(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	traces, err := s.store.QueryTraces(ctx, service, start, end, limit)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
+
+	traces, err := s.store.QueryTraces(ctx, tenant, service, start, end, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -575,7 +547,12 @@ func (s *QueryService) GetTrace(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	traces, err := s.store.QueryTraces(ctx, "", time.Time{}, time.Now(), 1)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
+
+	traces, err := s.store.QueryTraces(ctx, tenant, "", time.Time{}, time.Now(), 1)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -601,7 +578,10 @@ func (s *QueryService) GetAlerts(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 	alerts, err := s.store.GetActiveAlerts(ctx, tenant)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -646,7 +626,10 @@ func (s *QueryService) QueryMetrics(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 
 	// Collect metric names to query: use Names array if provided, else single Name
 	metricNames := query.Names
@@ -658,24 +641,25 @@ func (s *QueryService) QueryMetrics(c *gin.Context) {
 		return
 	}
 
-	// Determine which agents to query
+	// Determine which agents to query — always within the tenant's scope.
 	var agentIDs []string
 	if query.AgentID != "" {
 		agentIDs = []string{query.AgentID}
 	} else {
-		// No specific agent: discover active agents from storage
+		// No specific agent: discover the tenant's active agents from storage.
 		agents, err := s.store.GetAllAgentStates(ctx, tenant)
-		if err != nil || len(agents) == 0 {
-			// Fallback: try without agent filter (empty string, QuestDB exact match only)
-			// Use known agent IDs from topology discovery
-			agentIDs = s.discoverTenants(ctx)
-			if len(agentIDs) == 0 {
-				agentIDs = []string{"gai-tech"}
-			}
-		} else {
-			for _, a := range agents {
-				agentIDs = append(agentIDs, a.ID)
-			}
+		if err != nil {
+			s.logger.Warn("Failed to discover agents for metrics query",
+				zap.String("tenant", tenant), zap.Error(err))
+		}
+		for _, a := range agents {
+			agentIDs = append(agentIDs, a.ID)
+		}
+		if len(agentIDs) == 0 {
+			// No agents → no series. Return an empty result rather than
+			// guessing agent IDs.
+			c.JSON(http.StatusOK, []gin.H{})
+			return
 		}
 	}
 
@@ -701,7 +685,7 @@ func (s *QueryService) QueryMetrics(c *gin.Context) {
 
 	for _, aid := range agentIDs {
 		for _, name := range metricNames {
-			metrics, err := s.store.QueryMetrics(ctx, aid, name, start, end)
+			metrics, err := s.store.QueryMetrics(ctx, tenant, aid, name, start, end)
 			if err != nil {
 				s.logger.Warn("Failed to query metrics",
 					zap.String("agent_id", aid),
@@ -803,7 +787,12 @@ func (s *QueryService) QueryTracesPost(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	traces, err := s.store.QueryTraces(ctx, query.Service, start, end, query.Limit)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
+
+	traces, err := s.store.QueryTraces(ctx, tenant, query.Service, start, end, query.Limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -848,7 +837,12 @@ func (s *QueryService) QueryEventsPost(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	events, err := s.store.QueryEvents(ctx, "", query.Category, query.Severity, start, end, query.Limit)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
+
+	events, err := s.store.QueryEvents(ctx, tenant, "", query.Category, query.Severity, start, end, query.Limit)
 	if err != nil {
 		s.logger.Warn("Failed to query events", zap.Error(err))
 		c.JSON(http.StatusOK, []gin.H{})
@@ -863,14 +857,14 @@ func (s *QueryService) QueryEventsPost(c *gin.Context) {
 			labels = map[string]string{}
 		}
 		result = append(result, gin.H{
-			"id":        e.ID,
-			"source":    e.Source,
-			"category":  e.Category,
-			"severity":  e.Severity,
-			"title":     e.Title,
-			"message":   e.Description,
-			"labels":    labels,
-			"timestamp": e.Timestamp,
+			"id":           e.ID,
+			"source":       e.Source,
+			"category":     e.Category,
+			"severity":     e.Severity,
+			"title":        e.Title,
+			"message":      e.Description,
+			"labels":       labels,
+			"timestamp":    e.Timestamp,
 			"acknowledged": false,
 		})
 	}
@@ -943,68 +937,69 @@ func (s *QueryService) GetAlertRules(c *gin.Context) {
 	c.JSON(http.StatusOK, rules)
 }
 
-// AcknowledgeAlert acknowledges an alert.
+// AcknowledgeAlert acknowledges an alert: it transitions the alert through
+// the hot-tier state machine (firing/silenced → acknowledged), scoped to the
+// authenticated tenant. The transition is persisted and recorded in the
+// alert's history list.
 func (s *QueryService) AcknowledgeAlert(c *gin.Context) {
 	alertID := c.Param("alert_id")
-	s.logger.Info("Alert acknowledged", zap.String("alert_id", alertID))
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	reason := "acknowledged via API"
+	if uid, exists := c.Get(string(plan.CtxUserID)); exists {
+		if userID, isStr := uid.(string); isStr && userID != "" {
+			reason = "acknowledged by user " + userID
+		}
+	}
+
+	if err := s.store.AcknowledgeAlert(ctx, tenant, alertID, reason); err != nil {
+		switch {
+		case errors.Is(err, hot.ErrAlertNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"error": "NOT_FOUND", "message": "alert not found"})
+		case errors.Is(err, hot.ErrInvalidTransition):
+			c.JSON(http.StatusConflict, gin.H{"error": "INVALID_STATE", "message": err.Error()})
+		default:
+			s.logger.Error("acknowledge alert failed",
+				zap.String("tenant", tenant),
+				zap.String("alert_id", alertID),
+				zap.Error(err))
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "failed to acknowledge alert"})
+		}
+		return
+	}
+
+	s.logger.Info("Alert acknowledged",
+		zap.String("tenant", tenant),
+		zap.String("alert_id", alertID))
 	c.JSON(http.StatusOK, gin.H{"status": "acknowledged", "alert_id": alertID})
 }
 
-// ListAgents returns all agents.
-// When no X-Tenant-ID header is set (default), aggregates agents across all active tenants.
+// ListAgents returns all agents for the authenticated tenant.
 func (s *QueryService) ListAgents(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	tenant := tenantFromRequest(c)
-
-	// If a specific tenant is requested, return its agents directly.
-	if tenant != "default" {
-		agents, err := s.store.GetAllAgentStates(ctx, tenant)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(http.StatusOK, agents)
+	// Tenant scope comes exclusively from JWT claims — never from headers.
+	tenant, ok := requireTenant(c)
+	if !ok {
 		return
 	}
 
-	// Default: aggregate agents from all active tenants.
-	activeTenants := s.discoverTenants(ctx)
-	seenIDs := make(map[string]int) // maps agent ID to index in allAgents
-	var allAgents []models.AgentInfo
-
-	for _, t := range activeTenants {
-		// Skip the "default" tenant â€” it's a fallback bucket, not a real tenant.
-		// Including it would pull stubs from warm storage (QuestDB) that
-		// overwrite real agent metadata from actual tenants.
-		if t == "default" {
-			continue
-		}
-		agents, err := s.store.GetAllAgentStates(ctx, t)
-		if err != nil {
-			s.logger.Debug("Failed to get agents for tenant",
-				zap.String("tenant", t), zap.Error(err))
-			continue
-		}
-		for _, a := range agents {
-			if idx, exists := seenIDs[a.ID]; exists {
-				// If the new agent has hostname/OS metadata but the existing
-				// entry is a stub (empty hostname), replace it with the richer entry.
-				if a.Hostname != "" && allAgents[idx].Hostname == "" {
-					allAgents[idx] = a
-				}
-			} else {
-				seenIDs[a.ID] = len(allAgents)
-				allAgents = append(allAgents, a)
-			}
-		}
+	agents, err := s.store.GetAllAgentStates(ctx, tenant)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
 	}
-
-	if allAgents == nil {
-		allAgents = []models.AgentInfo{}
+	if agents == nil {
+		agents = []models.AgentInfo{}
 	}
-	c.JSON(http.StatusOK, allAgents)
+	c.JSON(http.StatusOK, agents)
 }
 
 // GetAgent returns a specific agent.
@@ -1013,7 +1008,10 @@ func (s *QueryService) GetAgent(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 	agent, err := s.store.GetAgentState(ctx, tenant, agentID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "agent not found"})
@@ -1029,7 +1027,10 @@ func (s *QueryService) GetAgentHealth(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
 
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 	health, err := s.store.GetHealthReport(ctx, tenant, agentID)
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "health report not found"})
@@ -1095,7 +1096,12 @@ func (s *QueryService) QueryNetworkEvents(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
-	events, err := s.store.QueryNetworkEvents(ctx, agentID, eventType, start, end, limit)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
+
+	events, err := s.store.QueryNetworkEvents(ctx, tenant, agentID, eventType, start, end, limit)
 	if err != nil {
 		s.logger.Error("query network events failed",
 			zap.Error(err),
@@ -1119,7 +1125,10 @@ func (s *QueryService) QueryNetworkEvents(c *gin.Context) {
 // ListTimelineSnapshots handles GET /api/v1/timeline/snapshots.
 // Query parameters: start, end (RFC3339), limit (default 50).
 func (s *QueryService) ListTimelineSnapshots(c *gin.Context) {
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 
 	start := time.Now().Add(-24 * time.Hour)
 	end := time.Now()
@@ -1175,7 +1184,10 @@ func (s *QueryService) ListTimelineSnapshots(c *gin.Context) {
 // GetTimelineSnapshot handles GET /api/v1/timeline/snapshots/:snapshot_id.
 func (s *QueryService) GetTimelineSnapshot(c *gin.Context) {
 	snapshotID := c.Param("snapshot_id")
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
@@ -1233,7 +1245,10 @@ func (s *QueryService) GetSnapshotDiff(c *gin.Context) {
 		return
 	}
 
-	tenant := tenantFromRequest(c)
+	tenant, ok := requireTenant(c)
+	if !ok {
+		return
+	}
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
@@ -1317,13 +1332,13 @@ func (s *QueryService) GetSnapshotDiff(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"fromId":         fromID,
-		"toId":           toID,
-		"addedNodes":     addedNodes,
-		"removedNodes":   removedNodes,
-		"addedEdges":     addedEdges,
-		"removedEdges":   removedEdges,
-		"metricChanges":  metricChanges,
+		"fromId":        fromID,
+		"toId":          toID,
+		"addedNodes":    addedNodes,
+		"removedNodes":  removedNodes,
+		"addedEdges":    addedEdges,
+		"removedEdges":  removedEdges,
+		"metricChanges": metricChanges,
 	})
 }
 
@@ -1342,6 +1357,9 @@ func (s *QueryService) RegisterTwinRoutes(authGroup *gin.RouterGroup, writeMW, c
 	authGroup.POST("/twins/:twin_id/backlogs/:agent_id/accept", s.AcceptBacklog)
 	authGroup.POST("/twins/:twin_id/backlogs/:agent_id/reject", s.RejectBacklog)
 	authGroup.GET("/agents/unassigned", s.ListUnassignedAgents)
+	authGroup.POST("/agents", writeMW, s.CreateAgent)
+	authGroup.GET("/agents/all", s.ListAllAgents)
+	authGroup.DELETE("/agents/:agent_id", writeMW, s.DeleteAgent)
 }
 
 // tenantFromJWT extracts the tenant ID from the Gin context populated by JWT middleware.
@@ -1577,6 +1595,83 @@ func (s *QueryService) ListUnassignedAgents(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": agents})
 }
 
+// CreateAgent handles POST /api/v1/agents — register a new agent.
+func (s *QueryService) CreateAgent(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	var req struct {
+		Name string `json:"name" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		return
+	}
+
+	agent, err := s.agentAssigner.CreateAgent(c.Request.Context(), tenantID, req.Name)
+	if err != nil {
+		s.logger.Error("Failed to create agent", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusCreated, gin.H{"data": agent})
+}
+
+// ListAllAgents handles GET /api/v1/agents/all — list all agents with metadata.
+func (s *QueryService) ListAllAgents(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agents, err := s.agentAssigner.ListAllAgents(c.Request.Context(), tenantID)
+	if err != nil {
+		s.logger.Error("Failed to list agents", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+	if agents == nil {
+		agents = []twin.AgentInfo{}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": agents})
+}
+
+// DeleteAgent handles DELETE /api/v1/agents/:agent_id — remove an agent.
+func (s *QueryService) DeleteAgent(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	if err := s.agentAssigner.DeleteAgent(c.Request.Context(), agentID, tenantID); err != nil {
+		s.logger.Error("Failed to delete agent", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": gin.H{"message": "agent deleted"}})
+}
+
 // â”€â”€ API Key Management Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // RegisterApiKeyRoutes registers API key management endpoints on the
@@ -1586,6 +1681,7 @@ func (s *QueryService) RegisterApiKeyRoutes(authGroup *gin.RouterGroup, writeMW 
 	authGroup.GET("/api-keys", s.ListApiKeys)
 	authGroup.POST("/api-keys", writeMW, s.CreateApiKey)
 	authGroup.DELETE("/api-keys/:key_id", writeMW, s.DeleteApiKey)
+	authGroup.PUT("/api-keys/:key_id/rotate", writeMW, s.RotateApiKey)
 }
 
 // ListApiKeys handles GET /api/v1/api-keys
@@ -1678,6 +1774,30 @@ func (s *QueryService) DeleteApiKey(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted": true}})
+}
+
+// RotateApiKey handles PUT /api/v1/api-keys/:key_id/rotate
+// Generates a new raw key for the given key ID and returns it.
+func (s *QueryService) RotateApiKey(c *gin.Context) {
+	if s.apiKeyManager == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "API key management requires PostgreSQL control plane"})
+		return
+	}
+
+	keyID := c.Param("key_id")
+	rawKey, err := s.apiKeyManager.RotateKey(c.Request.Context(), keyID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data": gin.H{
+			"id":     keyID,
+			"key":    rawKey,
+			"prefix": rawKey[:16],
+		},
+	})
 }
 
 // ── Phase 8: User Management Handlers ────────────────────────────────
@@ -1997,6 +2117,7 @@ func (s *QueryService) DeleteUser(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted": true}})
 }
+
 // â”€â”€ Phase 8: Tenant Management Handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 // tenantResponse is the JSON shape returned for tenant objects.
@@ -2194,4 +2315,47 @@ func (s *QueryService) RegisterAdminRoutes(authGroup *gin.RouterGroup, userWrite
 	// Plan management
 	authGroup.GET("/tenant/plan", userReadMW, s.GetTenantPlan)
 	authGroup.POST("/tenant/plan/change", tenantWriteMW, s.ChangePlan)
+}
+
+// RLSTenantMiddleware sets the PostgreSQL session variable `app.current_tenant_id`
+// for every authenticated request. This enables Row-Level Security policies to
+// enforce tenant isolation at the database level.
+//
+// This middleware MUST be applied after JWT authentication middleware to ensure
+// the tenant ID is available in the context.
+func (s *QueryService) RLSTenantMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if s.db == nil {
+			// No database configured, skip RLS middleware
+			c.Next()
+			return
+		}
+
+		tenantID, ok := tenantFromJWT(c)
+		if !ok {
+			// No tenant context, continue (authentication middleware will handle 401)
+			c.Next()
+			return
+		}
+
+		// Set the PostgreSQL session variable for RLS
+		// SET LOCAL does not support parameterized queries, so we use fmt.Sprintf.
+		// The tenant ID comes from a validated JWT token, so this is safe.
+		ctx := c.Request.Context()
+		_, err := s.db.Exec(ctx, fmt.Sprintf("SET LOCAL app.current_tenant_id = '%s'", tenantID))
+		if err != nil {
+			s.logger.Error("Failed to set RLS tenant context",
+				zap.String("tenant_id", tenantID),
+				zap.Error(err),
+			)
+			c.JSON(http.StatusInternalServerError, gin.H{
+				"error":   "INTERNAL",
+				"message": "Failed to set tenant context",
+			})
+			c.Abort()
+			return
+		}
+
+		c.Next()
+	}
 }

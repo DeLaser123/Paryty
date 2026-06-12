@@ -263,7 +263,10 @@ jobs:
         run: kubectl apply -k deploy/kubernetes/overlays/dev/
       - name: Verify deployment
         run: |
-          kubectl rollout status deployment/paryty-cluster -n paryty-dev --timeout=120s
+          kubectl rollout status deployment/paryty-ingestion -n paryty-dev --timeout=120s
+          kubectl rollout status deployment/paryty-pipeline -n paryty-dev --timeout=120s
+          kubectl rollout status deployment/paryty-query -n paryty-dev --timeout=120s
+          kubectl rollout status deployment/paryty-intelligence -n paryty-dev --timeout=120s
           kubectl rollout status deployment/paryty-frontend -n paryty-dev --timeout=120s
 
   # ──────────────────────────────────────────────────────────────
@@ -286,7 +289,10 @@ jobs:
         run: kubectl apply -k deploy/kubernetes/overlays/staging/
       - name: Verify deployment
         run: |
-          kubectl rollout status deployment/paryty-cluster -n paryty-staging --timeout=120s
+          kubectl rollout status deployment/paryty-ingestion -n paryty-staging --timeout=120s
+          kubectl rollout status deployment/paryty-pipeline -n paryty-staging --timeout=120s
+          kubectl rollout status deployment/paryty-query -n paryty-staging --timeout=120s
+          kubectl rollout status deployment/paryty-intelligence -n paryty-staging --timeout=120s
           kubectl rollout status deployment/paryty-frontend -n paryty-staging --timeout=120s
 
   # ──────────────────────────────────────────────────────────────
@@ -305,15 +311,12 @@ jobs:
         run: |
           mkdir -p $HOME/.kube
           echo "${{ secrets.KUBE_CONFIG_PROD }}" | base64 -d > $HOME/.kube/config
-      - name: Deploy canary (10% traffic)
+      - name: Deploy to production
+        run: kubectl apply -k deploy/kubernetes/overlays/prod/
+      - name: Verify deployment
         run: |
-          kubectl apply -k deploy/kubernetes/overlays/prod/
-          kubectl scale deployment/paryty-cluster-canary -n paryty-prod --replicas=1
-      - name: Monitor canary (5 min)
-        run: |
-          sleep 300
-          kubectl logs -n paryty-prod -l app=paryty-cluster,track=canary --tail=100
-      - name: Promote canary to stable
-        run: |
-          kubectl scale deployment/paryty-cluster -n paryty-prod --replicas=3
-          kubectl scale deployment/paryty-cluster-canary -n paryty-prod --replicas=0
+          kubectl rollout status deployment/paryty-ingestion -n paryty-prod --timeout=180s
+          kubectl rollout status deployment/paryty-pipeline -n paryty-prod --timeout=180s
+          kubectl rollout status deployment/paryty-query -n paryty-prod --timeout=180s
+          kubectl rollout status deployment/paryty-intelligence -n paryty-prod --timeout=180s
+          kubectl rollout status deployment/paryty-frontend -n paryty-prod --timeout=180s

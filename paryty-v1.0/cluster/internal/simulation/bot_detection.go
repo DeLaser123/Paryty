@@ -380,7 +380,7 @@ func (bd *BotDetector) DetectBotPatternsFromTopology(ctx context.Context, tenant
 
 	var allRecords []RequestRecord
 	for _, agent := range agents {
-		metrics, err := bd.store.QueryMetrics(ctx, agent.ID, "network.requests_per_sec", start, end)
+		metrics, err := bd.store.QueryMetrics(ctx, tenantID, agent.ID, "network.requests_per_sec", start, end)
 		if err != nil {
 			continue
 		}

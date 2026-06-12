@@ -1,0 +1,30 @@
+replicaCount: 2
+image:
+  repository: paryty/paryty-intelligence
+  tag: latest
+  pullPolicy: IfNotPresent
+service:
+  type: ClusterIP
+  grpc:
+    port: 50051
+  http:
+    port: 8080
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+pdb:
+  enabled: true
+  minAvailable: 1
+nodeSelector: {}
+tolerations: []
+affinity: {}

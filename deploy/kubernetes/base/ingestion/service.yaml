@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: paryty-ingestion
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty-ingestion
+    app.kubernetes.io/component: ingestion
+spec:
+  type: ClusterIP
+  ports:
+    - port: 50051
+      targetPort: grpc
+      protocol: TCP
+      name: grpc
+  selector:
+    app.kubernetes.io/name: paryty-ingestion

@@ -20,25 +20,48 @@ mod metal;
 mod proto;
 mod supervisor;
 
-/// Parse the `-c` / `--config` flag from argv. Returns `None` if not present.
-fn parse_config_flag() -> Option<String> {
+/// Parsed CLI arguments.
+struct CliArgs {
+    config_path: Option<String>,
+    set_key: Option<String>,
+}
+
+/// Parse CLI arguments from argv. Hand-rolled to avoid pulling in clap.
+fn parse_cli() -> CliArgs {
     let args: Vec<String> = std::env::args().collect();
+    let mut result = CliArgs { config_path: None, set_key: None };
     let mut i = 1;
     while i < args.len() {
-        if (args[i] == "-c" || args[i] == "--config") && i + 1 < args.len() {
-            return Some(args[i + 1].clone());
+        match args[i].as_str() {
+            "-c" | "--config" if i + 1 < args.len() => {
+                result.config_path = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--key" if i + 1 < args.len() => {
+                result.set_key = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "-h" | "--help" => {
+                eprintln!("Usage: paryty-agent [OPTIONS]");
+                eprintln!();
+                eprintln!("Options:");
+                eprintln!("  -c, --config <PATH>  Path to YAML configuration file");
+                eprintln!("  --key <API_KEY>      Set or update the API key and persist to config file");
+                eprintln!("  -h, --help           Print help");
+                eprintln!();
+                eprintln!("Environment variables:");
+                eprintln!("  PARYTY_API_KEY            API key (overrides config file)");
+                eprintln!("  PARYTY_CLUSTER_ENDPOINT   Cluster endpoint (overrides config file)");
+                eprintln!("  PARYTY_AGENT_CONFIG       Config file path (default: configs/agent/agent.yaml)");
+                std::process::exit(0);
+            }
+            _ => {
+                eprintln!("Unknown argument: {}. Run with --help for usage.", args[i]);
+                std::process::exit(1);
+            }
         }
-        if args[i] == "-h" || args[i] == "--help" {
-            eprintln!("Usage: paryty-agent [OPTIONS]");
-            eprintln!();
-            eprintln!("Options:");
-            eprintln!("  -c, --config <PATH>  Path to YAML configuration file");
-            eprintln!("  -h, --help           Print help");
-            std::process::exit(0);
-        }
-        i += 1;
     }
-    None
+    result
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -57,9 +80,25 @@ async fn main() -> Result<()> {
     let cancel_token = CancellationToken::new();
 
     // ── Load configuration ───────────────────────────────────────────
-    let config = if let Some(path) = parse_config_flag() {
+    let cli = parse_cli();
+
+    // Handle --key flag: persist API key to config file and exit.
+    if let Some(ref new_key) = cli.set_key {
+        let config_path = cli.config_path.clone().unwrap_or_else(|| {
+            std::env::var("PARYTY_AGENT_CONFIG")
+                .unwrap_or_else(|_| "configs/agent/agent.yaml".to_string())
+        });
+        config::persist_api_key(&config_path, new_key)?;
+        info!(path = %config_path, "API key persisted to config file");
+        eprintln!("✓ API key updated in {}", config_path);
+        eprintln!("  Restart the agent for the new key to take effect.");
+        eprintln!("  Or set PARYTY_API_KEY environment variable for immediate use without restart.");
+        return Ok(());
+    }
+
+    let config = if let Some(path) = &cli.config_path {
         info!(path = %path, "Loading config from CLI argument");
-        config::load_from_path(&path)?
+        config::load_from_path(path)?
     } else {
         config::load()?
     };
@@ -71,6 +110,11 @@ async fn main() -> Result<()> {
 
     // ── Initialize communication layer ───────────────────────────────
     let comm = Arc::new(communication::Client::new(&config).await?);
+    // Store config path for runtime key refresh.
+    comm.set_config_path(cli.config_path.clone().unwrap_or_else(|| {
+        std::env::var("PARYTY_AGENT_CONFIG")
+            .unwrap_or_else(|_| "configs/agent/agent.yaml".to_string())
+    })).await;
     info!("Communication layer initialized");
 
     // ── Wire communication lifecycle ─────────────────────────────────
@@ -143,10 +187,16 @@ async fn main() -> Result<()> {
         let comm = comm.clone();
         let handle = tokio::task::spawn_blocking(move || {
             // Create a single-threaded tokio runtime for the eBPF event loop.
-            let rt = tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-                .expect("Failed to create eBPF thread runtime");
+            // Failure here must not bring down the whole agent — the metal
+            // scraper keeps working without eBPF (graceful degradation
+            // principle: eBPF → /proc fallback → stub).
+            let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+                Ok(rt) => rt,
+                Err(e) => {
+                    error!("Failed to create eBPF thread runtime; eBPF layer disabled: {}", e);
+                    return;
+                }
+            };
 
             rt.block_on(async move {
                 tokio::select! {
