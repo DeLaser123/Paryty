@@ -1,0 +1,30 @@
+﻿/* Button - Paryty Design System primitive */
+.aef-btn {
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+  padding: 6px 14px;
+  border-radius: var(--aef-radius-control);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  transition:
+    opacity var(--aef-duration-fast) var(--aef-ease-exit),
+    transform var(--aef-duration-instant) var(--aef-ease-exit);
+}
+
+.aef-btn-active {
+  background: var(--aef-btn-active-bg);
+  color: var(--aef-btn-active-text);
+  border: none;
+}
+
+.aef-btn-inactive {
+  background: var(--aef-btn-inactive-bg);
+  color: var(--aef-btn-inactive-text);
+  border: var(--aef-btn-inactive-border);
+}
+
+.aef-btn:hover { opacity: 0.88; transform: translateY(-1px); }
+.aef-btn:active { opacity: 1; transform: scale(0.97) translateY(0); }

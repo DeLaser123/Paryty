@@ -191,6 +191,92 @@ var createPhase8Tables = []string{
 	`ALTER TABLE agent_assignments ADD COLUMN IF NOT EXISTS client_id TEXT NOT NULL DEFAULT ''`,
 	`ALTER TABLE agent_assignments ADD COLUMN IF NOT EXISTS topic_prefix TEXT NOT NULL DEFAULT ''`,
 
+	// ═══════════════════════════════════════════════════════════════════════
+	// Dual Reality Agent System — Schema Extensions
+	// ═══════════════════════════════════════════════════════════════════════
+
+	// Extend agent_registrations with Dual Reality lifecycle columns.
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS paired_at TIMESTAMPTZ`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS unpaired_at TIMESTAMPTZ`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS retired_at TIMESTAMPTZ`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS blacklisted_at TIMESTAMPTZ`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS blacklist_reason TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS identity_token TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE agent_registrations ADD COLUMN IF NOT EXISTS identity_token_hash TEXT NOT NULL DEFAULT ''`,
+
+	// Extend agent_assignments with unpair tracking.
+	`ALTER TABLE agent_assignments ADD COLUMN IF NOT EXISTS unpaired_at TIMESTAMPTZ`,
+
+	// Extend edge agent status CHECK constraint to include Dual Reality states.
+	// Uses DO block to handle constraint recreation idempotently.
+	`DO $$
+	BEGIN
+		ALTER TABLE agent_registrations DROP CONSTRAINT IF EXISTS agent_registrations_status_check;
+		ALTER TABLE agent_registrations ADD CONSTRAINT agent_registrations_status_check
+			CHECK (status IN ('pending', 'deployed', 'inactive', 'unconfigured', 'active', 'lost', 'rogue', 'retired', 'blacklisted'));
+	EXCEPTION WHEN duplicate_object THEN NULL;
+	END $$`,
+
+	// Extend cluster agent (twin) status CHECK constraint.
+	`DO $$
+	BEGIN
+		ALTER TABLE paryty_twins DROP CONSTRAINT IF EXISTS paryty_twins_status_check;
+		ALTER TABLE paryty_twins ADD CONSTRAINT paryty_twins_status_check
+			CHECK (status IN ('pending', 'active', 'degraded', 'inactive', 'deleted', 'unconfigured'));
+	EXCEPTION WHEN duplicate_object THEN NULL;
+	END $$`,
+
+	// agent_blacklist — tracks edge agents blocked from registering to a tenant.
+	`CREATE TABLE IF NOT EXISTS agent_blacklist (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		tenant_id UUID NOT NULL REFERENCES tenants(tenant_id) ON DELETE CASCADE,
+		edge_agent_id TEXT NOT NULL,
+		reason TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		UNIQUE(tenant_id, edge_agent_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_agent_blacklist_tenant ON agent_blacklist(tenant_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_agent_blacklist_edge ON agent_blacklist(edge_agent_id)`,
+
+	// agent_status_log — immutable audit trail for agent state transitions.
+	`CREATE TABLE IF NOT EXISTS agent_status_log (
+		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+		agent_id TEXT NOT NULL,
+		tenant_id UUID NOT NULL,
+		from_status TEXT,
+		to_status TEXT NOT NULL,
+		reason TEXT NOT NULL DEFAULT '',
+		actor_id UUID,
+		metadata JSONB NOT NULL DEFAULT '{}',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_agent_status_log_agent ON agent_status_log(agent_id, created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_agent_status_log_tenant ON agent_status_log(tenant_id, created_at DESC)`,
+
+	// RLS for new Dual Reality tables.
+	`DO $$
+	BEGIN
+		ALTER TABLE agent_blacklist ENABLE ROW LEVEL SECURITY;
+	EXCEPTION WHEN duplicate_object THEN NULL;
+	END $$`,
+	`DO $$
+	BEGIN
+		ALTER TABLE agent_status_log ENABLE ROW LEVEL SECURITY;
+	EXCEPTION WHEN duplicate_object THEN NULL;
+	END $$`,
+	`DO $$
+	BEGIN
+		DROP POLICY IF EXISTS tenant_isolation_agent_blacklist ON agent_blacklist;
+		CREATE POLICY tenant_isolation_agent_blacklist ON agent_blacklist
+			USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+	END $$`,
+	`DO $$
+	BEGIN
+		DROP POLICY IF EXISTS tenant_isolation_agent_status_log ON agent_status_log;
+		CREATE POLICY tenant_isolation_agent_status_log ON agent_status_log
+			USING (tenant_id = current_setting('app.current_tenant_id')::uuid);
+	END $$`,
+
 	// audit_log — immutable audit trail for all security-relevant actions.
 	`CREATE TABLE IF NOT EXISTS audit_log (
 		id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -202,7 +288,8 @@ var createPhase8Tables = []string{
 		details JSONB NOT NULL DEFAULT '{}',
 		ip_address TEXT,
 		user_agent TEXT,
-		created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		hash TEXT -- SHA-256 hash chain for tamper detection
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_log_tenant ON audit_log(tenant_id, created_at DESC)`,
 	`CREATE INDEX IF NOT EXISTS idx_audit_log_user ON audit_log(user_id, created_at DESC)`,

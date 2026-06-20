@@ -51,5 +51,7 @@ func RequirePermission(permission string) gin.HandlerFunc {
 			})
 			return
 		}
+	
+		c.Next()
 	}
 }

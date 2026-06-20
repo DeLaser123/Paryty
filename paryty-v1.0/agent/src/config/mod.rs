@@ -39,6 +39,9 @@ pub struct AgentConfig {
     /// Fallback env var: `PARYTY_CLIENT_ID` — gRPC assignment is primary.
     #[serde(default)]
     pub client_id: Option<String>,
+    /// Assigned cluster agent ID for auto-pairing on registration.
+    #[serde(default)]
+    pub cluster_agent_id: Option<String>,
     pub self_metrics: SelfMetricsConfig,
 }
 
@@ -335,6 +338,11 @@ pub fn load_from_str(yaml: &str) -> Result<Config> {
         config.agent.client_id = Some(client_id);
     }
 
+    // Override cluster agent ID from env var for auto-pairing.
+    if let Ok(id) = std::env::var("PARYTY_CLUSTER_AGENT_ID") {
+        config.agent.cluster_agent_id = Some(id);
+    }
+
     // Generate agent ID if set to "auto"
     if config.agent.id == "auto" {
         config.agent.id = uuid::Uuid::new_v4().to_string();
@@ -377,17 +385,16 @@ pub fn persist_api_key(config_path: &str, new_key: &str) -> Result<()> {
 
     if let serde_yaml::Value::Mapping(ref mut map) = doc {
         // Get or create the agent mapping.
-        let agent_entry = map.entry(agent_key.clone()).or_insert_with(|| {
-            serde_yaml::Value::Mapping(serde_yaml::mapping::Mapping::new())
-        });
+        let agent_entry = map
+            .entry(agent_key.clone())
+            .or_insert_with(|| serde_yaml::Value::Mapping(serde_yaml::mapping::Mapping::new()));
         if let serde_yaml::Value::Mapping(ref mut agent_map) = agent_entry {
             agent_map.insert(api_key_key, new_key_val);
         }
     }
 
     // Write back to file.
-    let yaml_str = serde_yaml::to_string(&doc)
-        .context("Failed to serialize config to YAML")?;
+    let yaml_str = serde_yaml::to_string(&doc).context("Failed to serialize config to YAML")?;
     std::fs::write(path, yaml_str)
         .context(format!("Failed to write config file: {}", config_path))?;
 

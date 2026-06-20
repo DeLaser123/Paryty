@@ -1,0 +1,254 @@
+/* - Sidebar & navigation (used by app Sidebar component) - */
+
+/* Navigation preview row (showcase) */
+.ds-nav-preview-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--aef-space-6);
+}
+
+/* - Sidebar base - */
+.ds-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: 480px;
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-sm);
+  background: var(--aef-bg);
+  flex-shrink: 0;
+  overflow: visible;
+}
+
+.ds-sidebar-expanded  { width: var(--aef-sidebar-width); }
+.ds-sidebar-collapsed { width: var(--aef-sidebar-collapsed); }
+
+/* Brand block */
+.ds-sidebar__brand {
+  padding: var(--aef-space-5) var(--aef-space-4);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+}
+
+.ds-sidebar__brand-icon-only {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.ds-sidebar__brand-name {
+  display: block;
+  font-family: var(--aef-font-heading);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--aef-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ds-sidebar__brand-sub {
+  display: block;
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.ds-sidebar__brand-mark {
+  font-family: var(--aef-font-heading);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--aef-text-primary);
+}
+
+/* Collapse control row — sits between brand and nav, visually distinct */
+.ds-sidebar__collapse-row {
+  display: flex;
+  align-items: center;
+  padding: 2px var(--aef-space-2);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+}
+
+.ds-sidebar-collapsed .ds-sidebar__collapse-row {
+  justify-content: center;
+}
+
+.ds-sidebar-expanded .ds-sidebar__collapse-row {
+  justify-content: flex-end;
+}
+
+.ds-sidebar__collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--aef-radius-control);
+  background: transparent;
+  border: none;
+  color: var(--aef-text-secondary);
+  cursor: pointer;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit),
+              color var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.ds-sidebar__collapse-btn:hover {
+  background: var(--aef-surface-hover);
+  color: var(--aef-text-primary);
+}
+
+/* Nav */
+.ds-sidebar__nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: var(--aef-space-2) var(--aef-space-2);
+  gap: var(--aef-space-3);
+  overflow-y: auto;
+  overflow-x: hidden;
+  position: relative;
+}
+
+/* Sliding active indicator pill — absolutely positioned behind nav items */
+.ds-nav-indicator {
+  position: absolute;
+  left: var(--aef-space-2);
+  right: var(--aef-space-2);
+  background: var(--aef-selected-bg);
+  border-radius: var(--aef-radius-pill);
+  z-index: 0;
+  pointer-events: none;
+  transition: top var(--aef-duration-standard) var(--aef-ease-emphasized),
+              height var(--aef-duration-standard) var(--aef-ease-emphasized),
+              opacity var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.ds-sidebar__bottom {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-1);
+  padding: var(--aef-space-2) var(--aef-space-2);
+  border-top: var(--aef-border-width) solid var(--aef-border);
+}
+
+/* Profile row in sidebar bottom */
+.ds-sidebar__profile {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: var(--aef-space-1) var(--aef-space-1);
+  border-radius: var(--aef-radius-pill);
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  width: 100%;
+  cursor: pointer;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.ds-sidebar__profile:hover {
+  background: var(--aef-surface-hover);
+}
+
+.ds-sidebar__profile--icon-only {
+  justify-content: center;
+  padding: var(--aef-space-1);
+}
+
+.ds-sidebar__profile-avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--aef-surface-mid);
+  color: var(--aef-icon);
+  flex-shrink: 0;
+}
+
+.ds-sidebar__profile-info {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ds-sidebar__profile-name {
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--aef-text-primary);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ds-sidebar__profile-role {
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Nav item */
+.ds-nav-item {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: 7px var(--aef-space-2);
+  border-radius: var(--aef-radius-pill);
+  cursor: pointer;
+  position: relative;
+  z-index: 1;
+  transition: color var(--aef-duration-standard) var(--aef-ease-settle);
+  color: var(--aef-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.ds-nav-item-active {
+  color: var(--aef-selected-text);
+}
+
+.ds-nav-item-active .ds-nav-item__icon,
+.ds-nav-item-active .ds-nav-item__chevron { color: var(--aef-selected-icon); }
+
+.ds-nav-item-active .ds-nav-item__icon {
+  animation: aef-scale-settle var(--aef-duration-standard) var(--aef-ease-settle) both;
+}
+
+.ds-nav-item-active .ds-nav-item__chevron {
+  animation: aef-scale-in var(--aef-duration-standard) var(--aef-ease-settle) both;
+}
+
+.ds-nav-item:not(.ds-nav-item-active):hover { background: var(--aef-surface-hover); }
+
+.ds-nav-item__icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--aef-icon);
+}
+
+.ds-nav-item__label {
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.ds-nav-item__chevron { margin-left: auto; flex-shrink: 0; }
+
+/* Icon-only nav item */
+.ds-nav-item-icon-only {
+  justify-content: center;
+  padding: 8px;
+}

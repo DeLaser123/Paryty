@@ -15,6 +15,9 @@ import type {
   AnomalyDetectionStatus,
   ModelInfo,
   AnomalySeverity,
+  WsAnomalyEvent,
+  WsForecastEvent,
+  WsDriftEvent,
 } from '../types/intel';
 import { SEVERITY_ORDER } from '../types/intel';
 import { getRestClient } from '../api/rest';
@@ -48,6 +51,14 @@ interface IntelState {
   anomalies: Anomaly[];
   detectionStatus: AnomalyDetectionStatus | null;
   modelAccuracy: Record<string, ModelInfo> | null;
+  driftEvents: WsDriftEvent[];
+
+  // Connection state
+  isWsConnected: boolean;
+  /** True once any data (REST or WS) has been received. */
+  dataReceived: boolean;
+  /** Metric names discovered from real data (no hardcoded list). */
+  knownMetrics: string[];
 
   // UI State
   isLoading: boolean;
@@ -61,7 +72,7 @@ interface IntelState {
   severityFilter: AnomalySeverity | null;
   metricFilter: string | null;
 
-  // Actions
+  // Actions — REST
   fetchForecasts: (metricNames: string[]) => Promise<void>;
   fetchAnomalies: () => Promise<void>;
   fetchDetectionStatus: () => Promise<void>;
@@ -73,6 +84,12 @@ interface IntelState {
   setSeverityFilter: (severity: AnomalySeverity | null) => void;
   setMetricFilter: (metric: string | null) => void;
   clear: () => void;
+
+  // Actions — WebSocket
+  handleWsAnomaly: (event: WsAnomalyEvent) => void;
+  handleWsForecast: (event: WsForecastEvent) => void;
+  handleWsDrift: (event: WsDriftEvent) => void;
+  setWsConnected: (connected: boolean) => void;
 
   // Computed
   filteredAnomalies: () => Anomaly[];
@@ -93,12 +110,18 @@ export const useIntelStore = create<IntelState>()((set, get) => ({
   anomalies: [],
   detectionStatus: null,
   modelAccuracy: null,
+  driftEvents: [],
+
+  // Connection state
+  isWsConnected: false,
+  dataReceived: false,
+  knownMetrics: [],
 
   // UI defaults
   isLoading: false,
   isRetraining: false,
   error: null,
-  selectedMetric: 'cpu_usage_percent',
+  selectedMetric: '',
   horizonSeconds: DEFAULT_HORIZON_SECONDS,
   refreshInterval: DEFAULT_REFRESH_INTERVAL,
 
@@ -202,6 +225,75 @@ export const useIntelStore = create<IntelState>()((set, get) => ({
     }
   },
 
+  // ─── WebSocket Event Handlers ──────────────────────────────────
+
+  handleWsAnomaly: (event: WsAnomalyEvent) => {
+    const newAnomalies: Anomaly[] = event.anomalies.map((a, idx) => ({
+      id: `ws_${event.metric_name}_${event.agent_id}_${a.timestamp}_${idx}`,
+      timestamp: new Date(a.timestamp * 1000).toISOString(),
+      value: a.value,
+      score: a.score,
+      type: (a.type as Anomaly['type']) ?? 'point',
+      explanation: a.explanation,
+      contributingFactors: [],
+      detectionMethod: a.detection_method,
+      severity: (a.severity as AnomalySeverity) ?? 'medium',
+      metricName: event.metric_name,
+      agentId: event.agent_id,
+    }));
+    set((state) => {
+      // Deduplicate by id
+      const existingIds = new Set(state.anomalies.map((a) => a.id));
+      const unique = newAnomalies.filter((a) => !existingIds.has(a.id));
+      const merged = [...unique, ...state.anomalies].slice(0, 500); // cap at 500
+      const known = state.knownMetrics.includes(event.metric_name)
+        ? state.knownMetrics
+        : [...state.knownMetrics, event.metric_name];
+      return { anomalies: merged, dataReceived: true, knownMetrics: known };
+    });
+  },
+
+  handleWsForecast: (event: WsForecastEvent) => {
+    const series: ForecastSeries = {
+      metricName: event.metric_name,
+      agentId: event.agent_id,
+      tenantId: event.tenant_id,
+      points: event.forecast.forecast_points.map((p) => ({
+        timestamp: new Date(p.timestamp * 1000).toISOString(),
+        value: p.value,
+        lowerBound: p.lower_bound,
+        upperBound: p.upper_bound,
+      })),
+      modelInfo: {
+        bestModel: event.forecast.model_info.best_model,
+        weights: event.forecast.model_info.weights,
+        accuracy: event.forecast.model_info.accuracy,
+        lastTrained: new Date(event.forecast.model_info.last_trained * 1000).toISOString(),
+        trainingSamples: event.forecast.model_info.training_samples,
+      },
+      overallConfidence: event.forecast.overall_confidence,
+    };
+    set((state) => {
+      const newMap = new Map(state.forecasts);
+      newMap.set(event.metric_name, series);
+      const known = state.knownMetrics.includes(event.metric_name)
+        ? state.knownMetrics
+        : [...state.knownMetrics, event.metric_name];
+      return { forecasts: newMap, dataReceived: true, knownMetrics: known };
+    });
+  },
+
+  handleWsDrift: (event: WsDriftEvent) => {
+    set((state) => ({
+      driftEvents: [event, ...state.driftEvents].slice(0, 100),
+      dataReceived: true,
+    }));
+  },
+
+  setWsConnected: (connected: boolean) => {
+    set({ isWsConnected: connected });
+  },
+
   setSelectedMetric: (metric) => set({ selectedMetric: metric }),
 
   setHorizon: (seconds) => set({ horizonSeconds: seconds }),
@@ -218,7 +310,9 @@ export const useIntelStore = create<IntelState>()((set, get) => ({
       anomalies: [],
       detectionStatus: null,
       modelAccuracy: null,
+      driftEvents: [],
       error: null,
+      dataReceived: false,
     }),
 
   // ─── Computed ──────────────────────────────────────────────────

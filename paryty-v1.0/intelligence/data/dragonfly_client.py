@@ -111,12 +111,21 @@ class DragonflyClient:
     # Read API
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _metric_index_key(tenant_id: str, agent_id: str) -> str:
+        """Build the Redis SET key that indexes metric names per agent."""
+        return f"metrics_index:{tenant_id}:{agent_id}"
+
     def get_latest_metrics(
         self,
         agent_id: str,
         tenant_id: str,
     ) -> dict[str, float]:
         """Get the latest value for each metric of an agent.
+
+        Uses an index SET for O(1) lookups instead of SCAN.
+        Falls back to SCAN if the index does not exist, and populates
+        the index for subsequent calls.
 
         Args:
             agent_id: Agent identifier.
@@ -128,22 +137,40 @@ class DragonflyClient:
         self._ensure_connected()
         assert self._client is not None
 
-        # Scan for keys matching this agent
-        pattern = f"metrics:{tenant_id}:{agent_id}:*"
         result: dict[str, float] = {}
+        index_key = self._metric_index_key(tenant_id, agent_id)
 
         try:
+            # Try indexed lookup first (O(1) per metric)
+            metric_names = self._client.smembers(index_key)
+            if metric_names:
+                for metric_name in metric_names:
+                    key = self._metric_key(metric_name, agent_id, tenant_id)
+                    entries = self._client.zrevrange(key, 0, 0, withscores=True)
+                    if entries:
+                        value_str = entries[0][0]
+                        try:
+                            value_data = json.loads(value_str)
+                            result[metric_name] = float(
+                                value_data.get("value", 0)
+                            )
+                        except (json.JSONDecodeError, TypeError):
+                            result[metric_name] = float(value_str)
+                return result
+
+            # Fallback: SCAN and populate the index for next call
+            pattern = f"metrics:{tenant_id}:{agent_id}:*"
+            pipe = self._client.pipeline()
             cursor = 0
             while True:
                 cursor, keys = self._client.scan(
                     cursor=cursor, match=pattern, count=100
                 )
                 for key in keys:
-                    # Extract metric name from key
                     parts = key.split(":")
                     if len(parts) >= 4:
                         metric_name = ":".join(parts[3:])
-                        # Get the latest entry (highest score = most recent)
+                        pipe.sadd(index_key, metric_name)
                         entries = self._client.zrevrange(key, 0, 0, withscores=True)
                         if entries:
                             value_str = entries[0][0]
@@ -156,6 +183,11 @@ class DragonflyClient:
                                 result[metric_name] = float(value_str)
                 if cursor == 0:
                     break
+            # Execute the index population pipeline
+            try:
+                pipe.execute()
+            except redis.RedisError:
+                pass  # non-critical
 
             return result
 
@@ -186,14 +218,19 @@ class DragonflyClient:
         Returns:
             Tuple of (timestamps, values) in ascending order.
         """
+        import time as _time
+
         self._ensure_connected()
         assert self._client is not None
 
         key = self._metric_key(metric_name, agent_id, tenant_id)
 
         try:
-            # Get all entries in the sorted set
-            entries = self._client.zrange(key, 0, -1, withscores=True)
+            # Filter by window: only fetch entries scored >= (now - window_minutes)
+            cutoff = int(_time.time()) - (window_minutes * 60)
+            entries = self._client.zrangebyscore(
+                key, min=cutoff, max="+inf", withscores=True
+            )
 
             timestamps: list[int] = []
             values: list[float] = []
@@ -243,12 +280,14 @@ class DragonflyClient:
         assert self._client is not None
 
         key = self._metric_key(metric_name, agent_id, tenant_id)
+        index_key = self._metric_index_key(tenant_id, agent_id)
         entry = json.dumps({"value": value, "ts": timestamp})
 
         try:
             pipe = self._client.pipeline()
             pipe.zadd(key, {entry: timestamp})
             pipe.zremrangebyrank(key, 0, -(max_entries + 1))
+            pipe.sadd(index_key, metric_name)
             pipe.execute()
         except redis.RedisError as exc:
             logger.error("dragonfly_store_failed", error=str(exc))

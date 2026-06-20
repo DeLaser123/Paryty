@@ -41,87 +41,69 @@ function AuthenticatedLayout() {
  */
 
 import { BrowserRouter as Router, Routes, Route, Outlet, Navigate } from 'react-router-dom';
-import { Suspense, lazy } from 'react';
 import { AppShell } from './components/layout/AppShell';
-import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { AuthProvider } from './components/auth/AuthProvider';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { PublicRoute } from './components/auth/PublicRoute';
 import { PlanGate } from './components/auth/PlanGate';
 import { ToastContainer } from './components/common/Toast';
+import { LazyRoute } from './components/common/LazyRoute';
+import { lazyWithRetry } from './utils/lazyWithRetry';
 import { DashboardPage } from './components/dashboard/DashboardPage';
 
-// Lazy-loaded route components for code splitting
-const TopologyCanvas = lazy(() =>
+// Lazy-loaded route components with retry for chunk load failures.
+const TopologyCanvas = lazyWithRetry(() =>
   import('./components/topology/TopologyCanvas').then((m) => ({ default: m.TopologyCanvas })),
 );
-const MetricsView = lazy(() => import('./components/MetricsView'));
-const AlertView = lazy(() => import('./components/AlertView'));
-const IntelView = lazy(() => import('./components/intel/IntelView'));
+const MetricsView = lazyWithRetry(() => import('./components/MetricsView'));
+const AlertView = lazyWithRetry(() => import('./components/AlertView'));
+const IntelView = lazyWithRetry(() => import('./components/intel/IntelView'));
 
 // Lazy-loaded auth + settings pages
-const LoginPage = lazy(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
-const RegisterPage = lazy(() => import('./pages/RegisterPage').then((m) => ({ default: m.RegisterPage })));
-const SettingsPage = lazy(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
-const TwinDetailPage = lazy(() => import('./pages/TwinDetailPage').then((m) => ({ default: m.TwinDetailPage })));
-const TwinSettingsPage = lazy(() => import('./pages/TwinSettingsPage').then((m) => ({ default: m.TwinSettingsPage })));
-const AgentsPage = lazy(() => import('./pages/AgentsPage'));
+const LoginPage = lazyWithRetry(() => import('./pages/LoginPage').then((m) => ({ default: m.LoginPage })));
+const RegisterPage = lazyWithRetry(() => import('./pages/RegisterPage').then((m) => ({ default: m.RegisterPage })));
+const SettingsPage = lazyWithRetry(() => import('./pages/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const TwinDetailPage = lazyWithRetry(() => import('./pages/Twins/TwinDetailPage').then((m) => ({ default: m.TwinDetailPage })));
+const TwinEditPage = lazyWithRetry(() => import('./pages/Twins/TwinEditPage').then((m) => ({ default: m.TwinEditPage })));
+const TwinSettingsPage = lazyWithRetry(() => import('./pages/TwinSettingsPage').then((m) => ({ default: m.TwinSettingsPage })));
+const AgentsPage = lazyWithRetry(() => import('./pages/AgentsPage'));
 
-/** Loading fallback for Suspense boundaries. */
-function LoadingFallback() {
-  return (
-    <div className="loading-fallback">
-      <div className="loading-fallback__brand">
-        <div className="loading-fallback__logo">P</div>
-        <div className="loading-fallback__text">Paryty</div>
-      </div>
-      <div className="loading-fallback__progress">
-        <div className="aef-progress-track">
-          <div className="aef-progress-fill loading-fallback__progress-fill" />
-        </div>
-      </div>
-      <div className="loading-fallback__message">Initializing workspace…</div>
-    </div>
-  );
-}
+
 
 function App() {
   return (
     <Router>
       <AuthProvider>
-        <ErrorBoundary>
-          <Suspense fallback={<LoadingFallback />}>
-            <Routes>
-              {/* ── Public routes (no AppShell chrome) ── */}
-              <Route path="/login" element={
-                <PublicRoute><LoginPage /></PublicRoute>
-              } />
-              <Route path="/register" element={
-                <PublicRoute><RegisterPage /></PublicRoute>
-              } />
+        <Routes>
+          {/* ── Public routes (no AppShell chrome) ── */}
+          <Route path="/login" element={
+            <PublicRoute><LazyRoute><LoginPage /></LazyRoute></PublicRoute>
+          } />
+          <Route path="/register" element={
+            <PublicRoute><LazyRoute><RegisterPage /></LazyRoute></PublicRoute>
+          } />
 
-              {/* ── Authenticated routes (with AppShell chrome) ── */}
-              <Route element={<AuthenticatedLayout />}>
-                <Route path="/" element={<DashboardPage />} />
-                <Route path="/topology" element={<TopologyCanvas />} />
-                <Route path="/metrics" element={<MetricsView />} />
-                <Route path="/alerts" element={<AlertView />} />
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/agents" element={<AgentsPage />} />
-                <Route path="/twins/new" element={<Navigate to="/?new=true" replace />} />
-                <Route path="/twins/:id" element={<TwinDetailPage />} />
-                <Route path="/twins/:id/settings" element={<TwinSettingsPage />} />
+          {/* ── Authenticated routes (with AppShell chrome) ── */}
+          <Route element={<AuthenticatedLayout />}>
+            <Route path="/" element={<DashboardPage />} />
+            <Route path="/topology" element={<LazyRoute><TopologyCanvas /></LazyRoute>} />
+            <Route path="/metrics" element={<LazyRoute><MetricsView /></LazyRoute>} />
+            <Route path="/alerts" element={<LazyRoute><AlertView /></LazyRoute>} />
+            <Route path="/settings" element={<ProtectedRoute requiredRoles={['admin']}><LazyRoute><SettingsPage /></LazyRoute></ProtectedRoute>} />
+            <Route path="/agents" element={<LazyRoute><AgentsPage /></LazyRoute>} />
+            <Route path="/twins/new" element={<Navigate to="/?new=true" replace />} />
+            <Route path="/twins/:id/edit" element={<LazyRoute><TwinEditPage /></LazyRoute>} />
+            <Route path="/twins/:id" element={<LazyRoute><TwinDetailPage /></LazyRoute>} />
+            <Route path="/twins/:id/settings" element={<ProtectedRoute requiredRoles={['admin', 'operator']}><LazyRoute><TwinSettingsPage /></LazyRoute></ProtectedRoute>} />
 
-                {/* ── Feature-gated routes ── */}
-                <Route path="/intel" element={
-                  <PlanGate feature="paryty_intel">
-                    <IntelView />
-                  </PlanGate>
-                } />
-              </Route>
-            </Routes>
-          </Suspense>
-        </ErrorBoundary>
+            {/* ── Feature-gated routes ── */}
+            <Route path="/intel" element={
+              <PlanGate feature="paryty_intel">
+                <LazyRoute><IntelView /></LazyRoute>
+              </PlanGate>
+            } />
+          </Route>
+        </Routes>
       </AuthProvider>
       {/* Toast notifications — rendered outside all layout for correct stacking */}
       <ToastContainer />

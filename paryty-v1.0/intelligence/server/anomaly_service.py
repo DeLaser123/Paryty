@@ -15,7 +15,7 @@ import asyncio
 import os
 import time
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any
 
 import grpc
@@ -29,6 +29,8 @@ from ..anomaly.explainer import AnomalyExplainer
 from ..anomaly.isolation_forest import IsolationForestDetector
 from ..anomaly.model_store import AnomalyModelStore
 from ..anomaly.statistical import AnomalyResult, AnomalyType, Severity, StatisticalDetector
+from ..data.timeseries import sanitize_series
+from .metrics import record_anomaly_detected, update_detector_counts
 from ..proto.models import (
     AnomalyProto,
     AnomalyTypeProto,
@@ -131,12 +133,30 @@ class AnomalyServicer:
                     metric_name=request.metric_name,
                 )
 
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                _ML_EXECUTOR,
-                self._detect_sync,
-                request,
-            )
+            loop = asyncio.get_running_loop()
+            # Timeout: 60s for anomaly detection ML operations
+            timeout = int(os.getenv("ANOMALY_DETECTION_TIMEOUT", "60"))
+            try:
+                return await asyncio.wait_for(
+                    loop.run_in_executor(
+                        _ML_EXECUTOR,
+                        self._detect_sync,
+                        request,
+                    ),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "detect_anomalies_timeout",
+                    agent=request.agent_id,
+                    metric=request.metric_name,
+                    timeout=timeout,
+                )
+                return DetectAnomaliesResponse(
+                    agent_id=request.agent_id,
+                    tenant_id=request.tenant_id,
+                    metric_name=request.metric_name,
+                )
 
         except Exception as exc:
             logger.error(
@@ -304,6 +324,16 @@ class AnomalyServicer:
 
         values = list(request.values)
         timestamps = list(request.timestamps)
+
+        # Sanitize NaN/Inf values from input
+        timestamps, values, n_removed = sanitize_series(timestamps, values)
+        if n_removed > 0:
+            logger.warning(
+                "sanitized_nan_inf_values",
+                agent=request.agent_id,
+                metric=request.metric_name,
+                removed=n_removed,
+            )
         n = len(values)
 
         # 1. Statistical detection
@@ -349,9 +379,22 @@ class AnomalyServicer:
         # Overall score
         overall_score = max((a.score for a in combined), default=0.0)
 
-        # Update stats
+        # Update stats and Prometheus metrics
         self._anomalies_detected_24h += len(combined)
         self._last_detection_time = time.time()
+
+        # Record Prometheus metrics
+        update_detector_counts(
+            statistical=len(self._statistical),
+            isolation_forest=len(self._if_detectors),
+            autoencoder=len(self._ae_detectors),
+        )
+        for r in combined:
+            record_anomaly_detected(
+                tenant_id=request.tenant_id,
+                metric_name=request.metric_name,
+                severity=r.severity.value if hasattr(r.severity, 'value') else str(r.severity),
+            )
 
         elapsed = time.monotonic() - start_time
         logger.info(
@@ -402,13 +445,10 @@ class AnomalyServicer:
                 corr = float(np.corrcoef(vals_a, vals_b)[0, 1])
 
                 # If correlation is unexpectedly low for related metrics
-                related_pairs = {
-                    ("cpu_usage", "memory_usage"),
-                    ("memory_usage", "disk_io"),
-                    ("cpu_usage", "network_io"),
-                }
-                pair = (min(ma, mb), max(ma, mb))
-                if pair in {tuple(sorted(p)) for p in related_pairs}:
+                # Dynamically build related pairs from actual metric names
+                related_pairs = self._build_related_pairs(list(metrics.keys()))
+                pair = tuple(sorted([ma, mb]))
+                if pair in related_pairs:
                     if abs(corr) < 0.3:
                         # Count simultaneous anomalies
                         anom_a = len(metric_anomalies.get(ma, []))
@@ -428,6 +468,35 @@ class AnomalyServicer:
                         )
 
         return correlations
+
+    @staticmethod
+    def _build_related_pairs(metric_names: list[str]) -> set[tuple[str, str]]:
+        """Build related metric pairs dynamically from the actual metric names.
+
+        Metrics that share a common prefix (e.g., "cpu_usage" and "cpu_idle")
+        or are known to be correlated (any two of cpu/memory/disk/network)
+        are considered related.
+        """
+        related: set[tuple[str, str]] = set()
+        # All pairwise combinations of known infrastructure metrics
+        known_groups = [
+            ["cpu", "memory", "disk", "network", "io"],
+        ]
+        for group in known_groups:
+            group_metrics = [
+                m for m in metric_names
+                if any(m.lower().startswith(g) for g in group)
+            ]
+            for i in range(len(group_metrics)):
+                for j in range(i + 1, len(group_metrics)):
+                    related.add(tuple(sorted([group_metrics[i], group_metrics[j]])))
+        # Same-prefix metrics are related
+        for m in metric_names:
+            prefix = m.rsplit("_", 1)[0] if "_" in m else m
+            for other in metric_names:
+                if m != other and other.startswith(prefix):
+                    related.add(tuple(sorted([m, other])))
+        return related
 
     # ------------------------------------------------------------------
     # Detector management

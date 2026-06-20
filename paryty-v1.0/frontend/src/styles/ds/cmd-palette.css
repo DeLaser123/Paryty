@@ -1,0 +1,99 @@
+/* Command palette */
+.aef-cmd-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.64);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 120px;
+  z-index: 210;
+  animation: aef-fade-in var(--aef-duration-fast) var(--aef-ease-exit) both;
+}
+
+.aef-cmd-palette {
+  width: 520px;
+  max-width: calc(100vw - 32px);
+  background: var(--aef-surface-card);
+  border: var(--aef-border-width) solid var(--aef-border-strong);
+  border-radius: var(--aef-radius-sheet);
+  overflow: hidden;
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.8);
+  animation: aef-scale-in var(--aef-duration-standard) var(--aef-ease-settle) both;
+}
+
+.aef-cmd-search {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-3);
+  padding: var(--aef-space-3) var(--aef-space-4);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+  color: var(--aef-text-secondary);
+}
+
+.aef-cmd-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--aef-font-body);
+  font-size: 11px;
+  color: var(--aef-text-primary);
+  caret-color: var(--aef-text-primary);
+}
+
+.aef-cmd-input::placeholder { color: var(--aef-text-secondary); }
+
+.aef-cmd-results {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: var(--aef-space-1);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.aef-cmd-results::-webkit-scrollbar { width: 3px; }
+.aef-cmd-results::-webkit-scrollbar-track { background: transparent; }
+.aef-cmd-results::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: var(--aef-radius-full);
+}
+
+.aef-cmd-item {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-3);
+  padding: 8px var(--aef-space-3);
+  border-radius: var(--aef-radius-control);
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-primary);
+  cursor: pointer;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.aef-cmd-item:hover,
+.aef-cmd-item--focused {
+  background: var(--aef-surface-hover);
+}
+
+.aef-cmd-label { flex: 1; }
+
+.aef-cmd-kbd,
+.aef-cmd-kbd {
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+  background: var(--aef-surface-mid);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-control);
+  padding: 1px 6px;
+}
+
+.aef-cmd-empty {
+  padding: var(--aef-space-4);
+  text-align: center;
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+}

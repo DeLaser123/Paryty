@@ -1,23 +1,31 @@
 package security
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
+	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 // TestRequireMTLS_Enabled verifies that RequireMTLS returns true when both
-// PARYTY_TLS_CERT_FILE and PARYTY_TLS_CA_FILE are set.
+// PARYTY_TLS_CERT_FILE and PARYTY_TLS_CLIENT_CA_FILE are set.
 func TestRequireMTLS_Enabled(t *testing.T) {
 	// Set environment variables
 	os.Setenv("PARYTY_TLS_CERT_FILE", "/path/to/cert.pem")
-	os.Setenv("PARYTY_TLS_CA_FILE", "/path/to/ca.pem")
+	os.Setenv("PARYTY_TLS_CLIENT_CA_FILE", "/path/to/ca.pem")
 	defer os.Unsetenv("PARYTY_TLS_CERT_FILE")
-	defer os.Unsetenv("PARYTY_TLS_CA_FILE")
+	defer os.Unsetenv("PARYTY_TLS_CLIENT_CA_FILE")
 
 	result := RequireMTLS()
 	assert.True(t, result, "RequireMTLS should return true when both env vars are set")
@@ -28,7 +36,7 @@ func TestRequireMTLS_Enabled(t *testing.T) {
 func TestRequireMTLS_Disabled(t *testing.T) {
 	// Ensure environment variables are not set
 	os.Unsetenv("PARYTY_TLS_CERT_FILE")
-	os.Unsetenv("PARYTY_TLS_CA_FILE")
+	os.Unsetenv("PARYTY_TLS_CLIENT_CA_FILE")
 
 	result := RequireMTLS()
 	assert.False(t, result, "RequireMTLS should return false when env vars are not set")
@@ -39,7 +47,7 @@ func TestRequireMTLS_Disabled(t *testing.T) {
 func TestRequireMTLS_PartialConfig(t *testing.T) {
 	// Test with only cert file set
 	os.Setenv("PARYTY_TLS_CERT_FILE", "/path/to/cert.pem")
-	os.Unsetenv("PARYTY_TLS_CA_FILE")
+	os.Unsetenv("PARYTY_TLS_CLIENT_CA_FILE")
 	defer os.Unsetenv("PARYTY_TLS_CERT_FILE")
 
 	result := RequireMTLS()
@@ -47,8 +55,8 @@ func TestRequireMTLS_PartialConfig(t *testing.T) {
 
 	// Test with only CA file set
 	os.Unsetenv("PARYTY_TLS_CERT_FILE")
-	os.Setenv("PARYTY_TLS_CA_FILE", "/path/to/ca.pem")
-	defer os.Unsetenv("PARYTY_TLS_CA_FILE")
+	os.Setenv("PARYTY_TLS_CLIENT_CA_FILE", "/path/to/ca.pem")
+	defer os.Unsetenv("PARYTY_TLS_CLIENT_CA_FILE")
 
 	result = RequireMTLS()
 	assert.False(t, result, "RequireMTLS should return false when only CA file is set")
@@ -71,14 +79,14 @@ func TestServerTLS_ValidCerts(t *testing.T) {
 	cfg, err := ServerTLS(certFile, keyFile, "")
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
-	assert.Equal(t, tls.VersionTLS12, int(cfg.MinVersion))
+	assert.Equal(t, tls.VersionTLS13, int(cfg.MinVersion))
 	assert.Nil(t, cfg.ClientCAs, "Client CAs should be nil when no client CA file is provided")
 
 	// Test with client CA (mTLS enabled)
 	cfg, err = ServerTLS(certFile, keyFile, caFile)
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
-	assert.Equal(t, tls.VersionTLS12, int(cfg.MinVersion))
+	assert.Equal(t, tls.VersionTLS13, int(cfg.MinVersion))
 	assert.NotNil(t, cfg.ClientCAs, "Client CAs should be set when client CA file is provided")
 	assert.Equal(t, tls.RequireAndVerifyClientCert, cfg.ClientAuth)
 }
@@ -139,7 +147,7 @@ func TestClientTLS_ValidConfig(t *testing.T) {
 	cfg, err := ClientTLS(caFile, "", "")
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
-	assert.Equal(t, tls.VersionTLS12, int(cfg.MinVersion))
+	assert.Equal(t, tls.VersionTLS13, int(cfg.MinVersion))
 	assert.NotNil(t, cfg.RootCAs, "Root CAs should be set when server CA file is provided")
 	assert.Nil(t, cfg.Certificates, "Client certificates should be nil when not provided")
 
@@ -203,25 +211,76 @@ func TestLoadTLSFromEnv(t *testing.T) {
 	assert.Error(t, err)
 }
 
-// createTestCertificates creates test certificates for testing.
-// In a real test environment, you would use proper certificate generation.
+// createTestCertificates creates real self-signed test certificates.
 func createTestCertificates(certFile, keyFile, caFile string) error {
-	// For testing purposes, we'll create empty files
-	// In a real test, you would generate proper test certificates
+	// Generate CA certificate if caFile is requested.
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "Paryty Test CA"},
+		NotBefore:             time.Now().Add(-1 * time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	caCertDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		return err
+	}
+
+	if caFile != "" {
+		caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCertDER})
+		if err := os.WriteFile(caFile, caPEM, 0644); err != nil {
+			return err
+		}
+	}
+
+	if certFile == "" && keyFile == "" {
+		return nil
+	}
+
+	// Generate server certificate signed by the CA.
+	serverKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return err
+	}
+	serverTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "Paryty Test Server"},
+		NotBefore:    time.Now().Add(-1 * time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	caCert, err := x509.ParseCertificate(caCertDER)
+	if err != nil {
+		return err
+	}
+	serverCertDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, caCert, &serverKey.PublicKey, caKey)
+	if err != nil {
+		return err
+	}
+
 	if certFile != "" {
-		if err := os.WriteFile(certFile, []byte("test cert"), 0644); err != nil {
+		certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: serverCertDER})
+		if err := os.WriteFile(certFile, certPEM, 0644); err != nil {
 			return err
 		}
 	}
 	if keyFile != "" {
-		if err := os.WriteFile(keyFile, []byte("test key"), 0644); err != nil {
+		keyDER, err := x509.MarshalECPrivateKey(serverKey)
+		if err != nil {
+			return err
+		}
+		keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+		if err := os.WriteFile(keyFile, keyPEM, 0644); err != nil {
 			return err
 		}
 	}
-	if caFile != "" {
-		if err := os.WriteFile(caFile, []byte("test ca"), 0644); err != nil {
-			return err
-		}
-	}
+
 	return nil
 }

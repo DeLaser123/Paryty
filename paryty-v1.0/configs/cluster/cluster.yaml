@@ -24,7 +24,7 @@ cluster:
   # Stream engine (runtime connection config)
   stream:
     brokers:
-      - "localhost:9092"
+      - "127.0.0.1:9092"
     client_id: "paryty-cluster"
     topics:
       - name: "paryty.metrics.raw"
@@ -176,7 +176,7 @@ cluster:
   storage:
     hot:
       # Runtime connection config
-      addr: "localhost:6379"
+      addr: "127.0.0.1:6379"
       password: ""
       db: 0
       pool_size: 10
@@ -198,11 +198,11 @@ cluster:
       memory: "16Gi"
     warm:
       # Runtime connection config
-      addr: "localhost:8812"
-      ilp_addr: "localhost:9009"
+      addr: "127.0.0.1:8812"
+      ilp_addr: "127.0.0.1:9009"
       database: "paryty"
-      username: "admin"
-      password: "quest"
+      username: "${PARYTY_QUESTDB_USERNAME}"
+      password: "${PARYTY_QUESTDB_PASSWORD}"
       max_conns: 20
       ilp:
         addr: "questdb:9009"
@@ -253,9 +253,9 @@ cluster:
         size: "500Gi"
     cold:
       # Runtime connection config
-      endpoint: "localhost:8333"
-      access_key: "minioadmin"
-      secret_key: "minioadmin"
+      endpoint: "127.0.0.1:8333"
+      access_key: "${PARYTY_SWFS_ACCESS_KEY}"
+      secret_key: "${PARYTY_SWFS_SECRET_KEY}"
       use_ssl: false
       region: "us-east-1"
       bucket: "paryty-cold-storage"

@@ -12,14 +12,18 @@ first training and persisted to disk via joblib.
 from __future__ import annotations
 
 import asyncio
+import os
+import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
+from collections import OrderedDict
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from typing import Any
 
 import grpc
 import structlog
 
 from ..data.questdb_client import QuestDBClient
+from ..data.timeseries import sanitize_series
 from ..forecasting.config import ForecastingConfig
 from ..forecasting.ensemble import ForecastEnsemble
 from ..forecasting.model_store import ForecastModelStore
@@ -61,8 +65,12 @@ class ForecastingServicer:
         self._model_store = model_store or ForecastModelStore(
             self._config.model_store.base_dir
         )
-        # Cache: (tenant_id, metric_name) → ForecastEnsemble
-        self._ensembles: dict[tuple[str, str], ForecastEnsemble] = {}
+        # Cache: (tenant_id, metric_name) → ForecastEnsemble (LRU OrderedDict)
+        self._ensembles: OrderedDict[tuple[str, str], ForecastEnsemble] = OrderedDict()
+        self._max_ensembles = int(os.getenv("FORECAST_MAX_CACHED_ENSEMBLES", "500"))
+        # Per-ensemble locks to prevent concurrent fit/predict corruption
+        self._locks: dict[tuple[str, str], threading.Lock] = {}
+        self._locks_lock = threading.Lock()  # protects the _locks dict itself
         self._last_predict_time: float = 0.0
 
     # ------------------------------------------------------------------
@@ -95,17 +103,30 @@ class ForecastingServicer:
             horizon = request.horizon_seconds or self._config.default_horizon_seconds
             step = request.step_seconds or self._config.default_step_seconds
 
-            # Run in thread pool (CPU-bound)
-            loop = asyncio.get_event_loop()
-            return await loop.run_in_executor(
-                _ML_EXECUTOR,
-                self._forecast_sync,
-                request.agent_id,
-                request.tenant_id,
-                request.metric_name,
-                horizon,
-                step,
-            )
+            # Run in thread pool (CPU-bound) with timeout
+            loop = asyncio.get_running_loop()
+            timeout = int(os.getenv("FORECAST_TIMEOUT", "120"))
+            try:
+                return await asyncio.wait_for(
+                    loop.run_in_executor(
+                        _ML_EXECUTOR,
+                        self._forecast_sync,
+                        request.agent_id,
+                        request.tenant_id,
+                        request.metric_name,
+                        horizon,
+                        step,
+                    ),
+                    timeout=timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.error(
+                    "forecast_metric_timeout",
+                    agent=request.agent_id,
+                    metric=request.metric_name,
+                    timeout=timeout,
+                )
+                return self._error_response(request, f"Forecast timed out after {timeout}s")
 
         except Exception as exc:
             logger.error(
@@ -122,7 +143,7 @@ class ForecastingServicer:
         context: grpc.aio.ServicerContext | None = None,
     ) -> ForecastBatchResponse:
         """Forecast multiple metrics in parallel."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         tasks = [
             loop.run_in_executor(
                 _ML_EXECUTOR,
@@ -203,7 +224,7 @@ class ForecastingServicer:
     ) -> RetrainModelsResponse:
         """Trigger model retraining."""
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             return await loop.run_in_executor(
                 _ML_EXECUTOR,
                 self._retrain_sync,
@@ -230,7 +251,22 @@ class ForecastingServicer:
         horizon_seconds: int,
         step_seconds: int,
     ) -> ForecastMetricResponse:
-        """Synchronous forecast logic."""
+        """Synchronous forecast logic (runs in thread pool)."""
+        lock = self._get_lock(tenant_id, metric_name)
+        with lock:
+            return self._forecast_sync_locked(
+                agent_id, tenant_id, metric_name, horizon_seconds, step_seconds
+            )
+
+    def _forecast_sync_locked(
+        self,
+        agent_id: str,
+        tenant_id: str,
+        metric_name: str,
+        horizon_seconds: int,
+        step_seconds: int,
+    ) -> ForecastMetricResponse:
+        """Synchronous forecast logic (protected by per-ensemble lock)."""
         start_time = time.monotonic()
 
         # Get or create ensemble
@@ -244,6 +280,17 @@ class ForecastingServicer:
                 hours_back=168,  # 7 days
                 agent_id=agent_id if agent_id else None,
             )
+
+            # Sanitize NaN/Inf values from fetched data
+            timestamps, values, n_removed = sanitize_series(timestamps, values)
+            if n_removed > 0:
+                logger.warning(
+                    "sanitized_nan_inf_training_data",
+                    metric=metric_name,
+                    tenant=tenant_id,
+                    removed=n_removed,
+                )
+
             if len(values) < 3:
                 return ForecastMetricResponse(
                     agent_id=agent_id,
@@ -253,6 +300,14 @@ class ForecastingServicer:
                 )
 
             ensemble.fit_all(timestamps, values)
+
+            # Persist trained ensemble metadata to disk
+            try:
+                self._model_store.save(
+                    "ensemble_state", metric_name, ensemble.get_state()
+                )
+            except Exception as exc:
+                logger.warning("model_persist_failed", metric=metric_name, error=str(exc))
 
         # Predict
         result = ensemble.predict(horizon_seconds, step_seconds)
@@ -328,6 +383,17 @@ class ForecastingServicer:
                     tenant_id=tenant_id,
                     hours_back=168,
                 )
+
+                # Sanitize NaN/Inf values
+                timestamps, values, n_removed = sanitize_series(timestamps, values)
+                if n_removed > 0:
+                    logger.warning(
+                        "sanitized_nan_inf_retrain",
+                        metric=m,
+                        tenant=tenant_id,
+                        removed=n_removed,
+                    )
+
                 if len(values) < 3:
                     continue
 
@@ -360,11 +426,41 @@ class ForecastingServicer:
     # ------------------------------------------------------------------
 
     def _get_ensemble(self, tenant_id: str, metric_name: str) -> ForecastEnsemble:
-        """Get or create a cached ensemble for tenant+metric."""
+        """Get or create a cached ensemble for tenant+metric (LRU)."""
         key = (tenant_id, metric_name)
-        if key not in self._ensembles:
-            self._ensembles[key] = ForecastEnsemble(self._config)
-        return self._ensembles[key]
+        if key in self._ensembles:
+            self._ensembles.move_to_end(key)
+            return self._ensembles[key]
+
+        ensemble = ForecastEnsemble(self._config)
+        # Try to load persisted state from disk
+        try:
+            state = self._model_store.load("ensemble_state", metric_name)
+            if state is not None:
+                ensemble.set_state(state)
+                logger.info("ensemble_state_loaded", metric=metric_name)
+        except Exception as exc:
+            logger.warning("ensemble_state_load_failed", metric=metric_name, error=str(exc))
+
+        self._ensembles[key] = ensemble
+        # LRU eviction: remove oldest when over limit
+        while len(self._ensembles) > self._max_ensembles:
+            evicted_key, _ = self._ensembles.popitem(last=False)
+            logger.info(
+                "ensemble_evicted",
+                tenant=evicted_key[0],
+                metric=evicted_key[1],
+                cache_size=len(self._ensembles),
+            )
+        return ensemble
+
+    def _get_lock(self, tenant_id: str, metric_name: str) -> threading.Lock:
+        """Get or create a per-ensemble lock."""
+        key = (tenant_id, metric_name)
+        with self._locks_lock:
+            if key not in self._locks:
+                self._locks[key] = threading.Lock()
+            return self._locks[key]
 
     @staticmethod
     def _error_response(

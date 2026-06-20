@@ -87,7 +87,8 @@ func (a *TwinRESTAdapter) DeleteTwin(ctx context.Context, tenantID, twinID strin
 }
 
 // ListTwinAgents adapts TwinHandler.ListTwinAgents for the REST API.
-func (a *TwinRESTAdapter) ListTwinAgents(ctx context.Context, twinID string) ([]map[string]interface{}, error) {
+func (a *TwinRESTAdapter) ListTwinAgents(ctx context.Context, tenantID, twinID string) ([]map[string]interface{}, error) {
+	ctx = context.WithValue(ctx, plan.CtxTenantID, tenantID)
 	resp, err := a.handler.ListTwinAgents(ctx, &parytyv1.ListTwinAgentsRequest{TwinId: twinID})
 	if err != nil {
 		return nil, err

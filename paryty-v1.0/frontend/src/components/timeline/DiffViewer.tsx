@@ -9,6 +9,8 @@
 
 import { memo, useMemo } from 'react';
 import type { TimelineSnapshot } from '../../types/timeline';
+import { DetachableCard } from '../common/DetachableCard';
+import { GitBranch } from 'lucide-react';
 
 /** Props for DiffViewer. */
 interface DiffViewerProps {
@@ -56,66 +58,66 @@ export const DiffViewer = memo(function DiffViewer({ from, to }: DiffViewerProps
 
       <div className="diff-viewer__panels">
         {/* From snapshot */}
-        <div className="aef-container-card diff-viewer__panel">
-          <div className="aef-container-card__header">
-            <span className="aef-container-card__title">From</span>
-            <span className="aef-meta-pill">{new Date(from.timestamp).toLocaleString()}</span>
+        <DetachableCard
+          title="From"
+          icon={<GitBranch size={14} />}
+          metaLabel={new Date(from.timestamp).toLocaleString()}
+          className="diff-viewer__panel"
+          testId="diff-from-panel"
+        >
+          <div className="aef-stat-module">
+            <span className="aef-stat-module__label">Nodes</span>
+            <span className="aef-stat-module__value">{from.nodes.length}</span>
           </div>
-          <div className="aef-container-card__body aef-scroll">
-            <div className="aef-stat-module">
-              <span className="aef-stat-module__label">Nodes</span>
-              <span className="aef-stat-module__value">{from.nodes.length}</span>
-            </div>
-            <div className="aef-stat-module">
-              <span className="aef-stat-module__label">Edges</span>
-              <span className="aef-stat-module__value">{from.edges.length}</span>
-            </div>
-            <div className="aef-stat-module">
-              <span className="aef-stat-module__label">Alerts</span>
-              <span className="aef-stat-module__value">{from.alertCount}</span>
-            </div>
-            {diff.removed.map((node) => (
-              <div key={node.id} className="aef-stat-module" style={{ opacity: 0.5 }}>
-                <span className="aef-stat-module__label">-{node.name}</span>
-                <span className="aef-stat-module__value">{node.status}</span>
-              </div>
-            ))}
+          <div className="aef-stat-module">
+            <span className="aef-stat-module__label">Edges</span>
+            <span className="aef-stat-module__value">{from.edges.length}</span>
           </div>
-        </div>
+          <div className="aef-stat-module">
+            <span className="aef-stat-module__label">Alerts</span>
+            <span className="aef-stat-module__value">{from.alertCount}</span>
+          </div>
+          {diff.removed.map((node) => (
+            <div key={node.id} className="aef-stat-module" style={{ opacity: 0.5 }}>
+              <span className="aef-stat-module__label">-{node.name}</span>
+              <span className="aef-stat-module__value">{node.status}</span>
+            </div>
+          ))}
+        </DetachableCard>
 
         {/* To snapshot */}
-        <div className="aef-container-card diff-viewer__panel">
-          <div className="aef-container-card__header">
-            <span className="aef-container-card__title">To</span>
-            <span className="aef-meta-pill">{new Date(to.timestamp).toLocaleString()}</span>
+        <DetachableCard
+          title="To"
+          icon={<GitBranch size={14} />}
+          metaLabel={new Date(to.timestamp).toLocaleString()}
+          className="diff-viewer__panel"
+          testId="diff-to-panel"
+        >
+          <div className="aef-stat-module">
+            <span className="aef-stat-module__label">Nodes</span>
+            <span className="aef-stat-module__value">{to.nodes.length}</span>
           </div>
-          <div className="aef-container-card__body aef-scroll">
-            <div className="aef-stat-module">
-              <span className="aef-stat-module__label">Nodes</span>
-              <span className="aef-stat-module__value">{to.nodes.length}</span>
-            </div>
-            <div className="aef-stat-module">
-              <span className="aef-stat-module__label">Edges</span>
-              <span className="aef-stat-module__value">{to.edges.length}</span>
-            </div>
-            <div className="aef-stat-module">
-              <span className="aef-stat-module__label">Alerts</span>
-              <span className="aef-stat-module__value">{to.alertCount}</span>
-            </div>
-            {diff.added.map((node) => (
-              <div key={node.id} className="aef-stat-module">
-                <span className="aef-stat-module__label" style={{ color: 'var(--aef-status-live)' }}>+{node.name}</span>
-                <span className="aef-stat-module__value">{node.status}</span>
-              </div>
-            ))}
-            {diff.changed.map((node) => (
-              <div key={node.id} className="aef-stat-module">
-                <span className="aef-stat-module__label" style={{ color: 'var(--aef-status-warning)' }}>~{node.name}</span>
-                <span className="aef-stat-module__value">{node.status}</span>
-              </div>
-            ))}
+          <div className="aef-stat-module">
+            <span className="aef-stat-module__label">Edges</span>
+            <span className="aef-stat-module__value">{to.edges.length}</span>
           </div>
-        </div>
+          <div className="aef-stat-module">
+            <span className="aef-stat-module__label">Alerts</span>
+            <span className="aef-stat-module__value">{to.alertCount}</span>
+          </div>
+          {diff.added.map((node) => (
+            <div key={node.id} className="aef-stat-module">
+              <span className="aef-stat-module__label" style={{ color: 'var(--aef-status-live)' }}>+{node.name}</span>
+              <span className="aef-stat-module__value">{node.status}</span>
+            </div>
+          ))}
+          {diff.changed.map((node) => (
+            <div key={node.id} className="aef-stat-module">
+              <span className="aef-stat-module__label" style={{ color: 'var(--aef-status-warning)' }}>~{node.name}</span>
+              <span className="aef-stat-module__value">{node.status}</span>
+            </div>
+          ))}
+        </DetachableCard>
       </div>
     </div>
   );

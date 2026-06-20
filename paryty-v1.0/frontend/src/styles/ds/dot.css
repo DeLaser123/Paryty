@@ -1,0 +1,12 @@
+﻿/* Dot indicator - Paryty Design System primitive */
+.aef-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--aef-border);
+}
+
+.aef-dot-active {
+  background: var(--aef-dot-normal);
+}

@@ -20,7 +20,7 @@ export function useAlerts() {
       store.setAlerts(alerts);
       store.setRules(rules);
     } catch (err) {
-      store.setError((err as Error).message);
+      store.setError(err instanceof Error ? err.message : String(err));
     } finally {
       store.setLoading(false);
     }

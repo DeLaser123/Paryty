@@ -8,7 +8,7 @@
  */
 
 import { getRestClient } from './rest';
-import type { TwinDetails } from '../types/digitalParyty';
+import type { TwinDetails, TwinConfig } from '../types/digitalParyty';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -16,27 +16,17 @@ import type { TwinDetails } from '../types/digitalParyty';
 export interface CreateTwinPayload {
   name: string;
   description?: string;
-  config?: {
-    agentIds?: string[];
-    tenantLabel?: string;
-  };
+  config?: TwinConfig;
 }
 
 /** Payload for updating an existing twin. */
 export interface UpdateTwinPayload {
   name?: string;
   description?: string;
-  config?: {
-    agentIds?: string[];
-    tenantLabel?: string;
-  };
+  config?: TwinConfig;
 }
 
-/** Response shape for twin list operations. */
-export interface TwinListResponse {
-  twins: TwinDetails[];
-  total: number;
-}
+
 
 // ─── API Methods ────────────────────────────────────────────────────────────
 
@@ -125,7 +115,9 @@ export async function deleteTwin(twinId: string): Promise<void> {
  */
 export async function fetchTwinMetrics(twinId: string): Promise<Record<string, unknown>> {
   const client = getRestClient();
-  return client.get<Record<string, unknown>>(
+  // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+  const resp = await client.get<{ data: Record<string, unknown> }>(
     `/api/v1/twins/${encodeURIComponent(twinId)}/metrics`,
   );
+  return resp.data ?? {};
 }

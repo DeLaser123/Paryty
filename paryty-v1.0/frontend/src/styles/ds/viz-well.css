@@ -1,0 +1,19 @@
+/* - Viz well - */
+.aef-viz-well {
+  background: var(--aef-surface-mid);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-sm);
+  height: 120px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.aef-viz-well__icon { color: var(--aef-text-secondary); }
+.aef-viz-well__label {
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+}

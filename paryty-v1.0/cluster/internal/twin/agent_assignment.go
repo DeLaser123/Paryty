@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/paryty/paryty-v1.0/cluster/internal/plan"
 )
 
 // AgentAssignment maps an agent to its parent Paryty Twin.
@@ -36,6 +37,20 @@ type AgentAssigner struct {
 // NewAgentAssigner creates a new AgentAssigner.
 func NewAgentAssigner(db *pgxpool.Pool) *AgentAssigner {
 	return &AgentAssigner{db: db}
+}
+
+// userIDFromCtx extracts the user ID from the context.
+// Returns empty string if not found.
+func userIDFromCtx(ctx context.Context) string {
+	v := ctx.Value(plan.CtxUserID)
+	if v == nil {
+		return ""
+	}
+	userID, ok := v.(string)
+	if !ok {
+		return ""
+	}
+	return userID
 }
 
 // RegisterAgent assigns an agent to a twin. Uses upsert semantics: if the
@@ -293,4 +308,403 @@ func (a *AgentAssigner) DeleteAgent(ctx context.Context, agentID, tenantID strin
 		return fmt.Errorf("agent %s not found", agentID)
 	}
 	return nil
+}
+
+// UpdateAgent renames an agent and marks it as deployed.
+func (a *AgentAssigner) UpdateAgent(ctx context.Context, agentID, tenantID, name string) (*AgentInfo, error) {
+	tag, err := a.db.Exec(ctx, `
+		UPDATE agent_registrations
+		SET name = $1, status = CASE WHEN status = 'pending' THEN 'deployed' ELSE status END
+		WHERE agent_id = $2 AND tenant_id = $3
+	`, name, agentID, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("update agent: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil, fmt.Errorf("agent %s not found", agentID)
+	}
+
+	// Return updated agent info.
+	agents, err := a.ListAllAgents(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range agents {
+		if agents[i].AgentID == agentID {
+			return &agents[i], nil
+		}
+	}
+	return nil, fmt.Errorf("agent %s not found after update", agentID)
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dual Reality Agent System — New Lifecycle Operations
+// ═══════════════════════════════════════════════════════════════════════
+
+// PairingStatus holds detailed pairing information for the smart modal.
+type PairingStatus struct {
+	AgentID           string  `json:"agent_id"`
+	EdgeStatus        string  `json:"edge_status"`
+	ClusterAgentID    *string `json:"cluster_agent_id"`
+	ClusterAgentName  *string `json:"cluster_agent_name"`
+	ClusterAgentStatus *string `json:"cluster_agent_status"`
+	IsPaired          bool    `json:"is_paired"`
+	PairedAt          *string `json:"paired_at"`
+	OS                string  `json:"os"`
+	Arch              string  `json:"arch"`
+	Hostname          string  `json:"hostname"`
+	RetiredAt         *string `json:"retired_at"`
+	BlacklistedAt     *string `json:"blacklisted_at"`
+	BlacklistReason   string  `json:"blacklist_reason"`
+}
+
+// PairAgent links an edge agent to a cluster agent (twin).
+// Validates state transitions and enforces blacklist checks.
+func (a *AgentAssigner) PairAgent(ctx context.Context, agentID, twinID, tenantID string) error {
+	// Check blacklist.
+	blacklisted, err := a.IsBlacklisted(ctx, tenantID, agentID)
+	if err != nil {
+		return fmt.Errorf("check blacklist: %w", err)
+	}
+	if blacklisted {
+		return fmt.Errorf("agent %s is blacklisted and cannot be paired", agentID)
+	}
+
+	// Get current edge agent status.
+	var currentStatus string
+	err = a.db.QueryRow(ctx, `
+		SELECT status FROM agent_registrations WHERE agent_id = $1 AND tenant_id = $2
+	`, agentID, tenantID).Scan(&currentStatus)
+	if err != nil {
+		return fmt.Errorf("get agent status: %w", err)
+	}
+
+	// Validate state transition.
+	if err := CanTransitionEdge(EdgeAgentStatus(currentStatus), "pair"); err != nil {
+		return err
+	}
+
+	// Verify twin exists and belongs to tenant.
+	var twinExists bool
+	err = a.db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM paryty_twins WHERE id = $1 AND tenant_id = $2 AND deleted_at IS NULL)
+	`, twinID, tenantID).Scan(&twinExists)
+	if err != nil {
+		return fmt.Errorf("check twin existence: %w", err)
+	}
+	if !twinExists {
+		return fmt.Errorf("twin %s not found in tenant %s", twinID, tenantID)
+	}
+
+	// Execute pairing in a transaction.
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Remove any existing assignment for this agent.
+	_, err = tx.Exec(ctx, `DELETE FROM agent_assignments WHERE agent_id = $1`, agentID)
+	if err != nil {
+		return fmt.Errorf("clear existing assignment: %w", err)
+	}
+
+	// Create new assignment.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO agent_assignments (agent_id, twin_id, tenant_id)
+		VALUES ($1, $2, $3)
+	`, agentID, twinID, tenantID)
+	if err != nil {
+		return fmt.Errorf("insert assignment: %w", err)
+	}
+
+	// Update edge agent status to active.
+	_, err = tx.Exec(ctx, `
+		UPDATE agent_registrations
+		SET status = 'active', paired_at = now(), unpaired_at = NULL
+		WHERE agent_id = $1 AND tenant_id = $2
+	`, agentID, tenantID)
+	if err != nil {
+		return fmt.Errorf("update agent status: %w", err)
+	}
+
+	// Update cluster agent (twin) status to active.
+	_, err = tx.Exec(ctx, `
+		UPDATE paryty_twins
+		SET status = 'active', updated_at = now()
+		WHERE id = $1 AND tenant_id = $2
+	`, twinID, tenantID)
+	if err != nil {
+		return fmt.Errorf("update twin status: %w", err)
+	}
+
+	// Log state transition.
+	actorID := userIDFromCtx(ctx)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO agent_status_log (agent_id, tenant_id, from_status, to_status, reason, actor_id)
+		VALUES ($1, $2, $3, 'active', 'assigned to twin ' || $4, $5)
+	`, agentID, tenantID, currentStatus, twinID, actorID)
+	if err != nil {
+		return fmt.Errorf("log transition: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// UnpairAgent unlinks an edge agent from its cluster agent.
+// The edge agent becomes rogue, the cluster agent becomes unconfigured.
+func (a *AgentAssigner) UnpairAgent(ctx context.Context, agentID, tenantID string) error {
+	// Get current edge agent status.
+	var currentStatus string
+	err := a.db.QueryRow(ctx, `
+		SELECT status FROM agent_registrations WHERE agent_id = $1 AND tenant_id = $2
+	`, agentID, tenantID).Scan(&currentStatus)
+	if err != nil {
+		return fmt.Errorf("get agent status: %w", err)
+	}
+
+	if err := CanTransitionEdge(EdgeAgentStatus(currentStatus), "unpair"); err != nil {
+		return err
+	}
+
+	// Get the twin ID before removing the assignment.
+	var twinID string
+	err = a.db.QueryRow(ctx, `
+		SELECT twin_id FROM agent_assignments WHERE agent_id = $1
+	`, agentID).Scan(&twinID)
+	if err != nil {
+		return fmt.Errorf("agent %s is not paired to any cluster agent", agentID)
+	}
+
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Soft-delete assignment (set unpaired_at).
+	_, err = tx.Exec(ctx, `
+		DELETE FROM agent_assignments WHERE agent_id = $1
+	`, agentID)
+	if err != nil {
+		return fmt.Errorf("delete assignment: %w", err)
+	}
+
+	// Update edge agent status to rogue.
+	_, err = tx.Exec(ctx, `
+		UPDATE agent_registrations
+		SET status = 'rogue', unpaired_at = now()
+		WHERE agent_id = $1 AND tenant_id = $2
+	`, agentID, tenantID)
+	if err != nil {
+		return fmt.Errorf("update agent status: %w", err)
+	}
+
+	// Update cluster agent (twin) status to unconfigured.
+	_, err = tx.Exec(ctx, `
+		UPDATE paryty_twins
+		SET status = 'unconfigured', updated_at = now()
+		WHERE id = $1 AND tenant_id = $2
+	`, twinID, tenantID)
+	if err != nil {
+		return fmt.Errorf("update twin status: %w", err)
+	}
+
+	// Log state transition.
+	actorID := userIDFromCtx(ctx)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO agent_status_log (agent_id, tenant_id, from_status, to_status, reason, actor_id)
+		VALUES ($1, $2, 'active', 'rogue', 'unassigned from twin ' || $3, $4)
+	`, agentID, tenantID, twinID, actorID)
+	if err != nil {
+		return fmt.Errorf("log transition: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// RetireAgent gracefully decommissions an edge agent.
+func (a *AgentAssigner) RetireAgent(ctx context.Context, agentID, tenantID string) error {
+	var currentStatus string
+	err := a.db.QueryRow(ctx, `
+		SELECT status FROM agent_registrations WHERE agent_id = $1 AND tenant_id = $2
+	`, agentID, tenantID).Scan(&currentStatus)
+	if err != nil {
+		return fmt.Errorf("get agent status: %w", err)
+	}
+
+	if err := CanTransitionEdge(EdgeAgentStatus(currentStatus), "retire"); err != nil {
+		return err
+	}
+
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Remove assignment if paired.
+	_, _ = tx.Exec(ctx, `DELETE FROM agent_assignments WHERE agent_id = $1`, agentID)
+
+	// Update edge agent status.
+	_, err = tx.Exec(ctx, `
+		UPDATE agent_registrations
+		SET status = 'retired', retired_at = now()
+		WHERE agent_id = $1 AND tenant_id = $2
+	`, agentID, tenantID)
+	if err != nil {
+		return fmt.Errorf("update agent status: %w", err)
+	}
+
+	// Log transition.
+	actorID := userIDFromCtx(ctx)
+	_, err = tx.Exec(ctx, `
+		INSERT INTO agent_status_log (agent_id, tenant_id, from_status, to_status, reason, actor_id)
+		VALUES ($1, $2, $3, 'retired', 'retired by operator', $4)
+	`, agentID, tenantID, currentStatus, actorID)
+	if err != nil {
+		return fmt.Errorf("log transition: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// BlacklistAgent blocks an edge agent from ever registering again.
+func (a *AgentAssigner) BlacklistAgent(ctx context.Context, agentID, tenantID, reason string) error {
+	var currentStatus string
+	err := a.db.QueryRow(ctx, `
+		SELECT COALESCE(status, 'unknown') FROM agent_registrations WHERE agent_id = $1 AND tenant_id = $2
+	`, agentID, tenantID).Scan(&currentStatus)
+	if err != nil {
+		// Agent may not be registered yet — still allow blacklisting.
+		currentStatus = "unknown"
+	}
+
+	// Allow blacklisting from any non-blacklisted state.
+	if currentStatus == "blacklisted" {
+		return fmt.Errorf("agent %s is already blacklisted", agentID)
+	}
+
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Insert into blacklist table.
+	_, err = tx.Exec(ctx, `
+		INSERT INTO agent_blacklist (tenant_id, edge_agent_id, reason)
+		VALUES ($1, $2, $3)
+		ON CONFLICT (tenant_id, edge_agent_id) DO UPDATE SET reason = EXCLUDED.reason
+	`, tenantID, agentID, reason)
+	if err != nil {
+		return fmt.Errorf("insert blacklist: %w", err)
+	}
+
+	// Remove assignment if paired.
+	_, _ = tx.Exec(ctx, `DELETE FROM agent_assignments WHERE agent_id = $1`, agentID)
+
+	// Update edge agent status if registered.
+	_, _ = tx.Exec(ctx, `
+		UPDATE agent_registrations
+		SET status = 'blacklisted', blacklisted_at = now(), blacklist_reason = $3
+		WHERE agent_id = $1 AND tenant_id = $2
+	`, agentID, tenantID, reason)
+
+	// Log transition.
+	actorID := userIDFromCtx(ctx)
+	_, _ = tx.Exec(ctx, `
+		INSERT INTO agent_status_log (agent_id, tenant_id, from_status, to_status, reason, actor_id)
+		VALUES ($1, $2, $3, 'blacklisted', $4, $5)
+	`, agentID, tenantID, currentStatus, reason, actorID)
+
+	return tx.Commit(ctx)
+}
+
+// UnregisterAgent completely removes an edge agent from the system.
+// This erases all traces of client association for security.
+func (a *AgentAssigner) UnregisterAgent(ctx context.Context, agentID, tenantID string) error {
+	tx, err := a.db.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	// Log before deletion.
+	actorID := userIDFromCtx(ctx)
+	_, _ = tx.Exec(ctx, `
+		INSERT INTO agent_status_log (agent_id, tenant_id, from_status, to_status, reason, actor_id)
+		VALUES ($1, $2, 'active', 'unregistered', 'unregistered by operator — all client data erased', $3)
+	`, agentID, tenantID, actorID)
+
+	// Remove assignment.
+	_, _ = tx.Exec(ctx, `DELETE FROM agent_assignments WHERE agent_id = $1`, agentID)
+
+	// Remove from blacklist.
+	_, _ = tx.Exec(ctx, `DELETE FROM agent_blacklist WHERE edge_agent_id = $1 AND tenant_id = $2`, agentID, tenantID)
+
+	// Remove registration entirely.
+	tag, err := tx.Exec(ctx, `DELETE FROM agent_registrations WHERE agent_id = $1 AND tenant_id = $2`, agentID, tenantID)
+	if err != nil {
+		return fmt.Errorf("delete agent: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("agent %s not found", agentID)
+	}
+
+	return tx.Commit(ctx)
+}
+
+// IsBlacklisted checks if an edge agent is in the blacklist for a tenant.
+func (a *AgentAssigner) IsBlacklisted(ctx context.Context, tenantID, agentID string) (bool, error) {
+	var exists bool
+	err := a.db.QueryRow(ctx, `
+		SELECT EXISTS(SELECT 1 FROM agent_blacklist WHERE tenant_id = $1 AND edge_agent_id = $2)
+	`, tenantID, agentID).Scan(&exists)
+	return exists, err
+}
+
+// GetAgentPairingStatus returns detailed pairing info for the smart modal.
+func (a *AgentAssigner) GetAgentPairingStatus(ctx context.Context, agentID string) (*PairingStatus, error) {
+	var ps PairingStatus
+	var twinID, twinName, twinStatus *string
+	var pairedAt *time.Time
+	var retiredAt *time.Time
+	var blacklistedAt *time.Time
+
+	err := a.db.QueryRow(ctx, `
+		SELECT r.agent_id, r.status, r.hostname, r.os, r.arch,
+		       r.paired_at, r.retired_at, r.blacklisted_at, r.blacklist_reason,
+		       a.twin_id, t.name, t.status
+		FROM agent_registrations r
+		LEFT JOIN agent_assignments a ON a.agent_id = r.agent_id
+		LEFT JOIN paryty_twins t ON t.id = a.twin_id
+		WHERE r.agent_id = $1
+	`, agentID).Scan(
+		&ps.AgentID, &ps.EdgeStatus, &ps.Hostname, &ps.OS, &ps.Arch,
+		&pairedAt, &retiredAt, &blacklistedAt, &ps.BlacklistReason,
+		&twinID, &twinName, &twinStatus,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("get pairing status: %w", err)
+	}
+
+	ps.ClusterAgentID = twinID
+	ps.ClusterAgentName = twinName
+	ps.ClusterAgentStatus = twinStatus
+	ps.IsPaired = twinID != nil && *twinID != ""
+	if pairedAt != nil {
+		s := pairedAt.Format(time.RFC3339)
+		ps.PairedAt = &s
+	}
+	if retiredAt != nil {
+		s := retiredAt.Format(time.RFC3339)
+		ps.RetiredAt = &s
+	}
+	if blacklistedAt != nil {
+		s := blacklistedAt.Format(time.RFC3339)
+		ps.BlacklistedAt = &s
+	}
+
+	return &ps, nil
 }

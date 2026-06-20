@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Daily Pre-Market Briefing Template — Sovereign Analyst Protocol</title>
+<style>
+@page { size: A4; margin: 1.5cm; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Courier New', monospace; font-size: 10pt; line-height: 1.5; color: #1a1a1a; background: #fff; padding: 1.5cm; max-width: 21cm; margin: 0 auto; }
+h1 { font-size: 14pt; text-align: center; margin-bottom: 4px; }
+.subtitle { text-align: center; font-size: 9pt; color: #666; margin-bottom: 16px; }
+.field { border-bottom: 1px solid #ccc; display: inline-block; min-width: 60px; padding: 0 4px; }
+.wide { min-width: 200px; }
+.xwide { min-width: 350px; }
+.section { border: 1.5px solid #333; margin-bottom: 10px; padding: 8px 12px; }
+.section-title { font-weight: bold; font-size: 10pt; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 6px; background: #f0f0f0; padding: 3px 8px; display: inline-block; }
+.row { margin-bottom: 4px; }
+.label { font-weight: bold; }
+.note { font-size: 8pt; color: #888; margin-top: 2px; }
+.synth-section { border: 2px solid #c0392b; }
+.synth-title { background: #c0392b; color: #fff; }
+table { width: 100%; border-collapse: collapse; margin: 4px 0; font-size: 9pt; }
+th { background: #eee; border: 1px solid #999; padding: 3px 5px; text-align: left; }
+td { border: 1px solid #ccc; padding: 3px 5px; min-height: 18px; }
+.footer { text-align: center; font-size: 8pt; color: #999; margin-top: 12px; border-top: 1px solid #ddd; padding-top: 6px; }
+@media print { body { padding: 0; } }
+</style>
+</head>
+<body>
+
+<h1>DAILY PRE-MARKET BRIEFING</h1>
+<div class="subtitle">Sovereign Analyst Protocol v1.0 — Complete before 7:30 AM ET daily</div>
+
+<div class="section">
+  <div class="section-title">0. Session Info</div>
+  <div class="row"><span class="label">Date:</span> <span class="field wide"></span> <span class="label">Time:</span> <span class="field"></span> ET <span class="label">Day of Week:</span> <span class="field"></span></div>
+  <div class="row"><span class="label">VIX Spot:</span> <span class="field"></span> <span class="label">VIX Fut M1:</span> <span class="field"></span> <span class="label">VIX Fut M2:</span> <span class="field"></span></div>
+</div>
+
+<div class="section">
+  <div class="section-title">1. Macro Regime</div>
+  <table>
+    <tr><th>Indicator</th><th>Value</th><th>Score (0-3)</th></tr>
+    <tr><td>VIX Level</td><td></td><td></td></tr>
+    <tr><td>VIX Term Structure</td><td></td><td></td></tr>
+    <tr><td>10Y-2Y Spread (bps)</td><td></td><td></td></tr>
+    <tr><td>HY OAS (bps)</td><td></td><td></td></tr>
+  </table>
+  <div class="row"><span class="label">Composite Score:</span> <span class="field"></span> /12 → <span class="label">Regime:</span> <span class="field wide"></span></div>
+  <div class="row"><span class="label">10Y TIPS Real Yield:</span> <span class="field"></span> % → <span class="label">Gold Real Yield Regime:</span> <span class="field wide"></span></div>
+  <div class="row"><span class="label">Regime Change Signal:</span> <span class="field xwide"></span></div>
+  <div class="row"><span class="label">Notes:</span> <span class="field xwide"></span></div>
+</div>
+
+<div class="section">
+  <div class="section-title">2. Structural Flows (COT)</div>
+  <table>
+    <tr><th>Instrument</th><th>Non-Comm Net Pos</th><th>Non-Comm COT Idx</th><th>Comm COT Idx</th><th>Signal</th></tr>
+    <tr><td>DXY (DX)</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>Gold (GC)</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>Oil (CL)</td><td></td><td></td><td></td><td></td></tr>
+  </table>
+  <div class="row"><span class="label">CB Gold Demand (Qtrly, tonnes):</span> <span class="field"></span> <span class="label">USD Reserve Share:</span> <span class="field"></span> %</div>
+  <div class="row"><span class="label">Flow Verdict:</span> DXY=<span class="field"></span> Gold=<span class="field"></span> Oil=<span class="field"></span></div>
+</div>
+
+<div class="section">
+  <div class="section-title">3. Correlation State (60-Day Rolling)</div>
+  <table>
+    <tr><th>Pair</th><th>ρ Current</th><th>ρ 4w Ago</th><th>Velocity (Δ)</th><th>State</th></tr>
+    <tr><td>DXY ↔ Gold</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>DXY ↔ Oil</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>Gold ↔ Oil</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>Gold ↔ Copper</td><td></td><td></td><td></td><td></td></tr>
+  </table>
+  <div class="row"><span class="label">Multi-Pair Breakdowns:</span> <span class="field"></span> <span class="label">Regime Transition Alert:</span> <span class="field"></span></div>
+  <div class="row"><span class="label">Correlation Verdict:</span> <span class="field xwide"></span></div>
+</div>
+
+<div class="section">
+  <div class="section-title">4. Positioning & Sentiment</div>
+  <table>
+    <tr><th>Indicator</th><th>DXY</th><th>Gold</th><th>Oil</th></tr>
+    <tr><td>Put/Call Ratio</td><td></td><td></td><td></td></tr>
+    <tr><td>ETF Flow (5d, tonnes)</td><td>N/A</td><td></td><td>N/A</td></tr>
+    <tr><td>EIA Inventory WoW (M bbl)</td><td>N/A</td><td>N/A</td><td></td></tr>
+    <tr><td>OI Divergence Type</td><td></td><td></td><td></td></tr>
+    <tr><td>Sentiment Score (-1 to +1)</td><td></td><td></td><td></td></tr>
+  </table>
+  <div class="row"><span class="label">Contrarian Signal:</span> <span class="field xwide"></span></div>
+  <div class="row"><span class="label">Positioning Verdict:</span> <span class="field xwide"></span></div>
+</div>
+
+<div class="section">
+  <div class="section-title">5. Intraday Plan</div>
+  <div class="row"><span class="label">Session:</span> <span class="field wide"></span> <span class="label">Hours:</span> <span class="field"></span> ET</div>
+  <table>
+    <tr><th>Instrument</th><th>POC</th><th>VAH</th><th>VAL</th><th>Key S/R</th></tr>
+    <tr><td>DXY</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>Gold</td><td></td><td></td><td></td><td></td></tr>
+    <tr><td>Oil</td><td></td><td></td><td></td><td></td></tr>
+  </table>
+  <div class="row"><span class="label">Events Today:</span></div>
+  <div class="row"><span class="field xwide"></span></div>
+  <div class="row"><span class="field xwide"></span></div>
+  <div class="row"><span class="label">Event Protocol:</span> <span class="field xwide"></span></div>
+  <div class="row"><span class="label">Execution Bias:</span> <span class="field xwide"></span></div>
+</div>
+
+<div class="section synth-section">
+  <div class="section-title synth-title">6. Synthesis (YOUR ENGINE)</div>
+  <div class="row"><span class="label">Dominant Layer:</span> <span class="field wide"></span> <span class="label">Weight:</span> <span class="field"></span> %</div>
+  <div class="row"><span class="label">Conflicts:</span></div>
+  <div class="row"><span class="field xwide"></span></div>
+  <div class="row"><span class="field xwide"></span></div>
+  <div class="row"><span class="label">Conflict Resolution:</span></div>
+  <div class="row"><span class="field xwide"></span></div>
+  <div class="row"><span class="field xwide"></span></div>
+  <div class="row"><span class="label">Conviction Score:</span> <span class="field"></span> /5</div>
+  <table>
+    <tr><th>Trade Plan</th><th>DXY</th><th>Gold</th><th>Oil</th></tr>
+    <tr><td>Direction</td><td></td><td></td><td></td></tr>
+    <tr><td>Entry Zone</td><td></td><td></td><td></td></tr>
+    <tr><td>Stop Loss</td><td></td><td></td><td></td></tr>
+    <tr><td>Target 1 (1R)</td><td></td><td></td><td></td></tr>
+    <tr><td>Target 2 (2R)</td><td></td><td></td><td></td></tr>
+    <tr><td>Risk %</td><td></td><td></td><td></td></tr>
+    <tr><td>Time Stop (hrs)</td><td></td><td></td><td></td></tr>
+    <tr><td>Invalidation</td><td></td><td></td><td></td></tr>
+  </table>
+  <div class="row"><span class="label">Stand-Aside Condition:</span></div>
+  <div class="row"><span class="field xwide"></span></div>
+  <div class="row"><span class="field xwide"></span></div>
+</div>
+
+<div class="section" style="border-style: dashed;">
+  <div class="section-title">Post-Trade Review (fill after session)</div>
+  <table>
+    <tr><th>Instrument</th><th>Result</th><th>R-Multiple</th><th>Correct Layers</th><th>Wrong Layers</th><th>Lesson</th></tr>
+    <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+    <tr><td></td><td></td><td></td><td></td><td></td><td></td></tr>
+  </table>
+  <div class="row"><span class="label">Synthesis Adjustment:</span></div>
+  <div class="row"><span class="field xwide"></span></div>
+</div>
+
+<div class="footer">Sovereign Analyst Protocol v1.0 — Daily Briefing Template — CONFIDENTIAL</div>
+
+</body>
+</html>

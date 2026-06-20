@@ -38,7 +38,7 @@ func TestTwinLifecycle_CreateAndActivate(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a handler
-	handler := NewTwinHandler(pool, nil)
+	handler := NewTwinHandler(pool, nil, nil, nil, nil)
 
 	// Create a context with tenant ID
 	ctxWithTenant := context.WithValue(ctx, "tenant_id", tenantID)
@@ -91,7 +91,7 @@ func TestTwinLifecycle_GetById(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a handler
-	handler := NewTwinHandler(pool, nil)
+	handler := NewTwinHandler(pool, nil, nil, nil, nil)
 
 	// Create a context with tenant ID
 	ctxWithTenant := context.WithValue(ctx, "tenant_id", tenantID)
@@ -141,7 +141,7 @@ func TestTwinLifecycle_Update(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a handler
-	handler := NewTwinHandler(pool, nil)
+	handler := NewTwinHandler(pool, nil, nil, nil, nil)
 
 	// Create a context with tenant ID
 	ctxWithTenant := context.WithValue(ctx, "tenant_id", tenantID)
@@ -200,7 +200,7 @@ func TestTwinLifecycle_Delete(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a handler
-	handler := NewTwinHandler(pool, nil)
+	handler := NewTwinHandler(pool, nil, nil, nil, nil)
 
 	// Create a context with tenant ID
 	ctxWithTenant := context.WithValue(ctx, "tenant_id", tenantID)
@@ -262,7 +262,7 @@ func TestTwinLifecycle_TenantIsolation(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a handler
-	handler := NewTwinHandler(pool, nil)
+	handler := NewTwinHandler(pool, nil, nil, nil, nil)
 
 	// Create context for Tenant A
 	ctxA := context.WithValue(ctx, "tenant_id", tenantA)
@@ -332,7 +332,7 @@ func TestTwinLifecycle_PlanLimitEnforcement(t *testing.T) {
 	require.NoError(t, err)
 
 	// Create a handler
-	handler := NewTwinHandler(pool, nil)
+	handler := NewTwinHandler(pool, nil, nil, nil, nil)
 
 	// Create a context with tenant ID
 	ctxWithTenant := context.WithValue(ctx, "tenant_id", tenantID)

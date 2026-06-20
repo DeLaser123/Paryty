@@ -17,17 +17,22 @@ import (
 // AuthRESTAdapter bridges Gin REST handlers to the gRPC AuthHandler, providing
 // frontend-compatible JSON responses for register, login, refresh, and logout.
 type AuthRESTAdapter struct {
-	handler *AuthHandler
-	db      *pgxpool.Pool
-	engine  *plan.PlanEngine
+	handler     *AuthHandler
+	db          *pgxpool.Pool
+	engine      *plan.PlanEngine
+	cookieSecure bool // false in dev (HTTP), true in production (HTTPS)
 }
 
 // NewAuthRESTAdapter creates a new AuthRESTAdapter.
-func NewAuthRESTAdapter(handler *AuthHandler, db *pgxpool.Pool, engine *plan.PlanEngine) *AuthRESTAdapter {
+// cookieSecure controls the Secure flag on auth cookies — pass false for local
+// development over HTTP (where Secure cookies are silently rejected by browsers)
+// and true for production deployments behind HTTPS.
+func NewAuthRESTAdapter(handler *AuthHandler, db *pgxpool.Pool, engine *plan.PlanEngine, cookieSecure bool) *AuthRESTAdapter {
 	return &AuthRESTAdapter{
-		handler: handler,
-		db:      db,
-		engine:  engine,
+		handler:      handler,
+		db:           db,
+		engine:       engine,
+		cookieSecure: cookieSecure,
 	}
 }
 
@@ -188,13 +193,47 @@ func (a *AuthRESTAdapter) Login(c *gin.Context) {
 		}
 	}
 
+	// Set httpOnly cookie for refresh token (XSS protection).
+	// The refresh token is NOT included in the response body when using cookies.
+	refreshExpiresAt := now.Add(RefreshTokenTTL)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "paryty_refresh_token",
+		Value:    resp.RefreshToken,
+		Path:     "/api/v1/auth",
+		Expires:  refreshExpiresAt,
+		HttpOnly: true,
+		Secure:   a.cookieSecure,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	// Set httpOnly cookie for access token (used by WebSocket/SSE to avoid
+	// exposing tokens in URL query parameters, which are logged by proxies
+	// and visible in browser history).
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "paryty_access_token",
+		Value:    resp.AccessToken,
+		Path:     "/",
+		Expires:  accessExpiresAt,
+		HttpOnly: true,
+		Secure:   a.cookieSecure,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	// Remove refresh token from response body (now in httpOnly cookie).
+	delete(body, "refreshToken")
+
 	c.JSON(http.StatusOK, body)
 }
 
 // RefreshToken handles POST /api/v1/auth/refresh.
 func (a *AuthRESTAdapter) RefreshToken(c *gin.Context) {
 	var req refreshBind
-	if err := c.ShouldBindJSON(&req); err != nil {
+	
+	// Try to get refresh token from httpOnly cookie first, then from request body.
+	cookie, err := c.Cookie("paryty_refresh_token")
+	if err == nil && cookie != "" {
+		req.RefreshToken = cookie
+	} else if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "refresh_token is required"})
 		return
 	}
@@ -250,13 +289,33 @@ func (a *AuthRESTAdapter) RefreshToken(c *gin.Context) {
 		}
 	}
 
+	// Set httpOnly cookie for new refresh token.
+	refreshExpiresAt := now.Add(RefreshTokenTTL)
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "paryty_refresh_token",
+		Value:    resp.RefreshToken,
+		Path:     "/api/v1/auth",
+		Expires:  refreshExpiresAt,
+		HttpOnly: true,
+		Secure:   a.cookieSecure,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	// Remove refresh token from response body.
+	delete(body, "refreshToken")
+
 	c.JSON(http.StatusOK, body)
 }
 
 // Logout handles POST /api/v1/auth/logout.
 func (a *AuthRESTAdapter) Logout(c *gin.Context) {
 	var req logoutBind
-	if err := c.ShouldBindJSON(&req); err != nil {
+	
+	// Try to get refresh token from httpOnly cookie first, then from request body.
+	cookie, err := c.Cookie("paryty_refresh_token")
+	if err == nil && cookie != "" {
+		req.RefreshToken = cookie
+	} else if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"message": "refresh_token is required"})
 		return
 	}
@@ -265,11 +324,22 @@ func (a *AuthRESTAdapter) Logout(c *gin.Context) {
 		RefreshToken: req.RefreshToken,
 	}
 
-	_, err := a.handler.Logout(c.Request.Context(), protoReq)
+	_, err = a.handler.Logout(c.Request.Context(), protoReq)
 	if err != nil {
 		c.JSON(grpcCodeToHTTP(err), gin.H{"message": status.Convert(err).Message()})
 		return
 	}
+
+	// Clear the httpOnly cookie.
+	http.SetCookie(c.Writer, &http.Cookie{
+		Name:     "paryty_refresh_token",
+		Value:    "",
+		Path:     "/api/v1/auth",
+		MaxAge:   -1, // Delete cookie
+		HttpOnly: true,
+		Secure:   a.cookieSecure,
+		SameSite: http.SameSiteStrictMode,
+	})
 
 	c.JSON(http.StatusOK, gin.H{"message": "logged out"})
 }
@@ -320,20 +390,6 @@ func safeTimestamp(ts *timestamppb.Timestamp, fallback time.Time) time.Time {
 		return fallback
 	}
 	return ts.AsTime()
-}
-
-// buildAdminPermissions returns the default admin permission set.
-func buildAdminPermissions() map[string]bool {
-	return map[string]bool{
-		"tenants:read":  true,
-		"tenants:write": true,
-		"users:read":    true,
-		"users:write":   true,
-		"twins:read":    true,
-		"twins:write":   true,
-		"api_keys:read": true,
-		"api_keys:write": true,
-	}
 }
 
 // planLimitsToMap converts plan.LimitSet to a flat map for JSON serialization.

@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: frontend
-          image: ghcr.io/paryty/paryty-frontend:latest
+          image: ghcr.io/paryty/paryty-frontend:v1.0.0  # Pin to specific version
           ports:
             - name: http
               containerPort: 3000

@@ -8,6 +8,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -25,6 +26,7 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/plan"
 	"github.com/paryty/paryty-v1.0/cluster/internal/security"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
+	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
 	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
 	"go.uber.org/zap"
 )
@@ -49,26 +51,16 @@ func planQuotasToMap(quotas plan.QuotaSet) map[string]interface{} {
 
 // buildPermissionsFromRole returns the default permission set for a role.
 // Used as a fallback when JWT claims lack a permissions map.
+// Delegates to the canonical security.RolePermissions map to avoid drift.
 func buildPermissionsFromRole(role string) map[string]bool {
-	permissions := map[string]bool{}
-	switch role {
-	case "admin":
-		permissions["tenants:read"] = true
-		permissions["tenants:write"] = true
-		permissions["users:read"] = true
-		permissions["users:write"] = true
-		permissions["twins:read"] = true
-		permissions["twins:write"] = true
-		permissions["api_keys:read"] = true
-		permissions["api_keys:write"] = true
-	case "operator":
-		permissions["twins:read"] = true
-		permissions["twins:write"] = true
-		permissions["alerts:acknowledge"] = true
-	case "viewer":
-		permissions["twins:read"] = true
+	if perms, ok := security.RolePermissions[role]; ok {
+		out := make(map[string]bool, len(perms))
+		for k, v := range perms {
+			out[k] = v
+		}
+		return out
 	}
-	return permissions
+	return map[string]bool{}
 }
 
 // loadEventConsumerTenants returns the tenant IDs whose Redpanda event
@@ -284,7 +276,7 @@ func main() {
 	logger.Info("Query cache initialized")
 
 	// Create real query service with storage backend
-	queryService := api.NewQueryService(store, apiKeyManager, agentAssigner, logger)
+	queryService := api.NewQueryService(store, apiKeyManager, agentAssigner, logger, auditLogger)
 
 	// Wire control plane DB and plan engine into the query service for admin routes.
 	queryService.SetDB(cpPool)
@@ -313,8 +305,9 @@ func main() {
 
 	// Create Gin router
 	router := gin.New()
+	router.Use(security.SecurityHeaders())
 	router.Use(gin.Recovery())
-	// Phase 8 middleware chain: CORS → RequestID → AuditBegin
+	// Phase 8 middleware chain: SecurityHeaders → Recovery → CORS → RequestID → AuditBegin
 	router.Use(security.CORS(corsOrigins...))
 	router.Use(security.RequestID())
 	router.Use(security.AuditBegin(auditLogger))
@@ -340,8 +333,9 @@ func main() {
 	public := router.Group("/api/v1/auth")
 
 	if cpPool != nil {
-		authHandler := auth.NewAuthHandler(tokenManager, cpPool, planEngine, logger)
-		authAdapter := auth.NewAuthRESTAdapter(authHandler, cpPool, planEngine)
+		authHandler := auth.NewAuthHandler(tokenManager, cpPool, planEngine, logger, auditLogger)
+		cookieSecure := os.Getenv("PARYTY_DEV_MODE") != "true"
+		authAdapter := auth.NewAuthRESTAdapter(authHandler, cpPool, planEngine, cookieSecure)
 
 		public.POST("/register", authAdapter.Register)
 		public.POST("/login", authAdapter.Login)
@@ -396,6 +390,7 @@ func main() {
 	authd := router.Group("/api/v1")
 	authd.Use(auth.GinJWTAuth(tokenManager))
 	authd.Use(plan.GinPlanInfoInjector(planEngine))
+	authd.Use(queryService.RLSTenantMiddleware())
 	authd.Use(security.RateLimit(security.DefaultRateLimitConfig()))
 
 	// Register query data routes (rest.go) on the JWT-protected group.
@@ -546,7 +541,20 @@ func main() {
 	// Wire TwinHandler + TwinRESTAdapter if control plane pool is available.
 	var twinCreateMW gin.HandlerFunc
 	if cpPool != nil {
-		twinHandler := auth.NewTwinHandler(cpPool, nil) // nil dispatcher for now
+		// Create TopicManager for twin-scoped topic lifecycle.
+		topicMgr, tmErr := stream.NewTopicManager(cfg.ToStreamConfig(), logger)
+		if tmErr != nil {
+			logger.Warn("Failed to create TopicManager for twin topics", zap.Error(tmErr))
+		}
+
+		// Create RoutingCache for hot-path assignment lookups.
+		var routingCache *twin.RoutingCache
+		if agentAssigner != nil {
+			rdb := store.HotStore().RDB()
+			routingCache = twin.NewRoutingCache(rdb, agentAssigner, slog.Default())
+		}
+
+		twinHandler := auth.NewTwinHandler(cpPool, nil, topicMgr, routingCache, auditLogger) // nil dispatcher for now
 		twinAdapter := auth.NewTwinRESTAdapter(twinHandler)
 		queryService.SetTwinAPI(twinAdapter)
 		logger.Info("TwinHandler + TwinRESTAdapter wired for twin management")

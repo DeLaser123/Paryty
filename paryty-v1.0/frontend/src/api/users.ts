@@ -48,7 +48,9 @@ export async function fetchUsers(params?: {
   const query = new URLSearchParams(queryParams).toString();
   const path = `/api/v1/users${query ? `?${query}` : ''}`;
 
-  return client.get<UserListResponse>(path);
+  // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+  const response = await client.get<{ data: SubUser[] }>(path);
+  return { users: response.data ?? [], total: response.data?.length ?? 0 };
 }
 
 /**
@@ -59,7 +61,9 @@ export async function fetchUsers(params?: {
  */
 export async function fetchUserById(userId: string): Promise<SubUser> {
   const client = getRestClient();
-  return client.get<SubUser>(`/api/v1/users/${encodeURIComponent(userId)}`);
+  // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+  const response = await client.get<{ data: SubUser }>(`/api/v1/users/${encodeURIComponent(userId)}`);
+  return response.data;
 }
 
 /**
@@ -70,7 +74,9 @@ export async function fetchUserById(userId: string): Promise<SubUser> {
  */
 export async function createUser(payload: CreateSubUserParams): Promise<SubUser> {
   const client = getRestClient();
-  return client.post<SubUser>('/api/v1/users', payload);
+  // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+  const response = await client.post<{ data: SubUser }>('/api/v1/users', payload);
+  return response.data;
 }
 
 /**
@@ -82,10 +88,12 @@ export async function createUser(payload: CreateSubUserParams): Promise<SubUser>
  */
 export async function updateUser(userId: string, payload: UpdateUserPayload): Promise<SubUser> {
   const client = getRestClient();
-  return client.put<SubUser>(
+  // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+  const response = await client.put<{ data: SubUser }>(
     `/api/v1/users/${encodeURIComponent(userId)}`,
     payload,
   );
+  return response.data;
 }
 
 /**

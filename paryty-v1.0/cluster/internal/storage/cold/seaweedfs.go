@@ -12,6 +12,7 @@ import (
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
+	"github.com/minio/minio-go/v7/pkg/encrypt"
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
 )
 
@@ -98,7 +99,10 @@ func (c *Client) StoreMetricBatch(ctx context.Context, batch *models.MetricBatch
 		batch.AgentID)
 
 	_, err = c.minio.PutObject(ctx, bucketMetrics, key, bytes.NewReader(data), int64(len(data)),
-		minio.PutObjectOptions{ContentType: "application/json"})
+		minio.PutObjectOptions{
+			ContentType:        "application/json",
+			ServerSideEncryption: encrypt.NewSSE(),
+		})
 	if err != nil {
 		return fmt.Errorf("put object: %w", err)
 	}
@@ -143,7 +147,10 @@ func (c *Client) StoreTrace(ctx context.Context, trace *models.Trace) error {
 		trace.TraceID)
 
 	_, err = c.minio.PutObject(ctx, bucketTraces, key, bytes.NewReader(data), int64(len(data)),
-		minio.PutObjectOptions{ContentType: "application/json"})
+		minio.PutObjectOptions{
+			ContentType:        "application/json",
+			ServerSideEncryption: encrypt.NewSSE(),
+		})
 	if err != nil {
 		return fmt.Errorf("put object: %w", err)
 	}
@@ -187,7 +194,10 @@ func (c *Client) StoreEvents(ctx context.Context, events []models.Event) error {
 		time.Now().Format("2006/01/02"))
 
 	_, err = c.minio.PutObject(ctx, bucketEvents, key, bytes.NewReader(data), int64(len(data)),
-		minio.PutObjectOptions{ContentType: "application/json"})
+		minio.PutObjectOptions{
+			ContentType:        "application/json",
+			ServerSideEncryption: encrypt.NewSSE(),
+		})
 	if err != nil {
 		return fmt.Errorf("put object: %w", err)
 	}

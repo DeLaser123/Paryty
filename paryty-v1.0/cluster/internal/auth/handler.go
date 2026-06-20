@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/paryty/paryty-v1.0/cluster/internal/plan"
 	parytyv1 "github.com/paryty/paryty-v1.0/cluster/internal/proto"
+	"github.com/paryty/paryty-v1.0/cluster/internal/security"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -29,6 +30,7 @@ type AuthHandler struct {
 	engine    *plan.PlanEngine
 	loginRate *loginRateLimiter
 	logger    *zap.Logger
+	audit     *security.AuditLogger
 }
 
 // loginRateLimiter provides per-email brute-force protection for login.
@@ -129,7 +131,7 @@ func (l *loginRateLimiter) recordSuccess(key string) {
 
 // NewAuthHandler creates a new AuthHandler. A nil logger is replaced with
 // zap.NewNop() so callers without logging configured remain safe.
-func NewAuthHandler(tm *TokenManager, db *pgxpool.Pool, engine *plan.PlanEngine, logger *zap.Logger) *AuthHandler {
+func NewAuthHandler(tm *TokenManager, db *pgxpool.Pool, engine *plan.PlanEngine, logger *zap.Logger, audit *security.AuditLogger) *AuthHandler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
@@ -139,6 +141,7 @@ func NewAuthHandler(tm *TokenManager, db *pgxpool.Pool, engine *plan.PlanEngine,
 		engine:    engine,
 		loginRate: newLoginRateLimiter(),
 		logger:    logger,
+		audit:     audit,
 	}
 }
 
@@ -231,6 +234,15 @@ func (h *AuthHandler) Register(ctx context.Context, req *parytyv1.RegisterReques
 		return nil, status.Errorf(codes.Internal, "store refresh token: %v", err)
 	}
 
+	// Audit log successful registration.
+	if h.audit != nil {
+		h.audit.LogAction(tenantID, userID, "auth.register", "user", userID, map[string]interface{}{
+			"email": req.Email,
+			"name":  req.Name,
+			"plan":  planName,
+		})
+	}
+
 	return &parytyv1.RegisterResponse{
 		TenantId:     tenantID,
 		UserId:       userID,
@@ -310,6 +322,14 @@ func (h *AuthHandler) Login(ctx context.Context, req *parytyv1.LoginRequest) (*p
 
 	// Clear rate limit on successful login.
 	h.loginRate.recordSuccess(req.Email)
+
+	// Audit log successful login.
+	if h.audit != nil {
+		h.audit.LogAction(tenantID, userID, "auth.login", "user", userID, map[string]interface{}{
+			"email": req.Email,
+			"role":  role,
+		})
+	}
 
 	return &parytyv1.LoginResponse{
 		AccessToken:  accessToken,
@@ -447,12 +467,35 @@ func (h *AuthHandler) Logout(ctx context.Context, req *parytyv1.LogoutRequest) (
 	}
 
 	hash := HashRefreshToken(req.RefreshToken)
-	_, err := h.db.Exec(ctx, `
+	
+	// Look up user ID and tenant ID from refresh token before revoking.
+	var userID, tenantID string
+	err := h.db.QueryRow(ctx, `
+		SELECT user_id, tenant_id FROM refresh_tokens
+		WHERE token_hash = $1 AND revoked_at IS NULL
+	`, hash).Scan(&userID, &tenantID)
+	if err != nil {
+		// Token not found or already revoked — still attempt to revoke.
+		_, _ = h.db.Exec(ctx, `
+			UPDATE refresh_tokens SET revoked_at = now()
+			WHERE token_hash = $1 AND revoked_at IS NULL
+		`, hash)
+		return &emptypb.Empty{}, nil
+	}
+
+	_, err = h.db.Exec(ctx, `
 		UPDATE refresh_tokens SET revoked_at = now()
 		WHERE token_hash = $1 AND revoked_at IS NULL
 	`, hash)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "revoke refresh token: %v", err)
+	}
+
+	// Audit log successful logout.
+	if h.audit != nil {
+		h.audit.LogAction(tenantID, userID, "auth.logout", "user", userID, map[string]interface{}{
+			"token_hash": hash[:8] + "...", // Truncated for security
+		})
 	}
 
 	return &emptypb.Empty{}, nil
@@ -532,25 +575,14 @@ func (h *AuthHandler) storeRefreshToken(ctx context.Context, userID, refreshToke
 }
 
 func buildPermissions(role string) map[string]bool {
-	permissions := map[string]bool{}
-	switch role {
-	case "admin":
-		permissions["tenants:read"] = true
-		permissions["tenants:write"] = true
-		permissions["users:read"] = true
-		permissions["users:write"] = true
-		permissions["twins:read"] = true
-		permissions["twins:write"] = true
-		permissions["api_keys:read"] = true
-		permissions["api_keys:write"] = true
-	case "operator":
-		permissions["twins:read"] = true
-		permissions["twins:write"] = true
-		permissions["alerts:acknowledge"] = true
-	case "viewer":
-		permissions["twins:read"] = true
+	if perms, ok := security.RolePermissions[role]; ok {
+		out := make(map[string]bool, len(perms))
+		for k, v := range perms {
+			out[k] = v
+		}
+		return out
 	}
-	return permissions
+	return map[string]bool{}
 }
 
 // isUniqueViolation checks if a PostgreSQL error is a unique constraint

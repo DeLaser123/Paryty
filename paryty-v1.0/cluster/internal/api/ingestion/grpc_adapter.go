@@ -48,12 +48,12 @@ const (
 )
 
 // TenantFromContext extracts the tenant stored in ctx.
-// Returns "default" if no tenant is set.
+// Returns empty string if no tenant is set.
 func TenantFromContext(ctx context.Context) string {
 	if t, ok := ctx.Value(ctxKeyTenant).(string); ok && t != "" {
 		return t
 	}
-	return "default"
+	return ""
 }
 
 // TwinIDFromContext extracts the twin ID stored in ctx.
@@ -136,15 +136,20 @@ func (a *IngestionGRPCAdapter) enrichContext(ctx context.Context) context.Contex
 	return ctx
 }
 
-// isRateLimited checks if the agent has exceeded its rate limit.
+// isRateLimited checks if the tenant has exceeded its rate limit.
+// The tenant ID is extracted from the gRPC context (set by AuthInterceptor).
 // Returns a gRPC status error if rate-limited, nil otherwise.
-func (a *IngestionGRPCAdapter) isRateLimited(agentID string) error {
+func (a *IngestionGRPCAdapter) isRateLimited(ctx context.Context) error {
 	if a.rateLimiter == nil {
 		return nil
 	}
-	if !a.rateLimiter.Allow(agentID) {
+	tenantID := TenantFromContext(ctx)
+	if tenantID == "" {
+		tenantID = "anonymous"
+	}
+	if !a.rateLimiter.Allow(tenantID) {
 		return status.Errorf(codes.ResourceExhausted,
-			"rate limit exceeded for agent %s", agentID)
+			"rate limit exceeded for tenant %s", tenantID)
 	}
 	return nil
 }
@@ -343,8 +348,8 @@ func (a *IngestionGRPCAdapter) SendBatch(ctx context.Context, req *pb.MetricBatc
 		zap.String("agent_id", req.AgentId),
 	)
 
-	// Rate limit check
-	if err := a.isRateLimited(req.AgentId); err != nil {
+	// Rate limit check (tenant-level)
+	if err := a.isRateLimited(ctx); err != nil {
 		return nil, err
 	}
 
@@ -485,8 +490,8 @@ func (a *IngestionGRPCAdapter) StreamMetrics(stream grpc.BidiStreamingServer[pb.
 				continue
 			}
 
-			// Rate limit check
-			if rateErr := a.isRateLimited(m.Metrics.AgentId); rateErr != nil {
+			// Rate limit check (tenant-level)
+			if rateErr := a.isRateLimited(ctx); rateErr != nil {
 				a.logger.Warn("Stream rate limited",
 					zap.String("correlation_id", correlationID),
 					zap.String("agent_id", m.Metrics.AgentId),
@@ -565,8 +570,8 @@ func (a *IngestionGRPCAdapter) ReportNetworkEvents(stream grpc.ClientStreamingSe
 			continue
 		}
 
-		// Rate limit check.
-		if rateErr := a.isRateLimited(batch.AgentId); rateErr != nil {
+		// Rate limit check (tenant-level).
+		if rateErr := a.isRateLimited(ctx); rateErr != nil {
 			a.logger.Warn("Network event rate limited",
 				zap.String("correlation_id", correlationID),
 				zap.String("agent_id", batch.AgentId),
@@ -800,10 +805,10 @@ func RLSTenantInterceptor(db *pgxpool.Pool) grpc.UnaryServerInterceptor {
 			return handler(ctx, req)
 		}
 
-		// Set the PostgreSQL session variable for RLS
-		// SET LOCAL does not support parameterized queries, so we use fmt.Sprintf.
-		// The tenant ID comes from a validated API key, so this is safe.
-		_, err := db.Exec(ctx, fmt.Sprintf("SET LOCAL app.current_tenant_id = '%s'", tenant))
+		// Set the PostgreSQL session variable for RLS.
+		// Use set_config() with a parameterized query to prevent SQL injection.
+		_, err := db.Exec(ctx,
+			"SELECT set_config('app.current_tenant_id', $1, true)", tenant)
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to set RLS tenant context: %v", err)
 		}

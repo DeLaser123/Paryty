@@ -1,0 +1,927 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Sovereign Analyst Protocol — DXY / Gold / Oil</title>
+<style>
+@page { size: A4; margin: 2cm; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Georgia', 'Times New Roman', serif; font-size: 11pt; line-height: 1.6; color: #1a1a1a; background: #fff; padding: 2cm; max-width: 21cm; margin: 0 auto; }
+h1 { font-size: 22pt; color: #0d1b2a; border-bottom: 3px solid #1b263b; padding-bottom: 8px; margin-bottom: 4px; }
+h2 { font-size: 16pt; color: #1b263b; border-bottom: 1.5px solid #415a77; padding-bottom: 5px; margin-top: 36px; margin-bottom: 12px; }
+h3 { font-size: 13pt; color: #415a77; margin-top: 22px; margin-bottom: 8px; }
+h4 { font-size: 11pt; color: #778da9; text-transform: uppercase; letter-spacing: 1px; margin-top: 16px; margin-bottom: 6px; }
+p, li { margin-bottom: 8px; text-align: justify; }
+ul, ol { padding-left: 24px; }
+.subtitle { font-size: 12pt; color: #415a77; font-style: italic; margin-bottom: 24px; }
+.cover { text-align: center; padding: 80px 0 60px 0; page-break-after: always; }
+.cover h1 { font-size: 28pt; border: none; margin-bottom: 8px; }
+.cover .subtitle { font-size: 14pt; margin-bottom: 40px; }
+.cover .meta { font-size: 10pt; color: #778da9; line-height: 2; }
+.cover .classification { display: inline-block; border: 2px solid #c0392b; color: #c0392b; font-weight: bold; padding: 6px 18px; font-size: 10pt; letter-spacing: 2px; margin-top: 24px; }
+.toc { page-break-after: always; }
+.toc h2 { border: none; text-align: center; }
+.toc ul { list-style: none; padding: 0; }
+.toc li { padding: 6px 0; border-bottom: 1px dotted #ccc; font-size: 11pt; }
+.toc li span { float: right; color: #778da9; }
+.page-break { page-break-before: always; }
+.formula-box { background: #f0f4f8; border-left: 4px solid #415a77; padding: 14px 18px; margin: 12px 0; font-family: 'Courier New', monospace; font-size: 10pt; line-height: 1.8; overflow-x: auto; }
+.signal-table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 10pt; }
+.signal-table th { background: #1b263b; color: #fff; padding: 8px 10px; text-align: left; }
+.signal-table td { padding: 7px 10px; border-bottom: 1px solid #ddd; }
+.signal-table tr:nth-child(even) { background: #f7f9fb; }
+.bullish { color: #27ae60; font-weight: bold; }
+.bearish { color: #c0392b; font-weight: bold; }
+.neutral { color: #7f8c8d; font-weight: bold; }
+.alert-box { border: 1.5px solid #e67e22; background: #fef9e7; padding: 12px 16px; margin: 12px 0; border-radius: 4px; }
+.alert-box strong { color: #e67e22; }
+.source-box { background: #eaf2e8; border-left: 4px solid #27ae60; padding: 10px 14px; margin: 10px 0; font-size: 9.5pt; }
+.source-box a { color: #1b6b3a; text-decoration: none; }
+.briefing-template { background: #f8f9fa; border: 2px solid #1b263b; padding: 20px; margin: 16px 0; }
+.briefing-section { border-bottom: 1px dashed #aaa; padding: 10px 0; }
+.briefing-section:last-child { border-bottom: none; }
+.briefing-label { font-weight: bold; color: #1b263b; font-size: 10pt; text-transform: uppercase; letter-spacing: 0.5px; }
+.briefing-field { color: #555; font-style: italic; margin-left: 16px; }
+.worked-example { background: #fafafa; border: 1.5px solid #ddd; padding: 16px; margin: 16px 0; }
+.worked-example h4 { color: #1b263b; text-transform: none; letter-spacing: 0; font-size: 12pt; }
+.layer-badge { display: inline-block; background: #1b263b; color: #fff; padding: 3px 12px; font-size: 9pt; letter-spacing: 1px; margin-bottom: 6px; }
+.decision-matrix { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 9.5pt; }
+.decision-matrix th { background: #415a77; color: #fff; padding: 6px 8px; }
+.decision-matrix td { padding: 6px 8px; border: 1px solid #ccc; text-align: center; }
+footer { margin-top: 40px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 8.5pt; color: #999; text-align: center; }
+@media print {
+  body { padding: 0; }
+  .page-break { page-break-before: always; }
+  .cover { padding-top: 120px; }
+  .no-print { display: none; }
+}
+</style>
+</head>
+<body>
+
+<!-- ====== COVER PAGE ====== -->
+<div class="cover">
+  <h1>The Sovereign Analyst Protocol</h1>
+  <div class="subtitle">A 6-Layer Institutional-Grade Analytical Framework<br>for DXY, Gold (XAU/USD), and Oil (WTI/Brent)<br>Built Exclusively on Free, Open Data Sources</div>
+  <div class="meta">
+    Version 1.0 &mdash; June 2026<br>
+    Classification: PERSONAL PROPRIETARY METHODOLOGY<br>
+    Research Basis: Peer-Reviewed Financial Literature Only<br>
+  </div>
+  <div class="classification">CONFIDENTIAL &mdash; NOT FOR DISTRIBUTION</div>
+</div>
+
+<!-- ====== TABLE OF CONTENTS ====== -->
+<div class="toc">
+  <h2>Table of Contents</h2>
+  <ul>
+    <li>1. Executive Summary &amp; Philosophy <span>3</span></li>
+    <li>2. Complete Data Source Registry <span>4</span></li>
+    <li>3. Layer 1 &mdash; Macro Regime Identification <span>6</span></li>
+    <li>4. Layer 2 &mdash; Structural Flow Analysis <span>9</span></li>
+    <li>5. Layer 3 &mdash; Cross-Asset Correlation State <span>12</span></li>
+    <li>6. Layer 4 &mdash; Positioning &amp; Sentiment Extremes <span>15</span></li>
+    <li>7. Layer 5 &mdash; Intraday Microstructure &amp; Timing <span>18</span></li>
+    <li>8. Layer 6 &mdash; The Synthesis Engine <span>21</span></li>
+    <li>9. Daily Pre-Market Briefing Template <span>24</span></li>
+    <li>10. Worked Example A &mdash; DXY Setup (June 2026) <span>27</span></li>
+    <li>11. Worked Example B &mdash; Gold Setup (Jan&ndash;Jun 2026) <span>29</span></li>
+    <li>12. Worked Example C &mdash; Oil Setup (Jan&ndash;Jun 2026) <span>31</span></li>
+    <li>13. Future Automation Map <span>33</span></li>
+    <li>14. Academic References <span>34</span></li>
+  </ul>
+</div>
+
+<!-- ====== SECTION 1: EXECUTIVE SUMMARY ====== -->
+<div class="page-break"></div>
+<h2>1. Executive Summary &amp; Philosophy</h2>
+
+<h3>1.1 The Core Thesis</h3>
+<p>The Dollar Index (DXY), Gold (XAU/USD), and Oil (WTI/Brent) form a <strong>coupled tripartite system</strong> governed by macro regime states, institutional flows, and cross-asset causal dynamics. Peer-reviewed research establishes that:</p>
+<ul>
+  <li><strong>Granger causality runs from DXY to both Gold and Oil</strong> (Zhang et al., Economics Bulletin; MPRA Paper 31795). The dollar statistically precedes commodity price movements.</li>
+  <li><strong>Simultaneous equation models</strong> confirm oil prices are significantly affected by gold, the USD exchange rate, and equity markets concurrently (Baffes &amp; Hossain, MPRA Paper 70452).</li>
+  <li><strong>Regime-switching dynamics</strong> govern gold and commodity behavior &mdash; a single static model fails across different market states (Hamilton, 1989; IJFR, 2021).</li>
+  <li><strong>Real yields (10Y TIPS)</strong> have a documented strong inverse relationship with gold prices (University of Malta, 2025; PIMCO, 2025).</li>
+  <li><strong>Cross-asset correlation breakdowns</strong> cluster around crisis events and regime transitions (JDACM, 2025).</li>
+</ul>
+
+<h3>1.2 The Irreducible Edge</h3>
+<p>Every data source and formula in this protocol is publicly available. The un-replicable component is <strong>Layer 6: your personal synthesis engine</strong> &mdash; the way you weight conflicting signals, resolve ambiguities between layers, and assign conviction scores. This is a cognitive skill developed through deliberate repetition, not a purchased tool.</p>
+
+<h3>1.3 Design Principles</h3>
+<ul>
+  <li><strong>Free data only:</strong> No Bloomberg, no Reuters Eikon, no premium feeds.</li>
+  <li><strong>Manual-first:</strong> Every step is executable with pen, paper, spreadsheet, and a browser.</li>
+  <li><strong>Programmable-later:</strong> Layers 1&ndash;5 contain rule-based logic suitable for future software encoding.</li>
+  <li><strong>Regime-aware:</strong> No single strategy applies in all conditions. The framework adapts.</li>
+  <li><strong>Research-grounded:</strong> Every formula and threshold traces to peer-reviewed literature.</li>
+</ul>
+
+<!-- ====== SECTION 2: DATA SOURCE REGISTRY ====== -->
+<div class="page-break"></div>
+<h2>2. Complete Data Source Registry</h2>
+
+<table class="signal-table">
+  <thead>
+    <tr><th>#</th><th>Source</th><th>Data Provided</th><th>URL</th><th>Freq.</th><th>Layer</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>FRED (St. Louis Fed)</td><td>845,000+ economic series: yields, spreads, GDP, CPI, Fed Funds, real rates</td><td>https://fred.stlouisfed.org</td><td>Daily/Monthly</td><td>1</td></tr>
+    <tr><td>2</td><td>FRED: DFII10</td><td>10-Year TIPS real yield (market yield)</td><td>https://fred.stlouisfed.org/series/DFII10</td><td>Daily</td><td>1,3</td></tr>
+    <tr><td>3</td><td>FRED: REAINTRATREARAT10Y</td><td>10-Year Real Interest Rate (Cleveland Fed)</td><td>https://fred.stlouisfed.org/series/REAINTRATREARAT10Y</td><td>Monthly</td><td>1</td></tr>
+    <tr><td>4</td><td>FRED: T10Y2Y</td><td>10Y-2Y Treasury spread (yield curve slope)</td><td>https://fred.stlouisfed.org/series/T10Y2Y</td><td>Daily</td><td>1</td></tr>
+    <tr><td>5</td><td>FRED: BAMLH0A0HYM2</td><td>US High Yield OAS (credit spread)</td><td>https://fred.stlouisfed.org/series/BAMLH0A0HYM2</td><td>Daily</td><td>1</td></tr>
+    <tr><td>6</td><td>FRED: VIXCLS</td><td>CBOE VIX (implied equity volatility)</td><td>https://fred.stlouisfed.org/series/VIXCLS</td><td>Daily</td><td>1</td></tr>
+    <tr><td>7</td><td>CBOE</td><td>VIX term structure, VVIX</td><td>https://www.cboe.com/delayed_quotes/vix/quote_table</td><td>Daily</td><td>1</td></tr>
+    <tr><td>8</td><td>CFTC COT Reports</td><td>Weekly futures positioning by trader category</td><td>https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm</td><td>Weekly (Fri)</td><td>2,4</td></tr>
+    <tr><td>9</td><td>IMF COFER</td><td>Currency composition of official FX reserves</td><td>https://data.imf.org/en/datasets/IMF.STA:COFER</td><td>Quarterly</td><td>2</td></tr>
+    <tr><td>10</td><td>World Gold Council</td><td>Central bank gold demand, ETF flows</td><td>https://www.gold.org/goldhub/data</td><td>Monthly/Qtrly</td><td>2,4</td></tr>
+    <tr><td>11</td><td>EIA</td><td>Weekly petroleum status report (inventories)</td><td>https://www.eia.gov/petroleum/data.php</td><td>Weekly (Wed)</td><td>4</td></tr>
+    <tr><td>12</td><td>Yahoo Finance</td><td>Historical OHLCV for DXY, Gold, Oil, Copper, SPX</td><td>https://finance.yahoo.com</td><td>Daily/Intraday</td><td>3,5</td></tr>
+    <tr><td>13</td><td>TradingView (Free)</td><td>Charts, volume profile, economic calendar</td><td>https://www.tradingview.com</td><td>Real-time*</td><td>5</td></tr>
+    <tr><td>14</td><td>Investing.com</td><td>Historical data, economic calendar, COT charts</td><td>https://www.investing.com</td><td>Daily</td><td>4,5</td></tr>
+    <tr><td>15</td><td>ForexFactory</td><td>Economic calendar with impact ratings</td><td>https://www.forexfactory.com/calendar</td><td>Real-time</td><td>5</td></tr>
+    <tr><td>16</td><td>Federal Reserve</td><td>H.15 selected interest rates, FOMC statements</td><td>https://www.federalreserve.gov/releases/h15/</td><td>Daily</td><td>1</td></tr>
+    <tr><td>17</td><td>NY Fed</td><td>Yield curve recession probability model</td><td>https://www.newyorkfed.org/research/capital_markets/ycfaq</td><td>Monthly</td><td>1</td></tr>
+    <tr><td>18</td><td>BIS Statistics</td><td>FX turnover, cross-border flows, credit</td><td>https://www.bis.org/statistics/</td><td>Qtrly/3-Year</td><td>2</td></tr>
+    <tr><td>19</td><td>GLD ETF (State Street)</td><td>Gold ETF daily holdings &amp; NAV</td><td>https://www.spdrgoldshares.com</td><td>Daily</td><td>4</td></tr>
+    <tr><td>20</td><td>CME Group</td><td>Futures specifications, COT visualization</td><td>https://www.cmegroup.com</td><td>Daily</td><td>2,5</td></tr>
+  </tbody>
+</table>
+<p><em>* TradingView free tier has 15-min delay on some exchanges; sufficient for daily/swing analysis and volume profile on daily charts.</em></p>
+
+<!-- ====== SECTION 3: LAYER 1 ====== -->
+<div class="page-break"></div>
+<h2>3. Layer 1 &mdash; Macro Regime Identification</h2>
+<p><em>Research basis: Hamilton (1989) Markov regime-switching models; IJFR (2021) gold regime-switching framework; arXiv (2025) tactical asset allocation with macro regime detection; MDPI (2025) VIX futures term structure.</em></p>
+
+<h3>3.1 The Four Macro Regimes</h3>
+<table class="signal-table">
+  <thead>
+    <tr><th>Regime</th><th>Description</th><th>DXY Behavior</th><th>Gold Behavior</th><th>Oil Behavior</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>R1: Risk-On Expansion</strong></td><td>Growing economy, low vol, credit tightening gradually</td><td>Moderate strength (carry trade)</td><td>Range-bound / weak</td><td>Rising (demand growth)</td></tr>
+    <tr><td><strong>R2: Risk-On Late-Cycle</strong></td><td>Overheating, rising inflation, tightening cycle</td><td>Peak then weakens</td><td>Rising (inflation hedge)</td><td>Strong (supply tight)</td></tr>
+    <tr><td><strong>R3: Risk-Off Contraction</strong></td><td>Recession fears, credit widening, vol spikes</td><td>Strong (safe haven bid)</td><td>Strong (fear hedge)</td><td>Weak (demand destruction)</td></tr>
+    <tr><td><strong>R4: Crisis / Liquidity Shock</strong></td><td>Systemic stress, all correlations break, flight to USD cash</td><td>Spike higher violently</td><td>Initially sells off (margin calls), then rallies</td><td>Crashes (demand collapse)</td></tr>
+  </tbody>
+</table>
+
+<h3>3.2 Regime Classification Formula</h3>
+<p>Compute the <strong>Regime Score</strong> from four standardized indicators. Each indicator is scored 0&ndash;3 based on thresholds derived from Hamilton&rsquo;s two-state model (high-vol/low-vol) extended to four states via quantile-based classification:</p>
+
+<div class="formula-box">
+<strong>VIX Level Score:</strong><br>
+&nbsp;&nbsp;0 = VIX &lt; 15 &nbsp;(complacency)<br>
+&nbsp;&nbsp;1 = 15 &le; VIX &lt; 20 &nbsp;(normal)<br>
+&nbsp;&nbsp;2 = 20 &le; VIX &lt; 30 &nbsp;(elevated fear)<br>
+&nbsp;&nbsp;3 = VIX &ge; 30 &nbsp;(stress/crisis)<br><br>
+
+<strong>VIX Term Structure Score:</strong><br>
+&nbsp;&nbsp;Contango (VIX futures &gt; spot) = 0 (normal)<br>
+&nbsp;&nbsp;Flat = 1<br>
+&nbsp;&nbsp;Backwardation (VIX futures &lt; spot) = 2&ndash;3 (fear is NOW, not future)<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Mild backwardation (&lt;5% inversion) = 2<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Deep backwardation (&ge;5% inversion) = 3<br><br>
+
+<strong>Yield Curve Score (10Y-2Y spread):</strong><br>
+&nbsp;&nbsp;0 = Spread &gt; +100bps &nbsp;(steep curve, early cycle)<br>
+&nbsp;&nbsp;1 = +25bps to +100bps &nbsp;(normal)<br>
+&nbsp;&nbsp;2 = -25bps to +25bps &nbsp;(flattening, late cycle)<br>
+&nbsp;&nbsp;3 = Spread &lt; -25bps &nbsp;(inverted, recession signal)<br><br>
+
+<strong>Credit Spread Score (HY OAS):</strong><br>
+&nbsp;&nbsp;0 = OAS &lt; 350bps &nbsp;(tight, benign)<br>
+&nbsp;&nbsp;1 = 350&ndash;500bps &nbsp;(normal)<br>
+&nbsp;&nbsp;2 = 500&ndash;700bps &nbsp;(stress)<br>
+&nbsp;&nbsp;3 = OAS &gt; 700bps &nbsp;(crisis/distress)
+</div>
+
+<div class="formula-box">
+<strong>Composite Regime Score = VIX_Score + VIX_Term_Score + Yield_Score + Credit_Score</strong><br><br>
+Range: 0&ndash;12<br><br>
+<strong>Classification:</strong><br>
+&nbsp;&nbsp;0&ndash;3 &nbsp;&rarr; <strong>R1: Risk-On Expansion</strong><br>
+&nbsp;&nbsp;4&ndash;6 &nbsp;&rarr; <strong>R2: Risk-On Late-Cycle</strong><br>
+&nbsp;&nbsp;7&ndash;9 &nbsp;&rarr; <strong>R3: Risk-Off Contraction</strong><br>
+&nbsp;&nbsp;10&ndash;12 &rarr; <strong>R4: Crisis / Liquidity Shock</strong>
+</div>
+
+<h3>3.3 Real Yields Overlay (Gold-Specific)</h3>
+<p>Research from the University of Malta (2025) and PIMCO (2025) establishes that <strong>10-year TIPS real yields</strong> are the single most powerful macro driver of gold&rsquo;s medium-term direction:</p>
+<div class="formula-box">
+<strong>Real Yield Regime for Gold:</strong><br>
+&nbsp;&nbsp;Real yield &lt; 0% &nbsp;&rarr; Gold STRONGLY BULLISH (negative real cost of holding gold)<br>
+&nbsp;&nbsp;0% &le; Real yield &lt; 1% &nbsp;&rarr; Gold BULLISH<br>
+&nbsp;&nbsp;1% &le; Real yield &lt; 2% &nbsp;&rarr; Gold NEUTRAL (gold can rally but faces headwind)<br>
+&nbsp;&nbsp;Real yield &ge; 2% &nbsp;&rarr; Gold BEARISH (high opportunity cost, unless overridden<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;by central bank buying or geopolitical premium)
+</div>
+<p><em>Current (June 2026): 10Y TIPS yield at 2.20% &mdash; formally BEARISH for gold, yet gold trades at $4,246 due to the central bank demand override (see Layer 2).</em></p>
+
+<div class="source-box">
+<strong>Free Data Access:</strong> FRED series <a href="https://fred.stlouisfed.org/series/DFII10">DFII10</a> (daily 10Y TIPS market yield), <a href="https://fred.stlouisfed.org/series/VIXCLS">VIXCLS</a> (CBOE VIX), <a href="https://fred.stlouisfed.org/series/T10Y2Y">T10Y2Y</a> (10Y-2Y spread), <a href="https://fred.stlouisfed.org/series/BAMLH0A0HYM2">BAMLH0A0HYM2</a> (HY OAS).
+</div>
+
+<h3>3.4 Layer 1 Output</h3>
+<p>Your Layer 1 output is a single line written at the top of every briefing:</p>
+<div class="formula-box">
+REGIME: [R1|R2|R3|R4] (Score: X/12) | Real Yield: Y% | Regime Duration: Z weeks
+</div>
+
+<!-- ====== SECTION 4: LAYER 2 ====== -->
+<div class="page-break"></div>
+<h2>4. Layer 2 &mdash; Structural Flow Analysis</h2>
+<p><em>Research basis: BIS Working Paper 828 on currency composition of FX reserves; IMF COFER data; WisdomTree (2025) on central bank gold vs. Treasury holdings; CFTC COT report literature.</em></p>
+
+<h3>4.1 COT (Commitment of Traders) Analysis</h3>
+<p>The CFTC publishes weekly positioning data every Friday, showing where different trader categories stand as of Tuesday&rsquo;s close. This is the <strong>closest free proxy to institutional positioning</strong> available.</p>
+
+<h4>4.1.1 Key COT Metrics</h4>
+<div class="formula-box">
+<strong>Net Position = Long Contracts &minus; Short Contracts</strong><br><br>
+
+<strong>For each instrument (DXY futures, Gold futures, WTI futures):</strong><br>
+&nbsp;&nbsp;Commercial Net Position = Commercial Longs &minus; Commercial Shorts<br>
+&nbsp;&nbsp;Non-Commercial Net Position = Non-Comm Longs &minus; Non-Comm Shorts<br><br>
+
+<strong>COT Index (Williams, 1987):</strong><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Current Net Position &minus; Min(Net Position, N weeks)<br>
+COT_Index = &minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus; &times; 100<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Max(Net Position, N weeks) &minus; Min(Net Position, N weeks)<br><br>
+
+Where N = 156 weeks (3 years) or 260 weeks (5 years).<br>
+Range: 0 to 100.
+</div>
+
+<h4>4.1.2 COT Index Interpretation</h4>
+<table class="signal-table">
+  <thead><tr><th>COT Index (Non-Commercials)</th><th>Signal</th><th>Action Bias</th></tr></thead>
+  <tbody>
+    <tr><td>&gt; 80</td><td>Speculators extremely net long</td><td class="bearish">BEARISH &mdash; crowded long, reversal risk</td></tr>
+    <tr><td>60&ndash;80</td><td>Speculators moderately long</td><td class="neutral">NEUTRAL</td></tr>
+    <tr><td>20&ndash;60</td><td>Speculators balanced</td><td class="neutral">NEUTRAL</td></tr>
+    <tr><td>0&ndash;20</td><td>Speculators extremely net short</td><td class="bullish">BULLISH &mdash; crowded short, squeeze potential</td></tr>
+  </tbody>
+</table>
+
+<div class="alert-box">
+<strong>Key Insight:</strong> The <em>divergence</em> between commercial and non-commercial COT Index is more powerful than either alone. When Commercials COT Index &gt; 60 (they are buying) while Non-Commercials COT Index &lt; 20 (specs are selling), this is the strongest contrarian bullish signal &mdash; smart money is accumulating while the crowd is panicking.
+</div>
+
+<h3>4.2 Central Bank Reserve Flows</h3>
+<p>The IMF COFER data reveals how central banks allocate reserves between USD and gold. The historic 2025 shift where central banks held more gold than US Treasuries for the first time represents a <strong>structural dollar de-accumulation trend</strong> that overrides traditional real-yield signals for gold.</p>
+
+<div class="formula-box">
+<strong>Central Bank Gold Demand Intensity:</strong><br>
+&nbsp;&nbsp;Track quarterly central bank net purchases (tonnes) from World Gold Council<br>
+&nbsp;&nbsp;If quarterly purchases &gt; 200 tonnes &rarr; STRUCTURAL GOLD BID (overrides real yield headwind)<br>
+&nbsp;&nbsp;If quarterly purchases &lt; 100 tonnes &rarr; Gold must rely on other drivers<br><br>
+
+<strong>USD Reserve Share Trend:</strong><br>
+&nbsp;&nbsp;COFER USD share declining QoQ &rarr; STRUCTURAL USD BEARISH<br>
+&nbsp;&nbsp;COFER USD share stable/rising &rarr; USD supported by reserve demand
+</div>
+
+<h3>4.3 Layer 2 Output</h3>
+<div class="formula-box">
+STRUCTURAL FLOWS:<br>
+&nbsp;&nbsp;DXY COT: Comm=[X] NonComm=[Y] Index=[Z] | Interpretation: [signal]<br>
+&nbsp;&nbsp;Gold COT: Comm=[X] NonComm=[Y] Index=[Z] | Interpretation: [signal]<br>
+&nbsp;&nbsp;Oil COT:&nbsp; Comm=[X] NonComm=[Y] Index=[Z] | Interpretation: [signal]<br>
+&nbsp;&nbsp;CB Gold Demand: [Q] tonnes | USD Reserve Share: [X]% ([trend])<br>
+&nbsp;&nbsp;Flow Verdict: [BULLISH/BEARISH/NEUTRAL] for [DXY/Gold/Oil]
+</div>
+
+<div class="source-box">
+<strong>Free Data Access:</strong> <a href="https://www.cftc.gov/MarketReports/CommitmentsofTraders/index.htm">CFTC COT Reports</a> (weekly), <a href="https://data.imf.org/en/datasets/IMF.STA:COFER">IMF COFER</a> (quarterly), <a href="https://www.gold.org/goldhub/data">World Gold Council</a> (monthly/quarterly).
+</div>
+
+<!-- ====== SECTION 5: LAYER 3 ====== -->
+<div class="page-break"></div>
+<h2>5. Layer 3 &mdash; Cross-Asset Correlation State</h2>
+<p><em>Research basis: JDACM (2025) cross-asset correlation shifts in crises; MPRA (2025) DXY-gold-oil interdependencies; MDPI (2025) transfer entropy causal networks with 240-day rolling windows.</em></p>
+
+<h3>5.1 The Correlation Matrix</h3>
+<p>Maintain a <strong>rolling Pearson correlation matrix</strong> computed from daily log returns. The research literature uses rolling windows of 60 days (3 months) for tactical analysis and 240 days (1 year) for structural analysis (MDPI, 2025).</p>
+
+<div class="formula-box">
+<strong>Daily Log Return:</strong><br>
+&nbsp;&nbsp;r_t = ln(P_t / P_{t-1})<br><br>
+
+<strong>Rolling Pearson Correlation (60-day window):</strong><br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &Sigma;[(r_X,i &minus; r&#772;_X)(r_Y,i &minus; r&#772;_Y)]<br>
+&nbsp;&nbsp;&rho;(X,Y) = &minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;&minus;<br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; &radic;[&Sigma;(r_X,i &minus; r&#772;_X)&sup2;] &times; &radic;[&Sigma;(r_Y,i &minus; r&#772;_Y)&sup2;]<br><br>
+
+Where i ranges over the most recent 60 trading days.<br><br>
+
+<strong>Compute for all pairs:</strong><br>
+&nbsp;&nbsp;&rho;(DXY, Gold), &rho;(DXY, Oil), &rho;(Gold, Oil)<br>
+&nbsp;&nbsp;&rho;(DXY, US10Y), &rho;(Gold, US10Y), &rho;(Gold, SPX)<br>
+&nbsp;&nbsp;&rho;(Oil, SPX), &rho;(Gold, Copper)
+</div>
+
+<h3>5.2 Correlation Regime Classification</h3>
+<table class="signal-table">
+  <thead><tr><th>Pair</th><th>Normal Range</th><th>Breakdown Signal</th><th>What Breakdown Means</th></tr></thead>
+  <tbody>
+    <tr><td>DXY &harr; Gold</td><td>&minus;0.5 to &minus;0.8</td><td>&gt; &minus;0.3 or positive</td><td>Gold being driven by non-dollar factors (CB demand, geopolitics)</td></tr>
+    <tr><td>DXY &harr; Oil</td><td>&minus;0.2 to &minus;0.5</td><td>&gt; &minus;0.1 or positive</td><td>Oil driven by supply shock, not demand/dollar</td></tr>
+    <tr><td>Gold &harr; Oil</td><td>+0.2 to +0.5</td><td>&lt; 0 (negative)</td><td>Stagflation signal or regime transition</td></tr>
+    <tr><td>Gold &harr; Copper</td><td>+0.3 to +0.6</td><td>Strong divergence</td><td>Growth vs. fear are decoupling</td></tr>
+    <tr><td>Gold &harr; Real Yields</td><td>&minus;0.7 to &minus;0.9</td><td>&gt; &minus;0.5 (correlation weakening)</td><td>Gold has non-yield driver (structural CB bid)</td></tr>
+  </tbody>
+</table>
+
+<div class="alert-box">
+<strong>Critical Rule:</strong> When TWO or more pairs show simultaneous correlation breakdown, this is a <strong>regime transition signal</strong> &mdash; it means the current regime (from Layer 1) is about to change. This is the highest-value signal in the entire framework. Do NOT trade the old regime; prepare for the new one.
+</div>
+
+<h3>5.3 Correlation Velocity (Rate of Change)</h3>
+<p>Beyond the static correlation value, track how fast correlations are changing:</p>
+<div class="formula-box">
+<strong>Correlation Velocity = &rho;_current &minus; &rho;_4weeks_ago</strong><br><br>
+
+If &Delta;&rho; &gt; +0.3 in 4 weeks for any pair &rarr; RAPID CORRELATION SHIFT (regime stress)<br>
+If &Delta;&rho; &lt; &minus;0.3 in 4 weeks &rarr; CORRELATION UNRAVELING (regime stress)
+</div>
+
+<h3>5.4 Layer 3 Output</h3>
+<div class="formula-box">
+CORRELATION STATE:<br>
+&nbsp;&nbsp;DXY-Gold: [&rho;] (60d) | Velocity: [&Delta;] | State: [NORMAL|BREAKDOWN|SHIFTING]<br>
+&nbsp;&nbsp;DXY-Oil:&nbsp; [&rho;] (60d) | Velocity: [&Delta;] | State: [NORMAL|BREAKDOWN|SHIFTING]<br>
+&nbsp;&nbsp;Gold-Oil:&nbsp; [&rho;] (60d) | Velocity: [&Delta;] | State: [NORMAL|BREAKDOWN|SHIFTING]<br>
+&nbsp;&nbsp;Gold-Copper: [&rho;] (60d) | Velocity: [&Delta;] | State: [NORMAL|BREAKDOWN|SHIFTING]<br>
+&nbsp;&nbsp;Multi-Pair Breakdown Count: [N] | Regime Transition Alert: [YES/NO]<br>
+&nbsp;&nbsp;Correlation Verdict: [STABLE|STRAINING|TRANSITIONING]
+</div>
+
+<div class="source-box">
+<strong>Free Data Access:</strong> Download daily OHLCV from <a href="https://finance.yahoo.com">Yahoo Finance</a> (DXY: DX-Y.NYB, Gold: GC=F, Oil: CL=F, Copper: HG=F, SPX: ^GSPC). Compute in Google Sheets or any free spreadsheet tool. US 10Y yield from FRED series <a href="https://fred.stlouisfed.org/series/DGS10">DGS10</a>.
+</div>
+
+<!-- ====== SECTION 6: LAYER 4 ====== -->
+<div class="page-break"></div>
+<h2>6. Layer 4 &mdash; Positioning &amp; Sentiment Extremes</h2>
+<p><em>Research basis: LUISS thesis (Pecchiari) on orderflow imbalance and trading strategies; academic COT literature on commercial vs. speculative behavior; EIA petroleum market microstructure.</em></p>
+
+<h3>6.1 Sentiment Dashboard</h3>
+<p>Layer 4 extends Layer 2&rsquo;s COT analysis with additional sentiment indicators to detect <strong>crowded positioning and extreme sentiment</strong>:</p>
+
+<table class="signal-table">
+  <thead><tr><th>Indicator</th><th>Bullish Extreme</th><th>Bearish Extreme</th><th>Source</th></tr></thead>
+  <tbody>
+    <tr><td>COT Index (Non-Comm, Gold)</td><td>&lt; 10 (extremely short)</td><td>&gt; 90 (extremely long)</td><td>CFTC</td></tr>
+    <tr><td>COT Index (Non-Comm, Oil)</td><td>&lt; 10</td><td>&gt; 90</td><td>CFTC</td></tr>
+    <tr><td>COT Index (Non-Comm, DXY)</td><td>&lt; 10</td><td>&gt; 90</td><td>CFTC</td></tr>
+    <tr><td>GLD ETF Flows (5-day)</td><td>Large net outflows (&gt;10t/week)</td><td>Large net inflows (&gt;10t/week)</td><td>SPDR Gold</td></tr>
+    <tr><td>EIA Crude Inventories (WoW)</td><td>Large draw (&gt;5M bbl)</td><td>Large build (&gt;5M bbl)</td><td>EIA</td></tr>
+    <tr><td>Put/Call Ratio (CME Gold)</td><td>&gt; 1.2 (fear/oversold)</td><td>&lt; 0.5 (greed/overbought)</td><td>CME</td></tr>
+    <tr><td>DXY Futures Open Interest Change</td><td>OI rising + price falling (accumulation)</td><td>OI rising + price rising (crowded long)</td><td>CME</td></tr>
+  </tbody>
+</table>
+
+<h3>6.2 Sentiment Score Computation</h3>
+<div class="formula-box">
+<strong>Composite Sentiment Score:</strong><br>
+Assign each indicator a value: +1 (extreme bullish/crowded long), 0 (neutral), &minus;1 (extreme bearish/crowded short)<br><br>
+
+Sentiment_Score = Sum of all indicator values / Number of indicators<br><br>
+
+Range: &minus;1.0 to +1.0<br><br>
+
+<strong>Interpretation (Contrarian):</strong><br>
+&nbsp;&nbsp;Score &gt; +0.6 &nbsp;&rarr; EXTREME BULLISH CROWDING &rarr; Contrarian BEARISH signal<br>
+&nbsp;&nbsp;Score +0.3 to +0.6 &rarr; Moderately crowded long &rarr; Caution on longs<br>
+&nbsp;&nbsp;Score &minus;0.3 to +0.3 &rarr; Balanced positioning &rarr; No contrarian signal<br>
+&nbsp;&nbsp;Score &minus;0.6 to &minus;0.3 &rarr; Moderately crowded short &rarr; Caution on shorts<br>
+&nbsp;&nbsp;Score &lt; &minus;0.6 &nbsp;&rarr; EXTREME BEARISH CROWDING &rarr; Contrarian BULLISH signal
+</div>
+
+<h3>6.3 Open Interest Divergence</h3>
+<p>A powerful institutional signal that requires no premium data:</p>
+<div class="formula-box">
+<strong>Price-Rising + OI-Rising = New longs entering (trend continuation)</strong><br>
+<strong>Price-Rising + OI-Falling = Short covering (weak rally, reversal likely)</strong><br>
+<strong>Price-Falling + OI-Rising = New shorts entering (trend continuation)</strong><br>
+<strong>Price-Falling + OI-Falling = Long liquidation (selling exhaustion likely)</strong>
+</div>
+
+<h3>6.4 Layer 4 Output</h3>
+<div class="formula-box">
+POSITIONING &amp; SENTIMENT:<br>
+&nbsp;&nbsp;Gold: COT_Idx=[X] | ETF_Flow=[Y]t | P/C=[Z] | OI_Div=[type] | Sent=[score]<br>
+&nbsp;&nbsp;Oil:&nbsp; COT_Idx=[X] | EIA_Inv=[Y]M | P/C=[Z] | OI_Div=[type] | Sent=[score]<br>
+&nbsp;&nbsp;DXY:&nbsp; COT_Idx=[X] | OI_Change=[Y] | OI_Div=[type] | Sent=[score]<br>
+&nbsp;&nbsp;Contrarian Signal: [BULLISH/BEARISH/NONE] for [instrument]<br>
+&nbsp;&nbsp;Positioning Verdict: [CROWDED_LONG|CROWDED_SHORT|BALANCED]
+</div>
+
+<!-- ====== SECTION 7: LAYER 5 ====== -->
+<div class="page-break"></div>
+<h2>7. Layer 5 &mdash; Intraday Microstructure &amp; Timing</h2>
+<p><em>Research basis: SSRN (2024) intraday trading activity and liquidity in WTI/Brent crude; Kobe University gold market microstructure analysis; BIS CGFS Publication 11 on market liquidity frameworks.</em></p>
+
+<h3>7.1 Session Liquidity Map</h3>
+<table class="signal-table">
+  <thead><tr><th>Session</th><th>Hours (ET)</th><th>DXY Liquidity</th><th>Gold Liquidity</th><th>Oil Liquidity</th></tr></thead>
+  <tbody>
+    <tr><td>Tokyo Open</td><td>7:00 PM &ndash; 11:00 PM (prev day)</td><td>Low</td><td>Low</td><td>Low-Medium</td></tr>
+    <tr><td>Shanghai Open</td><td>9:00 PM &ndash; 2:00 AM</td><td>Low-Medium</td><td>Medium (SGE)</td><td>Medium (INE)</td></tr>
+    <tr><td>London Open</td><td>3:00 AM &ndash; 7:00 AM</td><td>High</td><td>High</td><td>Medium-High</td></tr>
+    <tr><td><strong>London-NY Overlap</strong></td><td><strong>8:00 AM &ndash; 12:00 PM</strong></td><td><strong>Peak</strong></td><td><strong>Peak</strong></td><td><strong>High</strong></td></tr>
+    <tr><td>NYMEX Pit Hours</td><td>9:00 AM &ndash; 2:30 PM</td><td>High</td><td>High</td><td><strong>Peak</strong></td></tr>
+    <tr><td>Afternoon (NY)</td><td>2:30 PM &ndash; 5:00 PM</td><td>Declining</td><td>Declining</td><td>Declining</td></tr>
+    <tr><td>Globex Evening</td><td>6:00 PM &ndash; 8:00 PM</td><td>Low</td><td>Low-Medium</td><td>Low-Medium</td></tr>
+  </tbody>
+</table>
+
+<div class="alert-box">
+<strong>Trading Window Rule:</strong> Execute your highest-conviction trades during the <strong>London-NY Overlap (8AM&ndash;12PM ET)</strong> for DXY and Gold, and during <strong>NYMEX Pit Hours (9AM&ndash;2:30PM ET)</strong> for Oil. Outside these windows, spreads widen and slippage increases. Never execute a high-conviction setup during Tokyo/Asian session unless a geopolitical event forces it.
+</div>
+
+<h3>7.2 Volume Profile Analysis</h3>
+<p>Using TradingView&rsquo;s free Volume Profile indicator on daily charts:</p>
+<div class="formula-box">
+<strong>Point of Control (POC):</strong> The price level with the highest traded volume in the lookback period<br>
+&nbsp;&nbsp;&rarr; Institutions accumulate at POC. Price tends to revert to POC when directionless.<br><br>
+
+<strong>High Volume Nodes (HVN):</strong> Price levels with above-average volume concentration<br>
+&nbsp;&nbsp;&rarr; Act as support/resistance. Price slows and consolidates at HVNs.<br><br>
+
+<strong>Low Volume Nodes (LVN):</strong> Price levels with below-average volume<br>
+&nbsp;&nbsp;&rarr; Price accelerates through LVNs. These are "thin" areas where moves are fast.<br><br>
+
+<strong>Value Area (VA):</strong> The price range containing 70% of the total volume<br>
+&nbsp;&nbsp;Value Area High (VAH) = upper boundary &rarr; resistance<br>
+&nbsp;&nbsp;Value Area Low (VAL) = lower boundary &rarr; support<br><br>
+
+<strong>Lookback Periods:</strong><br>
+&nbsp;&nbsp;Intraday scalps: Previous day&rsquo;s volume profile<br>
+&nbsp;&nbsp;Day trades: Previous week&rsquo;s volume profile<br>
+&nbsp;&nbsp;Swing trades: Previous month&rsquo;s volume profile
+</div>
+
+<h3>7.3 Economic Event Calendar Protocol</h3>
+<p>Before each session, identify all <strong>high-impact events</strong> from ForexFactory or Investing.com. The protocol for each event:</p>
+<div class="formula-box">
+<strong>Pre-Event (T-30 min):</strong><br>
+&nbsp;&nbsp;Reduce position size by 50% or close intraday positions entirely.<br>
+&nbsp;&nbsp;Record pre-event levels: DXY, Gold, Oil, VIX.<br><br>
+
+<strong>Event Execution (T+0 to T+5 min):</strong><br>
+&nbsp;&nbsp;DO NOT TRADE. This is where spreads blow out and stops get hunted.<br>
+&nbsp;&nbsp;Observe the initial reaction direction and magnitude.<br><br>
+
+<strong>Post-Event (T+5 to T+30 min):</strong><br>
+&nbsp;&nbsp;If the reaction aligns with your Layer 1&ndash;4 thesis &rarr; Enter on the first pullback.<br>
+&nbsp;&nbsp;If the reaction contradicts your thesis &rarr; Stand aside, reassess.<br>
+&nbsp;&nbsp;If the reaction is muted (priced in) &rarr; The market has already moved; wait for next catalyst.
+</div>
+
+<h3>7.4 Key Economic Events for DXY/Gold/Oil</h3>
+<table class="signal-table">
+  <thead><tr><th>Event</th><th>Frequency</th><th>Primary Impact</th><th>Secondary Impact</th></tr></thead>
+  <tbody>
+    <tr><td>FOMC Rate Decision &amp; Statement</td><td>8x/year</td><td>DXY</td><td>Gold, Oil (via rate expectations)</td></tr>
+    <tr><td>FOMC Press Conference</td><td>8x/year</td><td>DXY</td><td>Gold (dovish=hawkish for gold)</td></tr>
+    <tr><td>Non-Farm Payrolls (NFP)</td><td>1st Friday/month</td><td>DXY</td><td>Gold (via rate expectations)</td></tr>
+    <tr><td>CPI / PCE Inflation</td><td>Monthly</td><td>DXY, Gold</td><td>Oil (via demand signal)</td></tr>
+    <tr><td>EIA Crude Inventories</td><td>Every Wednesday</td><td>Oil</td><td>Minimal on DXY/Gold</td></tr>
+    <tr><td>OPEC+ Meetings</td><td>Monthly</td><td>Oil</td><td>DXY (via petrodollar flows)</td></tr>
+    <tr><td>US GDP (Advance)</td><td>Quarterly</td><td>DXY</td><td>Gold, Oil</td></tr>
+    <tr><td>ECB Rate Decision</td><td>6x/year</td><td>DXY (via EUR weighting)</td><td>Gold</td></tr>
+  </tbody>
+</table>
+
+<h3>7.5 Layer 5 Output</h3>
+<div class="formula-box">
+INTRADAY PLAN:<br>
+&nbsp;&nbsp;Session Window: [session] ([hours ET])<br>
+&nbsp;&nbsp;Key Levels &mdash; DXY: POC=[X] VAH=[X] VAL=[X] | Gold: POC=[X] VAH=[X] VAL=[X] | Oil: POC=[X] VAH=[X] VAL=[X]<br>
+&nbsp;&nbsp;Economic Events Today: [list with times ET]<br>
+&nbsp;&nbsp;Event Protocol: [PRE/POST/WAIT] for [event]<br>
+&nbsp;&nbsp;Execution Bias: [BUY dips|SELL rallies|RANGE trade|STAND ASIDE]
+</div>
+
+<!-- ====== SECTION 8: LAYER 6 ====== -->
+<div class="page-break"></div>
+<h2>8. Layer 6 &mdash; The Synthesis Engine</h2>
+<p><em>This layer is your proprietary cognitive process. It has no single research citation because it is the product of YOUR pattern recognition, risk tolerance, and decision-making style. Below is the structured protocol that you internalize through repetition.</em></p>
+
+<h3>8.1 The Synthesis Protocol</h3>
+<p>Every trading day, after completing Layers 1&ndash;5, execute this 5-step synthesis:</p>
+
+<h4>Step 1: Determine the Dominant Layer</h4>
+<p>Not all layers carry equal weight at all times. Use this regime-dependent weighting:</p>
+<div class="decision-matrix">
+  <table class="decision-matrix">
+    <thead><tr><th>Layer</th><th>R1 (Expansion)</th><th>R2 (Late-Cycle)</th><th>R3 (Contraction)</th><th>R4 (Crisis)</th></tr></thead>
+    <tbody>
+      <tr><td>L1: Regime</td><td>15%</td><td>20%</td><td>25%</td><td>35%</td></tr>
+      <tr><td>L2: Structural Flows</td><td>25%</td><td>25%</td><td>20%</td><td>15%</td></tr>
+      <tr><td>L3: Correlation State</td><td>15%</td><td>20%</td><td>20%</td><td>15%</td></tr>
+      <tr><td>L4: Positioning/Sentiment</td><td>25%</td><td>15%</td><td>15%</td><td>15%</td></tr>
+      <tr><td>L5: Microstructure/Timing</td><td>20%</td><td>20%</td><td>20%</td><td>20%</td></tr>
+    </tbody>
+  </table>
+</div>
+<p><em>In R1/R2, positioning extremes (L4) and flows (L2) matter most. In R3/R4, regime state (L1) dominates everything else because macro forces overwhelm individual positioning.</em></p>
+
+<h4>Step 2: Identify Conflicts Between Layers</h4>
+<p>Layers will frequently disagree. This is not a flaw &mdash; it is a feature. Document every conflict explicitly:</p>
+<div class="formula-box">
+CONFLICT LOG:<br>
+&nbsp;&nbsp;Conflict 1: [Layer X says BULLISH] but [Layer Y says BEARISH]<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Resolution: [Your reasoning for which layer you trust more in THIS context]<br>
+&nbsp;&nbsp;&nbsp;&nbsp;Confidence in resolution: [HIGH|MEDIUM|LOW]<br><br>
+&nbsp;&nbsp;Conflict 2: ...<br>
+&nbsp;&nbsp;(Repeat for all conflicts)
+</div>
+
+<div class="alert-box">
+<strong>The Conflict Resolution Rule:</strong> When Layer 1 (Regime) conflicts with any other layer, <strong>Layer 1 wins in R3 and R4 regimes</strong>. In R1 and R2, the conflict is genuine and requires your judgment. The way you resolve these conflicts is the core of your un-replicable edge.
+</div>
+
+<h4>Step 3: Assign Conviction Score</h4>
+<div class="formula-box">
+<strong>Conviction Score (1&ndash;5):</strong><br>
+&nbsp;&nbsp;5 = All 5 layers aligned, no conflicts, strong signal in each<br>
+&nbsp;&nbsp;4 = 4 of 5 layers aligned, minor conflict in one<br>
+&nbsp;&nbsp;3 = 3 of 5 layers aligned, moderate conflicts<br>
+&nbsp;&nbsp;2 = Mixed signals, no clear dominant thesis<br>
+&nbsp;&nbsp;1 = Layers broadly disagree, no actionable setup<br><br>
+
+<strong>Minimum Conviction Threshold:</strong><br>
+&nbsp;&nbsp;Intraday trades: Conviction &ge; 3 (shorter holding period needs less certainty)<br>
+&nbsp;&nbsp;Day trades: Conviction &ge; 4 (holding through a session requires stronger thesis)<br>
+&nbsp;&nbsp;DO NOT TRADE at Conviction &le; 2
+</div>
+
+<h4>Step 4: Define the Trade</h4>
+<div class="formula-box">
+TRADE PLAN:<br>
+&nbsp;&nbsp;Instrument: [DXY | Gold | Oil]<br>
+&nbsp;&nbsp;Direction: [LONG | SHORT]<br>
+&nbsp;&nbsp;Entry Zone: [price range from Layer 5 volume levels]<br>
+&nbsp;&nbsp;Stop Loss: [invalidation level &mdash; where your thesis is WRONG, not where it hurts]<br>
+&nbsp;&nbsp;Target 1: [1R &mdash; 1x risk from entry to stop]<br>
+&nbsp;&nbsp;Target 2: [2R &mdash; 2x risk]<br>
+&nbsp;&nbsp;Target 3: [3R+ &mdash; stretch target from HVN/POC]<br>
+&nbsp;&nbsp;Risk per Trade: [% of account, max 1&ndash;2%]<br>
+&nbsp;&nbsp;Time Stop: [max hours to hold if not moving]<br>
+&nbsp;&nbsp;Invalidation Condition: [specific event/level that kills the thesis mid-trade]
+</div>
+
+<h4>Step 5: Post-Trade Review</h4>
+<div class="formula-box">
+POST-TRADE LOG:<br>
+&nbsp;&nbsp;Outcome: [WIN | LOSS | BREAKEVEN | SCRATCH]<br>
+&nbsp;&nbsp;R-Multiple Achieved: [e.g., +1.7R, &minus;0.8R]<br>
+&nbsp;&nbsp;Layer Accuracy: Which layers were correct? Which were wrong?<br>
+&nbsp;&nbsp;Conflict Resolution: Was your conflict resolution correct?<br>
+&nbsp;&nbsp;Lesson: [One sentence &mdash; what did this trade teach you about YOUR synthesis?]<br>
+&nbsp;&nbsp;Adjustment: [Any tweak to your weighting/conflict resolution logic?]
+</div>
+
+<h3>8.2 The Synthesis Engine Is Not a Formula</h3>
+<p>The tables and protocols above are the <em>scaffolding</em>. The engine itself is:</p>
+<ul>
+  <li>Your ability to look at a COT divergence and <em>feel</em> whether it matters in the current regime.</li>
+  <li>Your willingness to override a &ldquo;textbook&rdquo; setup because something doesn&rsquo;t smell right.</li>
+  <li>Your pattern recognition for how DXY moves 20 minutes before Gold responds.</li>
+  <li>Your discipline to stand aside when conviction is low, even after days of not trading.</li>
+  <li>Your post-trade honesty in the review log.</li>
+</ul>
+<p>This is why a Bloomberg terminal and a team of analysts cannot replicate your edge. They have better data but not your synthesis.</p>
+
+<!-- ====== SECTION 9: BRIEFING TEMPLATE ====== -->
+<div class="page-break"></div>
+<h2>9. Daily Pre-Market Briefing Template</h2>
+<p>Complete this briefing every trading day before 7:30 AM ET (30 minutes before the London-NY overlap begins). Estimated time: 20&ndash;30 minutes once internalized.</p>
+
+<div class="briefing-template">
+  <div class="briefing-section">
+    <div class="briefing-label">Date / Time / Pre-Market VIX Level</div>
+    <div class="briefing-field">Date: ____ | Time: ____ ET | VIX Spot: ____ | VIX Futures M1: ____</div>
+  </div>
+  <div class="briefing-section">
+    <div class="briefing-label">Layer 1 &mdash; Macro Regime</div>
+    <div class="briefing-field">VIX Score: ____/3 | VIX Term Score: ____/3 | Yield Score: ____/3 | Credit Score: ____/3<br>
+    Composite Score: ____/12 | Regime: [R1/R2/R3/R4]<br>
+    10Y TIPS Real Yield: ____% | Real Yield Gold Regime: [BEARISH/NEUTRAL/BULLISH]<br>
+    Regime Change Signal: [STABLE | WATCHING | CHANGE DETECTED]<br>
+    Notes: ________________________________________________</div>
+  </div>
+  <div class="briefing-section">
+    <div class="briefing-label">Layer 2 &mdash; Structural Flows</div>
+    <div class="briefing-field">DXY COT Index (Non-Comm): ____ | (Comm): ____ | Signal: __________<br>
+    Gold COT Index (Non-Comm): ____ | (Comm): ____ | Signal: __________<br>
+    Oil COT Index (Non-Comm): ____ | (Comm): ____ | Signal: __________<br>
+    CB Gold Demand (latest quarter): ____ tonnes | USD Reserve Share: ____%<br>
+    Flow Verdict: DXY=[__] Gold=[__] Oil=[__]</div>
+  </div>
+  <div class="briefing-section">
+    <div class="briefing-label">Layer 3 &mdash; Correlation State</div>
+    <div class="briefing-field">&rho;(DXY,Gold): ____ (60d) | &Delta;4w: ____ | [NORMAL/BREAKDOWN/SHIFTING]<br>
+    &rho;(DXY,Oil): ____ (60d) | &Delta;4w: ____ | [NORMAL/BREAKDOWN/SHIFTING]<br>
+    &rho;(Gold,Oil): ____ (60d) | &Delta;4w: ____ | [NORMAL/BREAKDOWN/SHIFTING]<br>
+    &rho;(Gold,Copper): ____ (60d) | &Delta;4w: ____ | [NORMAL/BREAKDOWN/SHIFTING]<br>
+    Multi-Pair Breakdowns: ____ | Regime Transition Alert: [YES/NO]<br>
+    Correlation Verdict: [STABLE / STRAINING / TRANSITIONING]</div>
+  </div>
+  <div class="briefing-section">
+    <div class="briefing-label">Layer 4 &mdash; Positioning &amp; Sentiment</div>
+    <div class="briefing-field">Gold: P/C=____ | ETF 5d flow=____t | OI_Div=________ | Sent=____<br>
+    Oil: P/C=____ | EIA WoW=____M bbl | OI_Div=________ | Sent=____<br>
+    DXY: OI &Delta;=____ | OI_Div=________ | Sent=____<br>
+    Contrarian Signal: [BULLISH/BEARISH/NONE] for [____]<br>
+    Positioning Verdict: [CROWDED_LONG / CROWDED_SHORT / BALANCED]</div>
+  </div>
+  <div class="briefing-section">
+    <div class="briefing-label">Layer 5 &mdash; Intraday Plan</div>
+    <div class="briefing-field">Session: [London-NY Overlap / NYMEX / etc.] | Hours: ____ ET<br>
+    DXY Levels: POC=____ VAH=____ VAL=____<br>
+    Gold Levels: POC=____ VAH=____ VAL=____<br>
+    Oil Levels: POC=____ VAH=____ VAL=____<br>
+    Events Today: _________________________________<br>
+    Event Protocol: [PRE/POST/WAIT] for each event</div>
+  </div>
+  <div class="briefing-section">
+    <div class="briefing-label">Layer 6 &mdash; Synthesis</div>
+    <div class="briefing-field">Dominant Layer Today: [L1/L2/L3/L4/L5] (based on regime weights)<br>
+    Conflicts: ________________________________________________<br>
+    Conflict Resolution: ______________________________________<br>
+    Conviction Score: ____/5<br>
+    Primary Thesis: [LONG/SHORT] [DXY/Gold/Oil]<br>
+    Entry: ____ | Stop: ____ | Target 1: ____ | Target 2: ____<br>
+    Risk: ____% of account | Time Stop: ____ hours<br>
+    Invalidation: ____________________________________________<br>
+    Stand-Aside Condition: ____________________________________</div>
+  </div>
+</div>
+
+<!-- ====== SECTION 10: WORKED EXAMPLE A ====== -->
+<div class="page-break"></div>
+<h2>10. Worked Example A &mdash; DXY Setup (June 2026)</h2>
+
+<div class="worked-example">
+<h4>Market Context: June 18, 2026</h4>
+<p>DXY trading at <strong>100.67</strong>. The index has been recovering from a low near 97 in early 2026 after a sustained decline through late 2025. Kevin Warsh&rsquo;s first FOMC meeting is today. Inflation at 4.2%. J.P. Morgan maintains a bearish 2026 dollar outlook. VIX elevated at 22. 10Y-2Y spread positive at +45bps (un-inverted). HY OAS at 420bps. 10Y TIPS real yield at 2.20%.</p>
+
+<div class="formula-box">
+<strong>LAYER 1 &mdash; MACRO REGIME</strong><br>
+VIX Score: 2 (VIX=22, elevated fear but not panic) /3<br>
+VIX Term Score: 1 (flat to mild contango) /3<br>
+Yield Score: 1 (spread +45bps, normal positive slope) /3<br>
+Credit Score: 1 (OAS=420bps, normal range) /3<br>
+Composite: 5/12 &rarr; <strong>R2: RISK-ON LATE-CYCLE</strong><br>
+Real Yield: 2.20% &rarr; Formally bearish environment for risk assets but not extreme
+</div>
+
+<div class="formula-box">
+<strong>LAYER 2 &mdash; STRUCTURAL FLOWS</strong><br>
+DXY COT: Non-Comm Net Position = +18,000 contracts (net long dollar)<br>
+Non-Comm COT Index (3yr) = 55 (moderate, not extreme)<br>
+Commercial COT Index = 35 (moderately short dollar &mdash; hedgers selling into strength)<br>
+Signal: <strong>NEUTRAL</strong> &mdash; no extreme positioning<br>
+CB Flows: USD reserve share declining slowly &rarr; mild structural bearish<br>
+Flow Verdict: <strong>NEUTRAL with mild bearish tilt</strong>
+</div>
+
+<div class="formula-box">
+<strong>LAYER 3 &mdash; CORRELATION STATE</strong><br>
+&rho;(DXY, Gold) = &minus;0.45 (60d) | Velocity: +0.10 in 4w (weakening inverse)<br>
+&rho;(DXY, Oil) = &minus;0.15 (60d) | Velocity: +0.05 in 4w (stable)<br>
+&rho;(Gold, Oil) = +0.25 (60d) | Velocity: &minus;0.08 in 4w<br>
+&rho;(Gold, Copper) = +0.40 (60d) | Velocity: stable<br>
+Multi-Pair Breakdowns: 0 | Regime Transition Alert: <strong>NO</strong><br>
+Verdict: <strong>STABLE</strong> &mdash; DXY-Gold weakening is notable but not a breakdown
+</div>
+
+<div class="formula-box">
+<strong>LAYER 4 &mdash; POSITIONING &amp; SENTIMENT</strong><br>
+DXY OI Change: +2.1% WoW, price rising &rarr; New longs entering (trend continuation)<br>
+DXY Sentiment Score: +0.2 (mildly bullish crowd, not extreme)<br>
+Positioning Verdict: <strong>BALANCED leaning bullish</strong>
+</div>
+
+<div class="formula-box">
+<strong>LAYER 5 &mdash; INTRADAY PLAN</strong><br>
+FOMC Day! Event Protocol overrides normal session trading.<br>
+Pre-FOMC (before 2:00 PM ET): <strong>REDUCE SIZE or STAND ASIDE</strong><br>
+Key DXY levels: POC=100.20, VAH=101.10, VAL=99.80<br>
+Post-FOMC (after 2:30 PM): Trade the first directional pullback
+</div>
+
+<div class="formula-box">
+<strong>LAYER 6 &mdash; SYNTHESIS</strong><br>
+Dominant Layer: L2 (Structural Flows) &mdash; in R2 regime, flow weighting is 25%<br>
+Conflict: L5 says FOMC is imminent (stand aside), but L1-L4 suggest mild dollar strength<br>
+Resolution: FOMC is a binary event. Even if thesis is correct, the event risk dominates.<br>
+&nbsp;&nbsp;WAIT for post-FOMC clarity. If Fed is dovish &rarr; DXY sells off to VAL=99.80 &rarr; SHORT DXY<br>
+&nbsp;&nbsp;If Fed is hawkish &rarr; DXY tests VAH=101.10 &rarr; LONG DXY on pullback to POC=100.20<br>
+Conviction: 2/5 (pre-FOMC) &rarr; BELOW TRADE THRESHOLD<br>
+<strong>Decision: STAND ASIDE until post-FOMC price action clarifies direction.</strong>
+</div>
+</div>
+
+<!-- ====== SECTION 11: WORKED EXAMPLE B ====== -->
+<div class="page-break"></div>
+<h2>11. Worked Example B &mdash; Gold Setup (January&ndash;June 2026)</h2>
+
+<div class="worked-example">
+<h4>Market Context: The Great Gold Correction</h4>
+<p>Gold rallied from ~$2,420 (May 2024) to a peak of <strong>$5,598 (January 2026)</strong> &mdash; a 131% move driven by central bank accumulation, geopolitical premiums, and negative real yields in 2024-2025. Then gold corrected sharply: &minus;25% from peak to March 2026 lows. Currently recovering to <strong>$4,246 (June 18, 2026)</strong> with real yields at 2.20% (headwind) but central bank buying at historic levels (override).</p>
+
+<div class="formula-box">
+<strong>LAYER 1 &mdash; MACRO REGIME (as of Jan 2026 peak)</strong><br>
+At the peak: VIX=14, Yield=flat at &minus;5bps, Credit=320bps<br>
+Score: 0+1+2+0 = 3/12 &rarr; <strong>R1: RISK-ON EXPANSION</strong><br>
+Real Yield: &minus;0.3% (at the peak period) &rarr; STRONGLY BULLISH for gold<br>
+By March 2026 correction: VIX spiked to 32, Yield=+30bps, Credit=550bps<br>
+Score: 3+2+1+2 = 8/12 &rarr; <strong>R3: RISK-OFF CONTRACTION</strong><br>
+Regime SHIFT DETECTED &mdash; this is why the correction was so violent.
+</div>
+
+<div class="formula-box">
+<strong>LAYER 2 &mdash; STRUCTURAL FLOWS (January 2026)</strong><br>
+Gold COT Non-Comm COT Index at peak: 92 (EXTREME LONG CROWDING)<br>
+Gold COT Commercial COT Index: 8 (commercials selling aggressively)<br>
+<strong>DIVERGENCE ALERT:</strong> Specs extremely long, commercials extremely short<br>
+&nbsp;&nbsp;= Classic top signal in COT literature<br>
+CB Gold Demand: 280 tonnes in Q4 2025 (highest ever recorded)<br>
+USD Reserve Share: 47% (down from 58% in 2020) &rarr; STRUCTURAL USD BEARISH<br>
+Flow Verdict at peak: <strong>SHORT-TERM BEARISH (crowded) but STRUCTURAL BULLISH (CB demand)</strong>
+</div>
+
+<div class="formula-box">
+<strong>LAYER 3 &mdash; CORRELATION STATE (at correction)</strong><br>
+At the correction (March 2026):<br>
+&rho;(DXY, Gold) = +0.15 &mdash; <strong>BREAKDOWN</strong> (both selling off together = liquidity crisis)<br>
+&rho;(Gold, Oil) = +0.55 &mdash; Normal<br>
+&rho;(Gold, Copper) = +0.60 &mdash; Normal (both selling off on demand fear)<br>
+Multi-Pair Breakdowns: 1 (DXY-Gold) | Transition Alert: <strong>WATCHING</strong><br>
+The positive DXY-Gold correlation during the correction meant gold was NOT acting as<br>
+&nbsp;&nbsp;a safe haven &mdash; it was being sold for margin calls. This is the R4 signature.
+</div>
+
+<div class="formula-box">
+<strong>LAYER 4 &mdash; POSITIONING &amp; SENTIMENT (March 2026 bottom)</strong><br>
+Gold COT Non-Comm COT Index: 5 (EXTREME SHORT after liquidation)<br>
+Gold ETF 5-day flow: &minus;18 tonnes (panic outflows)<br>
+Gold Put/Call: 1.4 (extreme fear)<br>
+Sentiment Score: &minus;0.85 &rarr; EXTREME BEARISH CROWDING<br>
+Contrarian Signal: <strong>STRONGLY BULLISH</strong>
+</div>
+
+<div class="formula-box">
+<strong>LAYER 6 &mdash; SYNTHESIS (March 2026 bottom &rarr; June 2026 recovery)</strong><br>
+This was a CONVICTION 5/5 setup in retrospect:<br>
+&nbsp;&nbsp;L1: Regime shifted to R3 &rarr; Gold historically rallies in R3 (fear hedge)<br>
+&nbsp;&nbsp;L2: Structural CB bid at 280t/quarter provides a floor<br>
+&nbsp;&nbsp;L3: DXY-Gold correlation breakdown = temporary (margin call liquidation, not structural)<br>
+&nbsp;&nbsp;L4: Extreme short crowding + panic ETF outflows = classic capitulation bottom<br>
+&nbsp;&nbsp;L5: Gold POC at $3,800 (March), VAH at $4,100 &rarr; buy zone was $3,800&ndash;$4,000<br><br>
+Conflicts: L1 said R3 (risk-off) which normally means DXY strong and gold strong simultaneously.<br>
+&nbsp;&nbsp;But L3 showed them moving together, which is abnormal for R3.<br>
+Resolution: The DXY-Gold positive correlation was a LIQUIDITY CRISIS artifact (R4 behavior<br>
+&nbsp;&nbsp;inside an R3 regime). Once margin calls cleared, gold would decouple and rally alone.<br>
+&nbsp;&nbsp;This resolution was correct &mdash; gold recovered from $3,800 to $4,246 by June (+12%).<br>
+Conviction: 5/5 &mdash; All layers aligned on the buy after the March capitulation.
+</div>
+</div>
+
+<!-- ====== SECTION 12: WORKED EXAMPLE C ====== -->
+<div class="page-break"></div>
+<h2>12. Worked Example C &mdash; Oil Setup (January&ndash;June 2026)</h2>
+
+<div class="worked-example">
+<h4>Market Context: The Oil Rally</h4>
+<p>WTI crude rallied from <strong>$57 (January 2026) to $96 (June 2026)</strong> &mdash; a 68% move driven by Middle East escalation (referenced June 2025 levels of $68&ndash;$74), supply discipline from OPEC+, and demand recovery. DXY was relatively stable (97&ndash;101 range), meaning the oil rally was supply-driven, not dollar-driven.</p>
+
+<div class="formula-box">
+<strong>LAYER 1 &mdash; MACRO REGIME</strong><br>
+January 2026: R1 (Score: 2/12) &rarr; expansion regime<br>
+Oil in R1 = rising on demand growth (historically correct)<br>
+By June 2026: R2 (Score: 5/12) &rarr; late-cycle (inflation at 4.2%)<br>
+Oil in R2 = strong, supply tight (historically correct)
+</div>
+
+<div class="formula-box">
+<strong>LAYER 2 &mdash; STRUCTURAL FLOWS</strong><br>
+Oil COT Non-Comm COT Index: Rising from 30 (Jan) to 72 (May) &rarr; specs adding longs<br>
+Oil COT Commercial COT Index: Declining from 55 to 25 &rarr; producers hedging (selling)<br>
+Normal pattern: specs long + producers short = trend continuation (producers ALWAYS sell)<br>
+EIA Inventories: Consistent draws (&minus;2 to &minus;4M bbl/week) through Q1-Q2 2026<br>
+Flow Verdict: <strong>BULLISH</strong> &mdash; demand absorbing supply, specs riding the trend
+</div>
+
+<div class="formula-box">
+<strong>LAYER 3 &mdash; CORRELATION STATE</strong><br>
+&rho;(DXY, Oil) = &minus;0.25 (60d) &rarr; normal mild inverse<br>
+&rho;(Gold, Oil) = +0.35 (60d) &rarr; normal positive<br>
+No breakdowns. Oil moving on its own supply fundamentals, not dollar or gold dynamics.<br>
+Verdict: <strong>STABLE</strong> &mdash; oil is being driven by Layer 2 (supply) not Layer 3 (correlations)
+</div>
+
+<div class="formula-box">
+<strong>LAYER 4 &mdash; POSITIONING &amp; SENTIMENT (June 2026)</strong><br>
+Oil COT Non-Comm COT Index: 72 (approaching crowded long territory but not extreme)<br>
+EIA WoW: &minus;1.5M bbl (modest draw, not extreme)<br>
+Put/Call: 0.65 (moderate optimism, not euphoria)<br>
+Sentiment Score: +0.3 (mildly bullish, not extreme)<br>
+Positioning Verdict: <strong>BALANCED leaning bullish</strong> &mdash; room for more upside
+</div>
+
+<div class="formula-box">
+<strong>LAYER 5 &mdash; INTRADAY PLAN</strong><br>
+NYMEX Pit Hours: 9:00 AM &ndash; 2:30 PM ET<br>
+Oil POC (weekly): $74.50 | VAH: $77.20 | VAL: $72.80<br>
+EIA Report Wednesday at 10:30 AM ET &rarr; WAIT for post-report reaction<br>
+If EIA shows draw &gt; 3M bbl &rarr; buy the dip to POC $74.50<br>
+If EIA shows build &gt; 3M bbl &rarr; stand aside, thesis weakened
+</div>
+
+<div class="formula-box">
+<strong>LAYER 6 &mdash; SYNTHESIS</strong><br>
+Dominant Layer: L2 (Structural Flows at 25% weight in R2) &mdash; supply story is dominant<br>
+Conflicts: None significant. All layers point cautiously bullish.<br>
+Minor concern: COT at 72 approaching crowded territory, but not yet extreme.<br>
+Conviction: 4/5 &rarr; ABOVE TRADE THRESHOLD<br>
+Primary Thesis: <strong>LONG WTI OIL on dips to $73&ndash;$75 zone (POC area)</strong><br>
+Entry: $74.00&ndash;$75.00 | Stop: $71.50 (below VAL) | T1: $77.20 | T2: $80.00<br>
+Risk: 1.5% of account | Time Stop: 8 hours (day trade, no overnight)<br>
+Invalidation: EIA report shows build &gt; 5M bbl AND COT Index &gt; 85 next Friday
+</div>
+</div>
+
+<!-- ====== SECTION 13: AUTOMATION MAP ====== -->
+<div class="page-break"></div>
+<h2>13. Future Automation Map</h2>
+<p>When you choose to encode this framework into software, here is what is programmable vs. what must remain human:</p>
+
+<table class="signal-table">
+  <thead><tr><th>Component</th><th>Programmability</th><th>Method</th><th>Your Role</th></tr></thead>
+  <tbody>
+    <tr><td>L1: Regime Scoring</td><td><strong>Fully programmable</strong></td><td>Fetch FRED API &rarr; compute scores &rarr; classify regime</td><td>Verify and override if needed</td></tr>
+    <tr><td>L2: COT Index</td><td><strong>Fully programmable</strong></td><td>Parse CFTC data &rarr; compute COT Index with rolling window</td><td>Interpret divergence meaning</td></tr>
+    <tr><td>L2: CB Reserve Flows</td><td>Semi-programmable</td><td>Scrape IMF COFER / WGC quarterly</td><td>Assess structural significance</td></tr>
+    <tr><td>L3: Correlation Matrix</td><td><strong>Fully programmable</strong></td><td>Yahoo Finance API &rarr; rolling Pearson &rarr; flag breakdowns</td><td>Decide if breakdown is signal or noise</td></tr>
+    <tr><td>L4: Sentiment Score</td><td><strong>Fully programmable</strong></td><td>Aggregate indicators &rarr; score &rarr; flag extremes</td><td>Weight contrarian vs. trend-following</td></tr>
+    <tr><td>L5: Volume Profile</td><td>Semi-programmable</td><td>Requires intraday data feed (broker API)</td><td>Select relevant lookback periods</td></tr>
+    <tr><td>L5: Event Protocol</td><td><strong>Fully programmable</strong></td><td>Calendar API &rarr; auto-reduce size before events</td><td>Decide post-event entry</td></tr>
+    <tr><td>L6: Dominant Layer</td><td>Programmable (rule-based)</td><td>Regime-dependent weight table</td><td>Override weights in unusual conditions</td></tr>
+    <tr><td>L6: Conflict Resolution</td><td><strong>NOT programmable</strong></td><td>Requires human judgment</td><td>This is your edge</td></tr>
+    <tr><td>L6: Conviction Scoring</td><td>Partially programmable</td><td>Algorithmic suggestion, human final score</td><td>Final conviction is always yours</td></tr>
+    <tr><td>L6: Trade Definition</td><td>Partially programmable</td><td>Suggested levels from L5 data</td><td>Accept/reject/modify the plan</td></tr>
+  </tbody>
+</table>
+
+<h3>13.1 Recommended Automation Sequence</h3>
+<ol>
+  <li><strong>Phase 1:</strong> Automate L1 (regime scoring) &mdash; pure data fetch + computation. Zero judgment required.</li>
+  <li><strong>Phase 2:</strong> Automate L2 (COT Index) and L3 (correlation matrix) &mdash; these are formulaic.</li>
+  <li><strong>Phase 3:</strong> Build a daily briefing generator that auto-populates Layers 1&ndash;5, leaving Layer 6 blank for you to fill manually.</li>
+  <li><strong>Phase 4:</strong> Add L5 volume profile computation from broker API data.</li>
+  <li><strong>Phase 5:</strong> Build a trade journal that captures your L6 decisions and tracks layer accuracy over time.</li>
+</ol>
+
+<!-- ====== SECTION 14: REFERENCES ====== -->
+<div class="page-break"></div>
+<h2>14. Academic References</h2>
+<ol>
+  <li>Hamilton, J.D. (1989). &ldquo;A New Approach to the Economic Analysis of Nonstationary Time Series and the Business Cycle.&rdquo; <em>Econometrica</em>, 57(2), 357&ndash;384.</li>
+  <li>Baffes, J. &amp; Hossain, A. (2005). &ldquo;Oil, Gold, US Dollar and Stock Market Interdependencies.&rdquo; <em>MPRA Paper No. 70452</em>, University Library of Munich.</li>
+  <li>Zhang, Y.J. et al. (2010). &ldquo;The Relationship of the Value of the Dollar, and the Prices of Gold and Oil.&rdquo; <em>Economics Bulletin</em>, EB-11-00098.</li>
+  <li>Zhang, Y.J. &amp; Wei, Y.M. (2011). &ldquo;Oil and Gold: Correlation or Causation?&rdquo; <em>MPRA Paper No. 31795</em>.</li>
+  <li>University of Malta (2025). &ldquo;An Analysis of the Relationship Between Real Yields and Gold Prices.&rdquo; <em>OAR Repository</em>.</li>
+  <li>IJFR (2021). &ldquo;Half Century of Gold Price: Regime-Switching and Forecasting Framework.&rdquo; <em>International Journal of Financial Research</em>, 12(3), 1&ndash;18.</li>
+  <li>arXiv (2025). &ldquo;Tactical Asset Allocation with Macroeconomic Regime Detection.&rdquo; <em>arXiv:2503.11499v1</em>.</li>
+  <li>MDPI (2025). &ldquo;VIX Futures as a Market Timing Indicator.&rdquo; <em>Journal of Risk and Financial Management</em>, 12(3), 113.</li>
+  <li>MDPI (2025). &ldquo;The Evolution of the Linkage Among Geopolitical Risk, the US Dollar, Gold, and Oil.&rdquo; <em>Entropy</em>, 27(11), 1177.</li>
+  <li>JDACM (2025). &ldquo;Cross-Asset Correlation Shifts in Crisis Periods.&rdquo; <em>Journal of Data Analysis and Computational Methods</em>.</li>
+  <li>Nature (2024). &ldquo;Impact of Global Crisis Events on Dependence and Risk Spillover.&rdquo; <em>Humanities &amp; Social Sciences Communications</em>, 11, 4329.</li>
+  <li>SSRN (2024). &ldquo;Intraday Trading Activity and Liquidity on International Crude Oil Futures.&rdquo; <em>SSRN 4680994</em>.</li>
+  <li>BIS (2019). &ldquo;The Currency Composition of Foreign Exchange Reserves.&rdquo; <em>BIS Working Paper No. 828</em>.</li>
+  <li>PIMCO (2025). &ldquo;Understanding Gold Prices.&rdquo; <em>PIMCO Education</em>.</li>
+  <li>NY Fed. &ldquo;The Yield Curve as a Leading Indicator.&rdquo; <em>Federal Reserve Bank of New York</em>.</li>
+  <li>Pecchiari, M. &ldquo;Orderflow Imbalance and High Frequency Trading.&rdquo; <em>LUISS Guido Carli Thesis</em>.</li>
+  <li>BIS CGFS (2001). &ldquo;Market Microstructure and Market Liquidity.&rdquo; <em>CGFS Publication No. 11</em>.</li>
+  <li>Kobe University. &ldquo;An Empirical Analysis of Market Microstructure in Gold and Platinum Markets.&rdquo;</li>
+  <li>ECB (2024). &ldquo;The Link Between Oil Prices and the US Dollar.&rdquo; <em>ECB Economic Bulletin</em>.</li>
+  <li>Williams, L. (1987). COT Index methodology. Adapted in CFTC educational materials.</li>
+</ol>
+
+<footer>
+  <p>The Sovereign Analyst Protocol v1.0 &mdash; June 2026 &mdash; Personal Proprietary Methodology</p>
+  <p>This document is the intellectual property of its author. Not for distribution or reproduction.</p>
+</footer>
+
+</body>
+</html>

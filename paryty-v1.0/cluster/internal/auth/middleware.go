@@ -84,6 +84,9 @@ func GinJWTAuth(tm *TokenManager) gin.HandlerFunc {
 // (WebSocket upgrade, EventSource/SSE) that cannot set custom request
 // headers. Regular REST endpoints MUST use GinJWTAuth instead so tokens
 // never appear in access logs via URLs.
+//
+// For enhanced security, the middleware also checks for an httpOnly cookie
+// (paryty_access_token) before falling back to the query parameter.
 func GinJWTAuthFlexible(tm *TokenManager) gin.HandlerFunc {
 	headerAuth := GinJWTAuth(tm)
 	return func(c *gin.Context) {
@@ -92,11 +95,21 @@ func GinJWTAuthFlexible(tm *TokenManager) gin.HandlerFunc {
 			return
 		}
 
-		tokenStr := strings.TrimSpace(c.Query("token"))
+		// Try httpOnly cookie first (more secure than query param).
+		tokenStr := ""
+		if cookie, err := c.Cookie("paryty_access_token"); err == nil && cookie != "" {
+			tokenStr = strings.TrimSpace(cookie)
+		}
+
+		// Fall back to query parameter for backward compatibility.
+		if tokenStr == "" {
+			tokenStr = strings.TrimSpace(c.Query("token"))
+		}
+
 		if tokenStr == "" {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 				"error":   "UNAUTHENTICATED",
-				"message": "Provide a Bearer token or 'token' query parameter.",
+				"message": "Provide a Bearer token, 'token' query parameter, or paryty_access_token cookie.",
 			})
 			return
 		}

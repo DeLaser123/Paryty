@@ -113,12 +113,11 @@ export const ModelAccuracy = memo(function ModelAccuracy({
   }
 
   const entries = Object.entries(modelAccuracy);
-  const modelNames = [
-    'Linear Regression',
-    'Prophet',
-    'XGBoost',
-    'Ensemble',
-  ];
+
+  // Derive model names dynamically from API response
+  const modelNames = Array.from(
+    new Set(entries.flatMap(([, info]) => Object.keys(info.weights)))
+  );
 
   // Flatten all models from all metric entries
   const allModels: Array<{

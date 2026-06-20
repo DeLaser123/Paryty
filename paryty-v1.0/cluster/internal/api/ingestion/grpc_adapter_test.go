@@ -41,8 +41,8 @@ func newTestAdapterWithRateLimit(maxPerMinute int) (*IngestionGRPCAdapter, *Rate
 
 func TestTenantFromContext_Default(t *testing.T) {
 	ctx := context.Background()
-	if got := TenantFromContext(ctx); got != "default" {
-		t.Errorf("expected 'default', got %q", got)
+	if got := TenantFromContext(ctx); got != "" {
+		t.Errorf("expected empty string, got %q", got)
 	}
 }
 
@@ -81,8 +81,8 @@ func TestEnrichContext_WithMetadata(t *testing.T) {
 	enriched := adapter.enrichContext(ctx)
 
 	// enrichContext no longer sets tenant (tenant is owned by AuthInterceptor).
-	if got := TenantFromContext(enriched); got != "default" {
-		t.Errorf("expected tenant 'default' (not set by enrichContext), got %q", got)
+	if got := TenantFromContext(enriched); got != "" {
+		t.Errorf("expected tenant '' (not set by enrichContext), got %q", got)
 	}
 	if got := TwinIDFromContext(enriched); got != "twin-1" {
 		t.Errorf("expected twin 'twin-1', got %q", got)
@@ -98,8 +98,8 @@ func TestEnrichContext_NoMetadata_GeneratesCorrelationID(t *testing.T) {
 
 	enriched := adapter.enrichContext(ctx)
 
-	if got := TenantFromContext(enriched); got != "default" {
-		t.Errorf("expected tenant 'default', got %q", got)
+	if got := TenantFromContext(enriched); got != "" {
+		t.Errorf("expected tenant '', got %q", got)
 	}
 	corrID := CorrelationIDFromContext(enriched)
 	if corrID == "" {
@@ -120,8 +120,8 @@ func TestEnrichContext_EmptyMetadataValues_DefaultsApplied(t *testing.T) {
 
 	enriched := adapter.enrichContext(ctx)
 	// Tenant is not set by enrichContext — AuthInterceptor owns it.
-	if got := TenantFromContext(enriched); got != "default" {
-		t.Errorf("expected tenant 'default', got %q", got)
+	if got := TenantFromContext(enriched); got != "" {
+		t.Errorf("expected tenant '', got %q", got)
 	}
 	if got := TwinIDFromContext(enriched); got != "" {
 		t.Errorf("expected empty twin ID for empty value, got %q", got)
@@ -471,8 +471,8 @@ func TestSendBatch_CorrelationIDFromMetadata(t *testing.T) {
 	enriched := adapter.enrichContext(ctx)
 
 	// enrichContext no longer reads tenant from metadata (tenant owned by AuthInterceptor).
-	if got := TenantFromContext(enriched); got != "default" {
-		t.Errorf("expected tenant 'default' (not set by enrichContext), got %q", got)
+	if got := TenantFromContext(enriched); got != "" {
+		t.Errorf("expected tenant '' (not set by enrichContext), got %q", got)
 	}
 	if got := TwinIDFromContext(enriched); got != "twin-z" {
 		t.Errorf("expected twin 'twin-z', got %q", got)
@@ -490,8 +490,8 @@ func TestSendBatch_CorrelationIDGenerated(t *testing.T) {
 
 	enriched := adapter.enrichContext(ctx)
 
-	if got := TenantFromContext(enriched); got != "default" {
-		t.Errorf("expected tenant 'default', got %q", got)
+	if got := TenantFromContext(enriched); got != "" {
+		t.Errorf("expected tenant '', got %q", got)
 	}
 	corrID := CorrelationIDFromContext(enriched)
 	if corrID == "" {

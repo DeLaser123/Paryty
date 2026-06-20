@@ -130,7 +130,7 @@ class _NumpyAutoencoder:
         activations: list[np.ndarray],
         pre_acts: list[np.ndarray],
         x: np.ndarray,
-    ) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    ) -> tuple[list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
         """Backward pass. Returns (enc_grads_w, enc_grads_b, dec_grads_w, dec_grads_b)."""
         n = x.shape[0]
         output = activations[-1]

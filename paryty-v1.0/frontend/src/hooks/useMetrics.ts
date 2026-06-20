@@ -23,7 +23,7 @@ export function useMetrics(metricName?: string) {
       const series = await client.queryMetrics(query);
       store.appendSeries(series);
     } catch (err) {
-      store.setError((err as Error).message);
+      store.setError(err instanceof Error ? err.message : String(err));
     } finally {
       store.setLoading(false);
     }

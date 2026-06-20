@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,6 +33,16 @@ const (
 	// Total buffer = workerCount * workerChannelBuffer.
 	workerChannelBuffer = 10
 )
+
+// hasRegexTopics returns true if any topic in the slice contains regex metacharacters.
+func hasRegexTopics(topics []string) bool {
+	for _, t := range topics {
+		if strings.ContainsAny(t, ".*+?[](){}|^$\\") {
+			return true
+		}
+	}
+	return false
+}
 
 // Handler is a function that handles consumed messages.
 type Handler func(ctx context.Context, key string, value []byte) error
@@ -128,6 +139,9 @@ func NewConsumer(cfg Config, group string, topics []string, handler Handler, log
 //
 // Additional ConsumerOption values can be provided to override defaults for
 // max retries, drain timeout, and worker pool size.
+//
+// If any topic in the topics slice contains regex metacharacters (e.g., \. or .*)
+// the consumer automatically enables regex subscription mode.
 func NewConsumerWithDLQ(cfg Config, group string, topics []string, handler Handler, logger *zap.Logger, dlqProducer *Producer, dlqTopic string, opts ...ConsumerOption) (*Consumer, error) {
 	kopts := []kgo.Opt{
 		kgo.SeedBrokers(cfg.Brokers...),
@@ -145,6 +159,12 @@ func NewConsumerWithDLQ(cfg Config, group string, topics []string, handler Handl
 		kgo.OnPartitionsLost(func(ctx context.Context, _ *kgo.Client, m map[string][]int32) {
 			logger.Warn("Partitions lost", zap.Any("partitions", m))
 		}),
+	}
+
+	// Enable regex subscription if topics contain regex patterns.
+	if hasRegexTopics(topics) {
+		kopts = append(kopts, kgo.ConsumeRegex())
+		logger.Info("Regex subscription enabled for topics", zap.Strings("topics", topics))
 	}
 
 	client, err := kgo.NewClient(kopts...)

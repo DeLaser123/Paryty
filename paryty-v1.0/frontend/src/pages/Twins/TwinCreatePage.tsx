@@ -59,7 +59,7 @@ export const TwinCreatePage = memo(function TwinCreatePage() {
 
   return (
     <div className="dp-page" data-testid="twin-create-page">
-      <div className="dp-page__inner" style={{ maxWidth: 600 }}>
+      <div className="dp-page__inner" style={{ maxWidth: 'var(--aef-content-width-form)' }}>
         {/* Page header */}
         <div className="dp-header">
           <div className="dp-header__title-block">
@@ -70,7 +70,7 @@ export const TwinCreatePage = memo(function TwinCreatePage() {
               style={{ marginBottom: 'var(--aef-space-2)' }}
               data-testid="tc-back-btn"
             >
-              <ArrowLeft size={14} /> Back to twins
+              <ArrowLeft size={12} /> Back to twins
             </button>
             <h1 className="dp-header__title">New Digital Paryty</h1>
             <p className="dp-header__sub">
@@ -92,9 +92,9 @@ export const TwinCreatePage = memo(function TwinCreatePage() {
             style={{
               margin: 0,
               fontFamily: 'var(--aef-font-body)',
-              fontSize: 11,
+              fontSize: 'var(--aef-font-size-xs)',
               color: 'var(--aef-text-secondary)',
-              lineHeight: 1.6,
+              lineHeight: 'var(--aef-line-height-relaxed)',
             }}
           >
             A Digital Paryty is a live-telemetry-driven digital twin of your software system.
@@ -123,14 +123,14 @@ export const TwinCreatePage = memo(function TwinCreatePage() {
             className="aef-btn aef-btn-active"
             form="twin-config-form"
             disabled={isSubmitting}
-            style={{ opacity: isSubmitting ? 0.4 : 1 }}
+            style={{ opacity: isSubmitting ? 'var(--aef-disabled-opacity)' : 1 }}
             data-testid="tc-create-submit"
           >
             {isSubmitting ? (
               'Creating…'
             ) : (
               <>
-                <Plus size={14} /> Create Twin
+                <Plus size={12} /> Create Twin
               </>
             )}
           </button>

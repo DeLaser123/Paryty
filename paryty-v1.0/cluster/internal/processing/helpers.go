@@ -5,6 +5,7 @@ package processing
 import (
 	"math"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -247,4 +248,16 @@ func (rb *RingBuffer) DrainAll() []interface{} {
 	rb.tail = 0
 	rb.count = 0
 	return result
+}
+
+// extractTwinFromTopic extracts the 12-char twin ID prefix from a twin-scoped
+// topic name. Returns empty string if the topic is not twin-scoped.
+//
+// Format: paryty.<tenant>.twins.<twin_id_prefix>.<suffix>
+func extractTwinFromTopic(topic string) string {
+	parts := strings.Split(topic, ".")
+	if len(parts) >= 4 && parts[2] == "twins" {
+		return parts[3]
+	}
+	return ""
 }

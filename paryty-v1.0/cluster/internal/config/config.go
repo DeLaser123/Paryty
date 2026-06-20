@@ -532,6 +532,14 @@ func applyEnvOverrides(cfg *Config) {
 		cfg.Cluster.Storage.Warm.ILPAddr = v
 	}
 
+	if v := os.Getenv("PARYTY_QUESTDB_USERNAME"); v != "" {
+		cfg.Cluster.Storage.Warm.Username = v
+	}
+
+	if v := os.Getenv("PARYTY_QUESTDB_PASSWORD"); v != "" {
+		cfg.Cluster.Storage.Warm.Password = v
+	}
+
 	if v := os.Getenv("PARYTY_SEAWEEDFS_ENDPOINT"); v != "" {
 		cfg.Cluster.Storage.Cold.Endpoint = v
 	}

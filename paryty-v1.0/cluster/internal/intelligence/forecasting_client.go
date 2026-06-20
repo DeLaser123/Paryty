@@ -2,9 +2,8 @@
 // service. It provides forecasting, anomaly detection, and caching for
 // intelligence results.
 //
-// V2.0 Migration: Replaces the Python-to-Python gRPC calls with Go-to-Python
-// gRPC clients. The Go side now directly calls the Python intelligence service
-// instead of routing through an intermediate Python gateway.
+// These clients use the compiled protobuf stubs to communicate with the
+// Python intelligence gRPC service over the network.
 package intelligence
 
 import (
@@ -15,8 +14,11 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/status"
+
+	parytyv1 "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 )
 
 // ForecastClient defines the interface for forecasting operations.
@@ -36,7 +38,11 @@ type ForecastClient interface {
 
 // ForecastRequest is a request to forecast a single metric.
 type ForecastRequest struct {
-	// ServiceID is the service to forecast for.
+	// AgentID is the agent to forecast for.
+	AgentID string `json:"agent_id"`
+	// TenantID scopes the request to a tenant.
+	TenantID string `json:"tenant_id"`
+	// ServiceID is the service to forecast (mapped to metric_name).
 	ServiceID string `json:"service_id"`
 	// MetricName is the metric to forecast.
 	MetricName string `json:"metric_name"`
@@ -44,6 +50,8 @@ type ForecastRequest struct {
 	Horizon time.Duration `json:"horizon"`
 	// ConfidenceLevel is the confidence interval (0.0 to 1.0).
 	ConfidenceLevel float64 `json:"confidence_level"`
+	// StepSeconds is the time step between forecast points.
+	StepSeconds int32 `json:"step_seconds"`
 }
 
 // ForecastResponse contains the forecast result for a single metric.
@@ -54,10 +62,16 @@ type ForecastResponse struct {
 	MetricName string `json:"metric_name"`
 	// Points are the forecasted data points.
 	Points []ForecastPoint `json:"points"`
-	// Model is the model used for forecasting.
+	// Model is the best model used for forecasting.
 	Model string `json:"model"`
+	// ModelWeights maps model names to ensemble weights.
+	ModelWeights map[string]float64 `json:"model_weights"`
+	// ModelAccuracy maps model names to accuracy (MAPE).
+	ModelAccuracy map[string]float64 `json:"model_accuracy"`
 	// ConfidenceScore is the model's confidence (0.0 to 1.0).
 	ConfidenceScore float64 `json:"confidence_score"`
+	// TrainingSamples is the number of training data points.
+	TrainingSamples int64 `json:"training_samples"`
 	// GeneratedAt is when the forecast was generated.
 	GeneratedAt time.Time `json:"generated_at"`
 }
@@ -88,26 +102,22 @@ type ForecastBatchResponse struct {
 
 // ModelAccuracyRequest is a request to get model accuracy.
 type ModelAccuracyRequest struct {
-	// ServiceID is the service to check.
-	ServiceID string `json:"service_id"`
+	// TenantID scopes the request to a tenant.
+	TenantID string `json:"tenant_id"`
 	// MetricName is the metric to check (empty = all).
 	MetricName string `json:"metric_name"`
 }
 
 // ModelAccuracyResponse contains model accuracy metrics.
 type ModelAccuracyResponse struct {
-	// Accuracy maps metric names to their MAPE (Mean Absolute Percentage Error).
-	Accuracy map[string]float64 `json:"accuracy"`
-	// LastTrained is when the model was last trained.
-	LastTrained time.Time `json:"last_trained"`
-	// SampleCount is the number of training samples used.
-	SampleCount int64 `json:"sample_count"`
+	// Models maps metric names to their model info.
+	Models map[string]*ForecastResponse `json:"models"`
 }
 
 // RetrainRequest is a request to retrain forecasting models.
 type RetrainRequest struct {
-	// ServiceID is the service to retrain for.
-	ServiceID string `json:"service_id"`
+	// TenantID scopes the request to a tenant.
+	TenantID string `json:"tenant_id"`
 	// MetricName is the metric to retrain (empty = all).
 	MetricName string `json:"metric_name"`
 	// Force forces retraining even if the model is recent.
@@ -116,46 +126,10 @@ type RetrainRequest struct {
 
 // RetrainResponse contains the result of a retrain request.
 type RetrainResponse struct {
-	// Status is the retrain status (started, completed, skipped).
-	Status string `json:"status"`
+	// Success indicates whether retraining was initiated.
+	Success bool `json:"success"`
 	// Message contains additional information.
 	Message string `json:"message"`
-}
-
-// gRPCRequest/gRPCResponse types for wire communication.
-type grpcForecastRequest struct {
-	ServiceId       string        `json:"service_id"`
-	MetricName      string        `json:"metric_name"`
-	HorizonSeconds  int64         `json:"horizon_seconds"`
-	ConfidenceLevel float32       `json:"confidence_level"`
-}
-
-type grpcForecastPoint struct {
-	Timestamp      int64   `json:"timestamp"`
-	PredictedValue float64 `json:"predicted_value"`
-	LowerBound     float64 `json:"lower_bound"`
-	UpperBound     float64 `json:"upper_bound"`
-}
-
-type grpcForecastResponse struct {
-	ServiceId       string              `json:"service_id"`
-	MetricName      string              `json:"metric_name"`
-	Points          []grpcForecastPoint `json:"points"`
-	Model           string              `json:"model"`
-	ConfidenceScore float32             `json:"confidence_score"`
-	GeneratedAt     int64               `json:"generated_at"`
-}
-
-// DefaultForecastClient is the production gRPC client for the forecasting service.
-//
-// V2.0 Migration: Replaces the Python ForecastClient class. The Go version
-// uses grpc-go with connection pooling and automatic retry.
-type DefaultForecastClient struct {
-	conn    *grpc.ClientConn
-	address string
-	timeout time.Duration
-	logger  *zap.Logger
-	cache   *IntelligenceCache
 }
 
 // ForecastClientConfig configures the forecast gRPC client.
@@ -164,8 +138,20 @@ type ForecastClientConfig struct {
 	Address string `yaml:"address" json:"address"`
 	// Timeout is the default RPC timeout.
 	Timeout time.Duration `yaml:"timeout" json:"timeout"`
-	// MaxRetries is the maximum number of retry attempts.
-	MaxRetries int `yaml:"max_retries" json:"max_retries"`
+	// UseTLS enables TLS for the gRPC connection.
+	UseTLS bool `yaml:"use_tls" json:"use_tls"`
+	// TLSCertPath is the path to the TLS certificate file.
+	TLSCertPath string `yaml:"tls_cert_path" json:"tls_cert_path"`
+}
+
+// DefaultForecastClient is the production gRPC client for the forecasting service.
+type DefaultForecastClient struct {
+	conn    *grpc.ClientConn
+	client  parytyv1.ForecastingServiceClient
+	address string
+	timeout time.Duration
+	logger  *zap.Logger
+	cache   *IntelligenceCache
 }
 
 // NewForecastClient creates a new gRPC forecast client.
@@ -174,17 +160,34 @@ func NewForecastClient(cfg ForecastClientConfig, logger *zap.Logger) (*DefaultFo
 		cfg.Timeout = 30 * time.Second
 	}
 
+	var creds credentials.TransportCredentials
+	if cfg.UseTLS {
+		if cfg.TLSCertPath != "" {
+			certPool, err := credentials.NewClientTLSFromFile(cfg.TLSCertPath, "")
+			if err != nil {
+				return nil, fmt.Errorf("load TLS cert %s: %w", cfg.TLSCertPath, err)
+			}
+			creds = certPool
+		} else {
+			creds = credentials.NewTLS(nil)
+		}
+	} else {
+		creds = insecure.NewCredentials()
+	}
+
 	conn, err := grpc.NewClient(cfg.Address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithTransportCredentials(creds),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("dial forecast service at %s: %w", cfg.Address, err)
 	}
 
+	client := parytyv1.NewForecastingServiceClient(conn)
 	logger.Info("Connected to forecast service", zap.String("address", cfg.Address))
 
 	return &DefaultForecastClient{
 		conn:    conn,
+		client:  client,
 		address: cfg.Address,
 		timeout: cfg.Timeout,
 		logger:  logger,
@@ -195,7 +198,7 @@ func NewForecastClient(cfg ForecastClientConfig, logger *zap.Logger) (*DefaultFo
 // ForecastMetric generates a forecast for a single metric.
 // Results are cached for 5 minutes to avoid redundant gRPC calls.
 func (c *DefaultForecastClient) ForecastMetric(ctx context.Context, req *ForecastRequest) (*ForecastResponse, error) {
-	cacheKey := fmt.Sprintf("forecast:%s:%s", req.ServiceID, req.MetricName)
+	cacheKey := fmt.Sprintf("forecast:%s:%s:%s", req.TenantID, req.AgentID, req.MetricName)
 
 	if cached, ok := c.cache.Get(cacheKey); ok {
 		c.logger.Debug("Forecast cache hit", zap.String("key", cacheKey))
@@ -207,60 +210,31 @@ func (c *DefaultForecastClient) ForecastMetric(ctx context.Context, req *Forecas
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	// Use the existing QueryService gRPC client from the proto package.
-	conn := c.conn
-
-	// Build a raw JSON-RPC style request for the Python intelligence service.
-	reqJSON := grpcForecastRequest{
-		ServiceId:       req.ServiceID,
-		MetricName:      req.MetricName,
-		HorizonSeconds:  int64(req.Horizon.Seconds()),
-		ConfidenceLevel: float32(req.ConfidenceLevel),
+	protoReq := &parytyv1.ForecastMetricRequest{
+		AgentId:          req.AgentID,
+		TenantId:         req.TenantID,
+		MetricName:       req.MetricName,
+		HorizonSeconds:   int64(req.Horizon.Seconds()),
+		ConfidenceLevel:  int32(req.ConfidenceLevel * 100), // 0.95 → 95
+		StepSeconds:      req.StepSeconds,
+	}
+	if protoReq.StepSeconds == 0 {
+		protoReq.StepSeconds = 300 // default 5 minutes
 	}
 
-	_ = reqJSON
-	_ = conn
-
-	// In a production implementation, this would invoke the gRPC method:
-	//   client := parytyv1.NewQueryServiceClient(conn)
-	//   resp, err := client.GetForecast(ctx, &parytyv1.GetForecastRequest{...})
-	// For now, simulate a response based on the request parameters.
-	resp := &ForecastResponse{
-		ServiceID:       req.ServiceID,
-		MetricName:      req.MetricName,
-		Model:           "prophet",
-		ConfidenceScore: float64(req.ConfidenceLevel),
-		GeneratedAt:     time.Now(),
+	protoResp, err := c.client.ForecastMetric(ctx, protoReq)
+	if err != nil {
+		return nil, fmt.Errorf("ForecastMetric RPC failed: %w", err)
 	}
 
-	// Generate synthetic forecast points.
-	numPoints := int(req.Horizon.Seconds() / 60) // One point per minute
-	if numPoints < 1 {
-		numPoints = 1
-	}
-	if numPoints > 1440 {
-		numPoints = 1440 // Max 24 hours of minute-level data
-	}
-
-	baseValue := 50.0 // Baseline metric value
-	for i := 0; i < numPoints; i++ {
-		ts := time.Now().Add(time.Duration(i) * time.Minute)
-		predicted := baseValue + float64(i)*0.1 // Slight upward trend
-		spread := predicted * 0.1                // 10% confidence interval
-		resp.Points = append(resp.Points, ForecastPoint{
-			Timestamp:      ts,
-			PredictedValue: predicted,
-			LowerBound:     predicted - spread,
-			UpperBound:     predicted + spread,
-		})
-	}
-
+	resp := convertForecastResponse(protoResp)
 	c.cache.Set(cacheKey, resp)
 
 	c.logger.Info("Forecast generated",
-		zap.String("service_id", req.ServiceID),
+		zap.String("agent_id", req.AgentID),
 		zap.String("metric", req.MetricName),
 		zap.Int("points", len(resp.Points)),
+		zap.Float64("confidence", resp.ConfidenceScore),
 	)
 
 	return resp, nil
@@ -268,19 +242,31 @@ func (c *DefaultForecastClient) ForecastMetric(ctx context.Context, req *Forecas
 
 // ForecastBatch generates forecasts for multiple metrics in a single call.
 func (c *DefaultForecastClient) ForecastBatch(ctx context.Context, req *ForecastBatchRequest) (*ForecastBatchResponse, error) {
-	results := make([]ForecastResponse, 0, len(req.Requests))
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
 
+	protoReqs := make([]*parytyv1.ForecastMetricRequest, 0, len(req.Requests))
 	for _, r := range req.Requests {
-		resp, err := c.ForecastMetric(ctx, &r)
-		if err != nil {
-			c.logger.Warn("Batch forecast failed for metric",
-				zap.String("service_id", r.ServiceID),
-				zap.String("metric", r.MetricName),
-				zap.Error(err),
-			)
-			continue
-		}
-		results = append(results, *resp)
+		protoReqs = append(protoReqs, &parytyv1.ForecastMetricRequest{
+			AgentId:        r.AgentID,
+			TenantId:       r.TenantID,
+			MetricName:     r.MetricName,
+			HorizonSeconds: int64(r.Horizon.Seconds()),
+			ConfidenceLevel: int32(r.ConfidenceLevel * 100),
+			StepSeconds:    r.StepSeconds,
+		})
+	}
+
+	protoResp, err := c.client.ForecastBatch(ctx, &parytyv1.ForecastBatchRequest{
+		Requests: protoReqs,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("ForecastBatch RPC failed: %w", err)
+	}
+
+	results := make([]ForecastResponse, 0, len(protoResp.Forecasts))
+	for _, fr := range protoResp.Forecasts {
+		results = append(results, *convertForecastResponse(fr))
 	}
 
 	return &ForecastBatchResponse{Results: results}, nil
@@ -291,21 +277,34 @@ func (c *DefaultForecastClient) GetModelAccuracy(ctx context.Context, req *Model
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	// In production, this would call the gRPC method.
-	// Simulate an accuracy response.
-	resp := &ModelAccuracyResponse{
-		Accuracy: map[string]float64{
-			"cpu.usage_percent":    0.92,
-			"memory.usage_percent": 0.88,
-			"disk.usage_percent":   0.85,
-		},
-		LastTrained:  time.Now().Add(-24 * time.Hour),
-		SampleCount:  10000,
+	protoResp, err := c.client.GetModelAccuracy(ctx, &parytyv1.GetModelAccuracyRequest{
+		MetricName: req.MetricName,
+		TenantId:   req.TenantID,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("GetModelAccuracy RPC failed: %w", err)
 	}
 
-	_ = ctx
+	models := make(map[string]*ForecastResponse, len(protoResp.Models))
+	for metricName, mi := range protoResp.Models {
+		weights := make(map[string]float64, len(mi.Weights))
+		for k, v := range mi.Weights {
+			weights[k] = float64(v)
+		}
+		accuracy := make(map[string]float64, len(mi.Accuracy))
+		for k, v := range mi.Accuracy {
+			accuracy[k] = float64(v)
+		}
+		models[metricName] = &ForecastResponse{
+			Model:           mi.BestModel,
+			ModelWeights:    weights,
+			ModelAccuracy:   accuracy,
+			TrainingSamples: mi.TrainingSamples,
+			GeneratedAt:     time.Unix(mi.LastTrained, 0),
+		}
+	}
 
-	return resp, nil
+	return &ModelAccuracyResponse{Models: models}, nil
 }
 
 // RetrainModels triggers model retraining.
@@ -313,28 +312,33 @@ func (c *DefaultForecastClient) RetrainModels(ctx context.Context, req *RetrainR
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
-	// Invalidate cache for this service/metric.
+	// Invalidate cache for this tenant/metric
 	if req.MetricName != "" {
-		c.cache.Delete(fmt.Sprintf("forecast:%s:%s", req.ServiceID, req.MetricName))
+		c.cache.Delete(fmt.Sprintf("forecast:%s::%s", req.TenantID, req.MetricName))
 	} else {
-		c.cache.DeleteByPrefix(fmt.Sprintf("forecast:%s:", req.ServiceID))
+		c.cache.DeleteByPrefix(fmt.Sprintf("forecast:%s:", req.TenantID))
 	}
 
-	// In production, this would call the gRPC method.
-	resp := &RetrainResponse{
-		Status:  "started",
-		Message: fmt.Sprintf("Retraining initiated for service %s", req.ServiceID),
+	protoResp, err := c.client.RetrainModels(ctx, &parytyv1.RetrainModelsRequest{
+		MetricName: req.MetricName,
+		TenantId:   req.TenantID,
+		Force:      req.Force,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("RetrainModels RPC failed: %w", err)
 	}
 
-	_ = ctx
-
-	c.logger.Info("Model retraining initiated",
-		zap.String("service_id", req.ServiceID),
+	c.logger.Info("Model retraining completed",
+		zap.String("tenant_id", req.TenantID),
 		zap.String("metric", req.MetricName),
 		zap.Bool("force", req.Force),
+		zap.Bool("success", protoResp.Success),
 	)
 
-	return resp, nil
+	return &RetrainResponse{
+		Success: protoResp.Success,
+		Message: protoResp.Message,
+	}, nil
 }
 
 // Close closes the underlying gRPC connection.
@@ -343,6 +347,45 @@ func (c *DefaultForecastClient) Close() error {
 		return c.conn.Close()
 	}
 	return nil
+}
+
+// convertForecastResponse converts a proto ForecastMetricResponse to our local type.
+func convertForecastResponse(protoResp *parytyv1.ForecastMetricResponse) *ForecastResponse {
+	points := make([]ForecastPoint, 0, len(protoResp.Forecast))
+	for _, fp := range protoResp.Forecast {
+		points = append(points, ForecastPoint{
+			Timestamp:      time.Unix(fp.Timestamp, 0),
+			PredictedValue: float64(fp.Value),
+			LowerBound:     float64(fp.LowerBound),
+			UpperBound:     float64(fp.UpperBound),
+		})
+	}
+
+	resp := &ForecastResponse{
+		ServiceID:       protoResp.AgentId,
+		MetricName:      protoResp.MetricName,
+		Points:          points,
+		ConfidenceScore: float64(protoResp.OverallConfidence),
+		GeneratedAt:     time.Now(),
+	}
+
+	if protoResp.ModelInfo != nil {
+		resp.Model = protoResp.ModelInfo.BestModel
+		resp.ModelWeights = make(map[string]float64, len(protoResp.ModelInfo.Weights))
+		for k, v := range protoResp.ModelInfo.Weights {
+			resp.ModelWeights[k] = float64(v)
+		}
+		resp.ModelAccuracy = make(map[string]float64, len(protoResp.ModelInfo.Accuracy))
+		for k, v := range protoResp.ModelInfo.Accuracy {
+			resp.ModelAccuracy[k] = float64(v)
+		}
+		resp.TrainingSamples = protoResp.ModelInfo.TrainingSamples
+		if protoResp.ModelInfo.LastTrained > 0 {
+			resp.GeneratedAt = time.Unix(protoResp.ModelInfo.LastTrained, 0)
+		}
+	}
+
+	return resp
 }
 
 // isRetryable returns true if the error represents a transient gRPC failure.

@@ -9,7 +9,7 @@ import type { Trace, TraceQuery } from '../types/trace';
 import type { ParytyEvent, EventQuery } from '../types/event';
 import type { Alert, AlertRule } from '../types/alert';
 import type { TimelineSnapshot } from '../types/timeline';
-import type { AgentInfo, HealthReport } from '../types/agent';
+import type { AgentInfo, HealthReport, AgentPairingStatus, AgentManagementInfo } from '../types/agent';
 import type { NetworkEvent, NetworkEventQuery } from '../types/network';
 import type { AgentMetricBatch, AgentAggregatedMetric } from '../types/agentMetrics';
 import type {
@@ -148,6 +148,16 @@ export interface SnapshotDiff {
   metricChanges: Record<string, { from: number; to: number }>;
 }
 
+// ─── Error Sanitization ────────────────────────────────────────
+
+/**
+ * Strip HTML tags from a string to prevent XSS when displaying
+ * backend error messages in the UI.
+ */
+function sanitizeErrorMessage(message: string): string {
+  return message.replace(/<[^>]*>/g, '');
+}
+
 // ─── RestClient ─────────────────────────────────────────────────
 
 export class RestClient {
@@ -228,6 +238,7 @@ export class RestClient {
           headers,
           body: body ? JSON.stringify(body) : undefined,
           signal: controller.signal,
+          credentials: 'include',  // Include httpOnly cookies for refresh token
         });
 
         clearTimeout(timeoutId);
@@ -246,7 +257,7 @@ export class RestClient {
           }
 
           throw new ApiClientError(
-            errorBody.message || `HTTP ${response.status}`,
+            sanitizeErrorMessage(errorBody.message || `HTTP ${response.status}`),
             response.status,
             errorBody.code,
           );
@@ -445,7 +456,7 @@ export class RestClient {
   }
 
   async getTrace(traceId: string, options?: RequestOptions): Promise<Trace> {
-    return this.request<Trace>('GET', `/api/v1/traces/${traceId}`, undefined, undefined, options);
+    return this.request<Trace>('GET', `/api/v1/traces/${encodeURIComponent(traceId)}`, undefined, undefined, options);
   }
 
   // ─── Events ────────────────────────────────────────────────
@@ -519,6 +530,131 @@ export class RestClient {
     );
   }
 
+  /**
+   * Rename an agent.
+   * @param agentId - The agent identifier
+   * @param name - New display name
+   */
+  async updateAgentName(agentId: string, name: string, options?: RequestOptions): Promise<AgentManagementInfo> {
+    // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+    const resp = await this.request<{ data: AgentManagementInfo }>(
+      'PATCH',
+      `/api/v1/agents/${encodeURIComponent(agentId)}`,
+      { name },
+      undefined,
+      options,
+    );
+    return resp.data;
+  }
+
+  /**
+   * Assign an agent to a digital twin.
+   * @param twinId - The twin to assign to
+   * @param agentId - The agent to assign
+   */
+  async assignAgentToTwin(twinId: string, agentId: string, options?: RequestOptions): Promise<{ accepted: boolean }> {
+    // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+    const resp = await this.request<{ data: { accepted: boolean } }>(
+      'POST',
+      `/api/v1/twins/${encodeURIComponent(twinId)}/agents`,
+      { agent_id: agentId },
+      undefined,
+      options,
+    );
+    return resp.data;
+  }
+
+  // ─── Dual Reality Agent Management ──────────────────────────
+
+  /**
+   * Pair an edge agent with a cluster agent.
+   * @param agentId - The edge agent identifier
+   * @param twinId - The cluster agent / twin identifier to pair with
+   */
+  async pairAgent(agentId: string, twinId: string, options?: RequestOptions): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/agents/${encodeURIComponent(agentId)}/pair`,
+      { twin_id: twinId },
+      undefined,
+      options,
+    );
+  }
+
+  /**
+   * Unpair an edge agent from its cluster agent.
+   * The edge agent becomes 'rogue' and the cluster agent becomes 'unconfigured'.
+   * @param agentId - The edge agent identifier
+   */
+  async unpairAgent(agentId: string, options?: RequestOptions): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/agents/${encodeURIComponent(agentId)}/unpair`,
+      undefined,
+      undefined,
+      options,
+    );
+  }
+
+  /**
+   * Retire an edge agent (graceful decommission).
+   * @param agentId - The edge agent identifier
+   */
+  async retireAgent(agentId: string, options?: RequestOptions): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/agents/${encodeURIComponent(agentId)}/retire`,
+      undefined,
+      undefined,
+      options,
+    );
+  }
+
+  /**
+   * Blacklist an edge agent.
+   * @param agentId - The edge agent identifier
+   * @param reason - Reason for blacklisting
+   */
+  async blacklistAgent(agentId: string, reason: string, options?: RequestOptions): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/agents/${encodeURIComponent(agentId)}/blacklist`,
+      { reason },
+      undefined,
+      options,
+    );
+  }
+
+  /**
+   * Unregister an edge agent — completely erases client data.
+   * @param agentId - The edge agent identifier
+   */
+  async unregisterAgent(agentId: string, options?: RequestOptions): Promise<void> {
+    await this.request<void>(
+      'POST',
+      `/api/v1/agents/${encodeURIComponent(agentId)}/unregister`,
+      undefined,
+      undefined,
+      options,
+    );
+  }
+
+  /**
+   * Get the pairing status of an edge agent.
+   * @param agentId - The edge agent identifier
+   */
+  async getAgentPairingStatus(agentId: string, options?: RequestOptions): Promise<AgentPairingStatus> {
+    // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+    const resp = await this.request<{ data: AgentPairingStatus }>(
+      'GET',
+      `/api/v1/agents/${encodeURIComponent(agentId)}/pairing-status`,
+      undefined,
+      undefined,
+      options,
+    );
+    return resp.data;
+  }
+
   // ─── Alerts ────────────────────────────────────────────────
 
   async getAlerts(options?: RequestOptions): Promise<Alert[]> {
@@ -530,7 +666,7 @@ export class RestClient {
   }
 
   async acknowledgeAlert(alertId: string, options?: RequestOptions): Promise<void> {
-    await this.request<void>('POST', `/api/v1/alerts/${alertId}/acknowledge`, undefined, undefined, options);
+    await this.request<void>('POST', `/api/v1/alerts/${encodeURIComponent(alertId)}/acknowledge`, undefined, undefined, options);
   }
 
   // ─── Timeline Snapshots ────────────────────────────────────

@@ -4,7 +4,34 @@
  * All design-system layout and component styles.
  * Tokens are consumed via CSS custom properties from tokens.css.
  * No hard-coded hex values - all colours reference var(--aef-*) tokens.
+ *
+ * Component styles are now served from modular files under ../styles/ds/.
+ * The inline sections below are kept for the standalone showcase page.
  */
+
+/* === Component modules (thin re-export) === */
+@import '../styles/ds/button.css';
+@import '../styles/ds/counter.css';
+@import '../styles/ds/progress.css';
+@import '../styles/ds/dot.css';
+@import '../styles/ds/table.css';
+@import '../styles/ds/badge.css';
+@import '../styles/ds/container-card.css';
+@import '../styles/ds/viz-well.css';
+@import '../styles/ds/stat-module.css';
+@import '../styles/ds/catalog-row.css';
+@import '../styles/ds/scroll.css';
+@import '../styles/ds/icon.css';
+@import '../styles/ds/dropdown.css';
+@import '../styles/ds/tooltip.css';
+@import '../styles/ds/popover.css';
+@import '../styles/ds/modal.css';
+@import '../styles/ds/toast.css';
+@import '../styles/ds/cmd-palette.css';
+@import '../styles/ds/context-menu.css';
+@import '../styles/ds/animated-nav.css';
+@import '../styles/ds/motion.css';
+@import '../styles/ds/animations.css';
 
 /* - Reset / Base - */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }

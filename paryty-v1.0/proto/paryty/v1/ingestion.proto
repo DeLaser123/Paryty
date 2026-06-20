@@ -134,6 +134,12 @@ enum AgentCommandType {
   AGENT_COMMAND_TYPE_UPLOAD_BACKLOG = 6;
   // Agent should permanently delete local backlog.
   AGENT_COMMAND_TYPE_DELETE_BACKLOG = 7;
+  // Agent should gracefully shut down.
+  AGENT_COMMAND_TYPE_RETIRE = 8;
+  // Agent is blacklisted — shut down and persist blacklist state.
+  AGENT_COMMAND_TYPE_BLACKLIST = 9;
+  // Agent should clear identity and continue as rogue.
+  AGENT_COMMAND_TYPE_UNPAIR = 10;
 }
 
 // HeartbeatRequest is sent by the agent periodically.

@@ -1,8 +1,8 @@
 /**
  * TwinStatusBadge — compact status indicator for Digital Paryty twins.
  *
- * Renders a colored dot + label based on the twin's aggregate health status.
- * Supports three variants: healthy, degraded, and unhealthy.
+ * Uses DS aef-badge primitive with badge-valid/badge-warning/badge-pending
+ * variants for consistent status indication across the application.
  *
  * @module components/Twin/TwinStatusBadge
  */
@@ -27,20 +27,17 @@ interface TwinStatusBadgeProps {
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-const STATUS_MAP: Record<TwinStatus, { dot: string; label: string }> = {
-  healthy: { dot: 'dp-card__health-dot--healthy', label: 'Healthy' },
-  degraded: { dot: 'dp-card__health-dot--degraded', label: 'Degraded' },
-  unhealthy: { dot: 'dp-card__health-dot--unhealthy', label: 'Unhealthy' },
-  unknown: { dot: 'dp-card__health-dot--degraded', label: 'Unknown' },
+const STATUS_MAP: Record<TwinStatus, { badge: string; label: string }> = {
+  healthy: { badge: 'badge-valid', label: 'Healthy' },
+  degraded: { badge: 'badge-warning', label: 'Degraded' },
+  unhealthy: { badge: 'badge-warning', label: 'Unhealthy' },
+  unknown: { badge: 'badge-pending', label: 'Unknown' },
 };
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 /**
- * Renders a status badge with a colored health dot and text label.
- *
- * Uses the existing `dp-card__health-dot` CSS class pattern for the indicator
- * and follows the aef-* design system typography.
+ * Renders a DS aef-badge with the appropriate status variant.
  */
 export const TwinStatusBadge = memo(function TwinStatusBadge({
   status,
@@ -53,31 +50,10 @@ export const TwinStatusBadge = memo(function TwinStatusBadge({
 
   return (
     <span
-      className={clsx('twin-status-badge', className)}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 'var(--aef-space-2)',
-        whiteSpace: 'nowrap',
-      }}
+      className={clsx('aef-badge', config.badge, className)}
       data-testid={testId ?? 'twin-status-badge'}
     >
-      <span
-        className={clsx('dp-card__health-dot', config.dot)}
-        style={{ marginTop: 0, flexShrink: 0 }}
-        aria-hidden="true"
-      />
-      <span
-        style={{
-          fontFamily: 'var(--aef-font-body)',
-          fontSize: 11,
-          fontWeight: 500,
-          color: 'var(--aef-text-primary)',
-          textTransform: 'capitalize',
-        }}
-      >
-        {displayLabel}
-      </span>
+      {displayLabel}
     </span>
   );
 });

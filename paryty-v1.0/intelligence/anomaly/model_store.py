@@ -168,8 +168,9 @@ class AnomalyModelStore:
         existing = list(self._base_dir.glob(pattern))
         versions: list[int] = []
         for p in existing:
-            stem = p.stem
-            parts = stem.split("_v")
+            stem = p.stem  # e.g. "isolation_forest_cpu_v2_usage_v3"
+            # Use rsplit to handle metric names containing "_v" (e.g. "cpu_v2_usage")
+            parts = stem.rsplit("_v", 1)
             if len(parts) == 2:
                 try:
                     versions.append(int(parts[-1]))

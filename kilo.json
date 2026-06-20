@@ -1,0 +1,54 @@
+{
+  "$schema": "https://app.kilo.ai/config.json",
+  "model": "deepseek/deepseek-v4-pro",
+  "small_model": "deepseek/deepseek-v4-pro",
+  "default_agent": "code",
+  "snapshot": true,
+  "share": "manual",
+  "autoupdate": true,
+  "plugin": [
+    "@kilocode/plugin"
+  ],
+  "instructions": [
+    "AGENTS.md",
+    ".kilo/instructions/**/*.md",
+    ".qoder/rules/**/*.md"
+  ],
+  "skills": {
+    "paths": [
+      ".kilo/skills",
+      ".qoder/skills"
+    ]
+  },
+  "permission": {
+    "bash": "allow",
+    "read": "allow",
+    "edit": {
+      "*": "allow",
+      "*.lock": "deny",
+      ".env*": "deny",
+      "*.pem": "deny",
+      ".kilo/agent-manager.json": "deny"
+    },
+    "glob": "allow",
+    "grep": "allow",
+    "todowrite": "allow",
+    "webfetch": "allow",
+    "websearch": "allow",
+    "semantic_search": "allow",
+    "question": "allow",
+    "task": "allow",
+    "external_directory": {
+      "C:\\Users\\*\\AppData\\Local\\Temp\\kilo\\**": "allow",
+      "/tmp/kilo/**": "allow",
+      "*": "ask"
+    },
+    "skill": {
+      "*": "allow"
+    }
+  },
+  "compaction": {
+    "auto": true,
+    "prune": true
+  }
+}

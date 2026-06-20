@@ -195,12 +195,40 @@ class XGBoostForecaster:
         X, names = self._engineer_features(values_arr, timestamps_arr)
         self._feature_names = names
 
-        # Time-series train/val split (last 10% as validation)
+        # Time-series cross-validation (walk-forward)
+        n_splits = 5
+        split_size = len(X) // (n_splits + 1)
+        cv_mapes: list[float] = []
+
+        for i in range(n_splits):
+            train_end = split_size * (i + 1)
+            val_end = min(train_end + split_size, len(X))
+            if train_end >= len(X) or val_end <= train_end:
+                continue
+
+            X_cv_train, X_cv_val = X[:train_end], X[train_end:val_end]
+            y_cv_train, y_cv_val = values_arr[:train_end], values_arr[train_end:val_end]
+
+            cv_model = xgb.XGBRegressor(
+                n_estimators=self.n_estimators,
+                max_depth=self.max_depth,
+                learning_rate=self.learning_rate,
+                objective="reg:squarederror",
+                n_jobs=-1,
+                verbosity=0,
+                random_state=42,
+            )
+            cv_model.fit(X_cv_train, y_cv_train, verbose=False)
+            cv_pred = cv_model.predict(X_cv_val)
+            cv_mape = float(mean_absolute_percentage_error(y_cv_val, cv_pred) * 100)
+            cv_mapes.append(cv_mape)
+
+        # Final train/val split (last 10% as validation)
         split_idx = int(len(X) * 0.9)
         X_train, X_val = X[:split_idx], X[split_idx:]
         y_train, y_val = values_arr[:split_idx], values_arr[split_idx:]
 
-        # Train
+        # Train final model
         self._model = xgb.XGBRegressor(
             n_estimators=self.n_estimators,
             max_depth=self.max_depth,
@@ -217,9 +245,10 @@ class XGBoostForecaster:
             verbose=False,
         )
 
-        # Validation MAPE
+        # Validation MAPE (use CV average if available, else holdout)
         val_pred = self._model.predict(X_val)
-        self._val_mape = float(mean_absolute_percentage_error(y_val, val_pred) * 100)
+        holdout_mape = float(mean_absolute_percentage_error(y_val, val_pred) * 100)
+        self._val_mape = float(np.mean(cv_mapes)) if cv_mapes else holdout_mape
 
         # Store tail for recursive forecasting
         max_lag = max(self.lag_features)
@@ -234,6 +263,10 @@ class XGBoostForecaster:
             val_mape=f"{self._val_mape:.2f}%",
         )
 
+    # Maximum forecast horizon for recursive prediction (24 hours).
+    # Beyond this, error accumulation makes predictions unreliable.
+    MAX_HORIZON_SECONDS = 86400
+
     def predict(
         self,
         horizon_seconds: int,
@@ -242,7 +275,7 @@ class XGBoostForecaster:
         """Generate forecast using recursive prediction.
 
         Args:
-            horizon_seconds: Forecast horizon in seconds.
+            horizon_seconds: Forecast horizon in seconds (capped at 24h).
             step_seconds: Interval between points.
 
         Returns:
@@ -253,6 +286,15 @@ class XGBoostForecaster:
         """
         if self._model is None:
             raise RuntimeError("Model not fitted – call fit() first.")
+
+        # Cap horizon to prevent error accumulation in recursive prediction
+        if horizon_seconds > self.MAX_HORIZON_SECONDS:
+            logger.warning(
+                "xgboost_horizon_capped",
+                requested=horizon_seconds,
+                capped=self.MAX_HORIZON_SECONDS,
+            )
+            horizon_seconds = self.MAX_HORIZON_SECONDS
 
         now = int(time.time())
         n_steps = max(1, horizon_seconds // step_seconds)

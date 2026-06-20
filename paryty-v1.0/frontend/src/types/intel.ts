@@ -169,3 +169,57 @@ export const KEY_METRIC_LABELS: Record<KeyMetric, string> = {
   disk_usage_percent: 'Disk Usage',
   network_io_bytes: 'Network I/O',
 };
+
+// ─── WebSocket Payloads ─────────────────────────────────────────
+
+/** Real-time anomaly event pushed via WebSocket. */
+export interface WsAnomalyEvent {
+  tenant_id: string;
+  agent_id: string;
+  metric_name: string;
+  anomalies: Array<{
+    timestamp: number;
+    value: number;
+    score: number;
+    type: string;
+    severity: string;
+    explanation: string;
+    detection_method: string;
+  }>;
+  source: string;
+}
+
+/** Real-time forecast event pushed via WebSocket. */
+export interface WsForecastEvent {
+  tenant_id: string;
+  agent_id: string;
+  metric_name: string;
+  forecast: {
+    overall_confidence: number;
+    model_info: {
+      best_model: string;
+      weights: Record<string, number>;
+      accuracy: Record<string, number>;
+      last_trained: number;
+      training_samples: number;
+    };
+    forecast_points: Array<{
+      timestamp: number;
+      value: number;
+      lower_bound: number;
+      upper_bound: number;
+    }>;
+  };
+  source: string;
+}
+
+/** Real-time concept drift event pushed via WebSocket. */
+export interface WsDriftEvent {
+  tenant_id: string;
+  agent_id: string;
+  metric_name: string;
+  drift_type: string;
+  confidence: number;
+  timestamp: number;
+  source: string;
+}

@@ -128,21 +128,24 @@ func (m *APIKeyManager) ValidateKey(ctx context.Context, apiKey string) (string,
 
 // RevokeKey soft-deletes an API key by setting its revoked_at timestamp.
 // Returns an error if the key does not exist or is already revoked.
-func (m *APIKeyManager) RevokeKey(ctx context.Context, keyID string) error {
+func (m *APIKeyManager) RevokeKey(ctx context.Context, keyID, tenantID string) error {
 	if keyID == "" {
 		return fmt.Errorf("revoke key: key_id must not be empty")
+	}
+	if tenantID == "" {
+		return fmt.Errorf("revoke key: tenant_id must not be empty")
 	}
 
 	tag, err := m.pool.Exec(ctx,
 		`UPDATE api_keys SET revoked_at = now()
-		 WHERE key_id = $1 AND revoked_at IS NULL`,
-		keyID,
+		 WHERE key_id = $1 AND tenant_id = $2 AND revoked_at IS NULL`,
+		keyID, tenantID,
 	)
 	if err != nil {
 		return fmt.Errorf("revoke key %s: %w", keyID, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("revoke key %s: not found or already revoked", keyID)
+		return fmt.Errorf("revoke key %s: not found, already revoked, or not owned by tenant", keyID)
 	}
 
 	m.logger.Info("API key revoked",
@@ -194,9 +197,12 @@ func (m *APIKeyManager) ListKeys(ctx context.Context, tenantID string) ([]APIKey
 // RotateKey generates a new raw key for an existing API key ID.
 // The old key hash is replaced in-place with the new hash and prefix.
 // Returns the new raw key (shown once) or an error if the key doesn't exist.
-func (m *APIKeyManager) RotateKey(ctx context.Context, keyID string) (rawKey string, err error) {
+func (m *APIKeyManager) RotateKey(ctx context.Context, keyID, tenantID string) (rawKey string, err error) {
 	if keyID == "" {
 		return "", fmt.Errorf("rotate key: key_id must not be empty")
+	}
+	if tenantID == "" {
+		return "", fmt.Errorf("rotate key: tenant_id must not be empty")
 	}
 
 	// Generate new 32 random bytes -> 64 hex chars.
@@ -215,14 +221,14 @@ func (m *APIKeyManager) RotateKey(ctx context.Context, keyID string) (rawKey str
 
 	tag, err := m.pool.Exec(ctx,
 		`UPDATE api_keys SET key_hash = $1, key_prefix = $2
-		 WHERE key_id = $3 AND revoked_at IS NULL`,
-		string(hash), prefix, keyID,
+		 WHERE key_id = $3 AND tenant_id = $4 AND revoked_at IS NULL`,
+		string(hash), prefix, keyID, tenantID,
 	)
 	if err != nil {
 		return "", fmt.Errorf("rotate key %s: %w", keyID, err)
 	}
 	if tag.RowsAffected() == 0 {
-		return "", fmt.Errorf("rotate key %s: not found or revoked", keyID)
+		return "", fmt.Errorf("rotate key %s: not found, revoked, or not owned by tenant", keyID)
 	}
 
 	m.logger.Info("API key rotated",

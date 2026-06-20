@@ -390,7 +390,18 @@ impl GrpcClient {
 
         // Configure TLS if enabled.
         if self.tls_enabled {
-            let tls_config = tonic::transport::ClientTlsConfig::new();
+            let mut tls_config = tonic::transport::ClientTlsConfig::new();
+
+            // Extract hostname from endpoint URI for domain verification.
+            // This prevents MITM attacks by verifying the server's certificate
+            // matches the hostname we're connecting to.
+            if let Ok(uri) = endpoint_uri.parse::<http::Uri>() {
+                if let Some(host) = uri.host() {
+                    tls_config = tls_config.domain_name(host);
+                    debug!("TLS domain verification enabled for host: {}", host);
+                }
+            }
+
             endpoint = endpoint.tls_config(tls_config).context("Failed to configure TLS")?;
             debug!("TLS enabled for cluster connection");
         }
@@ -867,6 +878,9 @@ mod tests {
             started_at: None,
             twin_id: String::new(),
             client_id: String::new(),
+            cluster_agent_id: String::new(),
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
         };
 
         let result = client.register_agent(registration).await;
@@ -910,6 +924,7 @@ mod tests {
                 tenant_id: None,
                 twin_id: None,
                 client_id: None,
+                cluster_agent_id: None,
                 self_metrics: crate::config::SelfMetricsConfig { enabled: false, port: 9090 },
             },
             layers: crate::config::LayersConfig {

@@ -102,10 +102,6 @@ func main() {
 		logger.Warn("Failed to initialize topics (may already exist)", zap.Error(err))
 	}
 
-	// Create ingestion service
-	ingestionSvc := api.NewIngestionService(store, streamEngine, slog.Default())
-	logger.Info("Ingestion service created")
-
 	// Create rate limiter from configuration
 	rateLimiter := api.NewRateLimiter(cfg.Cluster.RateLimit.MaxBatchesPerMinute)
 	rateLimiter.StartCleanup(ctx)
@@ -148,6 +144,15 @@ func main() {
 	} else {
 		logger.Warn("DATABASE_URL not set — API key auth and agent tracking disabled")
 	}
+
+	// Create ingestion service (after agentAssigner is initialized)
+	var routingCache *twin.RoutingCache
+	if agentAssigner != nil {
+		rdb := store.HotStore().RDB()
+		routingCache = twin.NewRoutingCache(rdb, agentAssigner, slog.Default())
+	}
+	ingestionSvc := api.NewIngestionService(store, streamEngine, slog.Default(), routingCache)
+	logger.Info("Ingestion service created")
 
 	// Create gRPC server with auth interceptors (Phase 8).
 	var grpcOpts []grpc.ServerOption

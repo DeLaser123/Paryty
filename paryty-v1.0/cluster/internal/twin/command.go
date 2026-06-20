@@ -129,3 +129,39 @@ func (c *CommandManager) EnqueueIdentityCommand(ctx context.Context, agentID, tw
 	}
 	return c.EnqueueCommand(ctx, agentID, 5, string(payloadJSON))
 }
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dual Reality Agent System — Command Types
+// ═══════════════════════════════════════════════════════════════════════
+
+// Dual Reality command type constants.
+const (
+	CommandTypeRetire    int32 = 8
+	CommandTypeBlacklist int32 = 9
+	CommandTypeUnpair    int32 = 10
+)
+
+// EnqueueRetireCommand sends a RETIRE command to an edge agent.
+// The agent should gracefully shut down upon receipt.
+func (c *CommandManager) EnqueueRetireCommand(ctx context.Context, agentID string) error {
+	return c.EnqueueCommand(ctx, agentID, CommandTypeRetire, "{}")
+}
+
+// EnqueueBlacklistCommand sends a BLACKLIST command to an edge agent.
+// The agent should immediately shut down and refuse future restarts.
+func (c *CommandManager) EnqueueBlacklistCommand(ctx context.Context, agentID, reason string) error {
+	payload := struct {
+		Reason string `json:"reason"`
+	}{Reason: reason}
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal blacklist payload: %w", err)
+	}
+	return c.EnqueueCommand(ctx, agentID, CommandTypeBlacklist, string(payloadJSON))
+}
+
+// EnqueueUnpairCommand sends an UNPAIR command to an edge agent.
+// The agent should clear its identity and continue as a rogue agent.
+func (c *CommandManager) EnqueueUnpairCommand(ctx context.Context, agentID string) error {
+	return c.EnqueueCommand(ctx, agentID, CommandTypeUnpair, "{}")
+}

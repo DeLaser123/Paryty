@@ -247,6 +247,33 @@ func CORS(allowedOrigins ...string) gin.HandlerFunc {
 }
 
 // =============================================================================
+// Security Headers Middleware
+// =============================================================================
+
+// SecurityHeaders returns a Gin middleware that sets hardened HTTP security
+// headers on every response. These headers mitigate common attack classes
+// including clickjacking, MIME-type sniffing, XSS, and information leakage.
+//
+// This middleware should be registered FIRST in the middleware chain so that
+// security headers are present on all responses, including error responses
+// from later middleware.
+func SecurityHeaders() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Header("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+		c.Header("X-Frame-Options", "DENY")
+		c.Header("X-Content-Type-Options", "nosniff")
+		c.Header("X-XSS-Protection", "0")
+		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		c.Header("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+			"img-src 'self' data: blob:; connect-src 'self' ws: wss:; "+
+			"font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+		c.Next()
+	}
+}
+
+// =============================================================================
 // Rate Limit Middleware (token bucket)
 // =============================================================================
 
@@ -317,6 +344,7 @@ type tokenBucketLimiter struct {
 type bucketState struct {
 	tokens   float64
 	lastFill time.Time
+	lastSeen time.Time
 }
 
 func newTokenBucketLimiter(maxPerMinute, burst int) *tokenBucketLimiter {
@@ -340,12 +368,25 @@ func (l *tokenBucketLimiter) tryConsume(key string) (time.Duration, bool) {
 	defer l.mu.Unlock()
 
 	now := time.Now()
+
+	// Lazy eviction: periodically remove stale buckets to prevent memory leak.
+	// Runs inline every 1000 calls to avoid background goroutine.
+	if len(l.buckets) > 1000 {
+		staleThreshold := now.Add(-10 * time.Minute)
+		for k, b := range l.buckets {
+			if b.lastSeen.Before(staleThreshold) {
+				delete(l.buckets, k)
+			}
+		}
+	}
+
 	bucket, ok := l.buckets[key]
 	if !ok {
 		// New bucket: start full.
 		bucket = &bucketState{
 			tokens:   l.burst,
 			lastFill: now,
+			lastSeen: now,
 		}
 		l.buckets[key] = bucket
 	} else {
@@ -353,6 +394,7 @@ func (l *tokenBucketLimiter) tryConsume(key string) (time.Duration, bool) {
 		elapsed := now.Sub(bucket.lastFill).Seconds()
 		bucket.tokens = min(l.burst, bucket.tokens+elapsed*l.rate)
 		bucket.lastFill = now
+		bucket.lastSeen = now
 	}
 
 	if bucket.tokens >= 1.0 {

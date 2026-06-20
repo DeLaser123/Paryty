@@ -6,6 +6,9 @@ port 8812.  All queries are tenant-scoped.
 
 QuestDB supports standard PostgreSQL wire protocol for queries, making
 psycopg2 compatible.
+
+Connection pooling: uses psycopg2.pool.ThreadedConnectionPool for
+efficient connection reuse across concurrent ML workers.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from typing import Any
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.pool
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -25,6 +29,9 @@ class QuestDBClient:
 
     Connects via PostgreSQL wire protocol (port 8812 by default).
     All queries filter by ``tenant_id`` to enforce multi-tenancy.
+
+    Uses a threaded connection pool (min 2, max 10 connections) for
+efficient reuse across concurrent gRPC handler threads.
 
     Usage::
 
@@ -42,22 +49,28 @@ class QuestDBClient:
         database: str | None = None,
         user: str | None = None,
         password: str | None = None,
+        min_conn: int = 2,
+        max_conn: int = 10,
     ) -> None:
         self._host = host or os.getenv("QUESTDB_HOST", "localhost")
         self._port = port or int(os.getenv("QUESTDB_PORT", "8812"))
         self._database = database or os.getenv("QUESTDB_DATABASE", "paryty")
         self._user = user or os.getenv("QUESTDB_USER", "admin")
         self._password = password or os.getenv("QUESTDB_PASSWORD", "quest")
-        self._conn: Any | None = None
+        self._min_conn = min_conn
+        self._max_conn = max_conn
+        self._pool: psycopg2.pool.ThreadedConnectionPool | None = None
 
     def connect(self) -> None:
-        """Establish connection to QuestDB.
+        """Establish connection pool to QuestDB.
 
         Raises:
-            ConnectionError: If the connection fails.
+            ConnectionError: If the connection pool creation fails.
         """
         try:
-            self._conn = psycopg2.connect(
+            self._pool = psycopg2.pool.ThreadedConnectionPool(
+                self._min_conn,
+                self._max_conn,
                 host=self._host,
                 port=self._port,
                 dbname=self._database,
@@ -65,12 +78,14 @@ class QuestDBClient:
                 password=self._password,
                 connect_timeout=10,
             )
-            self._conn.autocommit = True
+            # Set autocommit on pool connections
             logger.info(
-                "questdb_connected",
+                "questdb_pool_connected",
                 host=self._host,
                 port=self._port,
                 database=self._database,
+                min_conn=self._min_conn,
+                max_conn=self._max_conn,
             )
         except psycopg2.Error as exc:
             logger.error("questdb_connection_failed", error=str(exc))
@@ -79,31 +94,34 @@ class QuestDBClient:
             ) from exc
 
     def disconnect(self) -> None:
-        """Close the connection."""
-        if self._conn is not None:
+        """Close all connections in the pool."""
+        if self._pool is not None:
             try:
-                self._conn.close()
+                self._pool.closeall()
             except Exception:
                 pass
-            self._conn = None
-            logger.info("questdb_disconnected")
+            self._pool = None
+            logger.info("questdb_pool_disconnected")
 
     @property
     def is_connected(self) -> bool:
-        """True if the connection is alive."""
-        if self._conn is None:
-            return False
-        try:
-            with self._conn.cursor() as cur:
-                cur.execute("SELECT 1")
-            return True
-        except Exception:
-            return False
+        """True if the connection pool is active."""
+        return self._pool is not None
 
     def _ensure_connected(self) -> None:
-        """Reconnect if connection is lost."""
-        if not self.is_connected:
+        """Reconnect if connection pool is not initialised."""
+        if self._pool is None:
             self.connect()
+
+    def _get_conn(self) -> Any:
+        """Get a connection from the pool."""
+        self._ensure_connected()
+        return self._pool.getconn()  # type: ignore[union-attr]
+
+    def _put_conn(self, conn: Any) -> None:
+        """Return a connection to the pool."""
+        if self._pool is not None:
+            self._pool.putconn(conn)
 
     # ------------------------------------------------------------------
     # Query API
@@ -144,8 +162,9 @@ class QuestDBClient:
 
         query += " ORDER BY timestamp ASC"
 
+        conn = self._get_conn()
         try:
-            with self._conn.cursor() as cur:  # type: ignore[union-attr]
+            with conn.cursor() as cur:
                 cur.execute(query, params)
                 rows = cur.fetchall()
 
@@ -177,6 +196,8 @@ class QuestDBClient:
                 error=str(exc),
             )
             return [], []
+        finally:
+            self._put_conn(conn)
 
     def query_recent(
         self,
@@ -213,8 +234,9 @@ class QuestDBClient:
         query += " ORDER BY timestamp DESC LIMIT %s"
         params.append(limit)
 
+        conn = self._get_conn()
         try:
-            with self._conn.cursor() as cur:  # type: ignore[union-attr]
+            with conn.cursor() as cur:
                 cur.execute(query, params)
                 rows = cur.fetchall()
 
@@ -241,6 +263,8 @@ class QuestDBClient:
                 error=str(exc),
             )
             return [], []
+        finally:
+            self._put_conn(conn)
 
     def query_available_metrics(
         self,
@@ -261,14 +285,17 @@ class QuestDBClient:
             query += " AND agent_id = %s"
             params.append(agent_id)
 
+        conn = self._get_conn()
         try:
-            with self._conn.cursor() as cur:  # type: ignore[union-attr]
+            with conn.cursor() as cur:
                 cur.execute(query, params)
                 rows = cur.fetchall()
             return [row[0] for row in rows]
         except psycopg2.Error as exc:
             logger.error("questdb_list_metrics_failed", error=str(exc))
             return []
+        finally:
+            self._put_conn(conn)
 
     def __enter__(self) -> QuestDBClient:
         self.connect()

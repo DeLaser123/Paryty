@@ -1,0 +1,12 @@
+.aef-catalog-row {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: 5px var(--aef-space-2);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-control);
+  background: var(--aef-surface-card);
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+}

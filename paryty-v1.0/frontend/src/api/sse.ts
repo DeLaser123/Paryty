@@ -10,22 +10,18 @@ export type SseEventHandler = (event: MessageEvent) => void;
 /**
  * Module-level access token getter for all SSE connections.
  *
- * EventSource cannot set request headers, so the cluster's SSE endpoints
- * authenticate via a `token` query parameter (validated by the same JWT
- * middleware as Bearer headers). Wired by AuthProvider on mount.
+ * Auth is handled via httpOnly cookie (paryty_access_token) sent automatically
+ * by the browser for same-origin requests. No longer exposing tokens in URL
+ * query parameters, which were logged by proxies and visible in browser history.
  */
-let sseTokenGetter: (() => string | null) | null = null;
 
-export function setSseTokenGetter(fn: (() => string | null) | null): void {
-  sseTokenGetter = fn;
+export function setSseTokenGetter(_fn: (() => string | null) | null): void {
+  // No-op: auth is handled via httpOnly cookie sent automatically by browser.
 }
 
-/** Appends the current access token (if any) as a `token` query parameter. */
+/** Returns the URL unchanged; auth is handled via httpOnly cookie. */
 function withAuthToken(url: string): string {
-  const token = sseTokenGetter?.() ?? null;
-  if (!token) return url;
-  const separator = url.includes('?') ? '&' : '?';
-  return `${url}${separator}token=${encodeURIComponent(token)}`;
+  return url;
 }
 
 export interface SseConfig {

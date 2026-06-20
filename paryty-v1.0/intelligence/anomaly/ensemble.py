@@ -112,7 +112,10 @@ class AnomalyEnsemble:
                 continue
 
             # Confidence = fraction of detectors that flagged
-            confidence = len(detectors_flagged) / 3.0
+            num_active_detectors = sum(1 for w in self._weights.values() if w > 0)
+            if num_active_detectors == 0:
+                num_active_detectors = 3  # fallback to 3 standard detectors
+            confidence = len(detectors_flagged) / num_active_detectors
 
             # Combined score: weighted average of individual scores
             scores = [
@@ -128,8 +131,6 @@ class AnomalyEnsemble:
 
             # Merge contributing factors
             all_factors: list[str] = []
-            for r in [stat_by_ts, if_by_ts, ae_by_ts]:
-                pass  # gather from detail_by_ts
             for r in list(statistical_results) + list(isolation_results) + list(autoencoder_results):
                 if r.timestamp == ts:
                     all_factors.extend(

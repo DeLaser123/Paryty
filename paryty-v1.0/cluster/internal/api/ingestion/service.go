@@ -11,6 +11,7 @@ import (
 	pb "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
+	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
 )
 
 // StoreBackend abstracts the storage layer for testability.
@@ -30,18 +31,20 @@ type StreamBackend interface {
 
 // IngestionService handles agent registration and metric ingestion.
 type IngestionService struct {
-	store  StoreBackend
-	stream StreamBackend
-	logger *slog.Logger
-	agents sync.Map // map[string]*models.AgentInfo — keys are "tenant:agentID"
+	store    StoreBackend
+	stream   StreamBackend
+	logger   *slog.Logger
+	routing  *twin.RoutingCache
+	agents   sync.Map // map[string]*models.AgentInfo — keys are "tenant:agentID"
 }
 
 // NewIngestionService creates a new ingestion service.
-func NewIngestionService(store *storage.Store, engine *stream.StreamEngine, logger *slog.Logger) *IngestionService {
+func NewIngestionService(store *storage.Store, engine *stream.StreamEngine, logger *slog.Logger, routing *twin.RoutingCache) *IngestionService {
 	return &IngestionService{
-		store:  store,
-		stream: engine,
-		logger: logger,
+		store:   store,
+		stream:  engine,
+		logger:  logger,
+		routing: routing,
 	}
 }
 
@@ -220,8 +223,12 @@ func (s *IngestionService) SendBatch(ctx context.Context, tenant, agentID string
 		return err
 	}
 
-	// Publish to tenant-scoped stream for processing
-	if err := s.stream.Producer().PublishTenant(ctx, stream.TopicMetricsRaw(tenant), tenant, agentID, batch); err != nil {
+	// Publish to twin-scoped or tenant-scoped stream for processing
+	topic := stream.TopicMetricsRaw(tenant) // default tenant topic
+	if s.routing != nil {
+		topic = s.routing.ResolveTopic(ctx, tenant, agentID)
+	}
+	if err := s.stream.Producer().PublishTenant(ctx, topic, tenant, agentID, batch); err != nil {
 		slog.Error("stream publish failed, attempting DLQ",
 			"error", err,
 			"tenant", tenant,
@@ -271,8 +278,16 @@ func (s *IngestionService) StoreNetworkEvents(ctx context.Context, tenant string
 	// instead of a string, breaking downstream consumers that expect time.Time.
 	modelEvent := networkEventBatchToModel(batch)
 
-	// Publish to tenant-scoped network events stream.
-	if err := s.stream.Producer().PublishTenant(ctx, stream.TopicNetworkEvents(tenant), tenant, agentID, modelEvent); err != nil {
+	// Publish to twin-scoped or tenant-scoped network events stream.
+	netTopic := stream.TopicNetworkEvents(tenant) // default tenant topic
+	if s.routing != nil {
+		// For network events, we need to resolve to the twin's network.events topic
+		twinID := s.routing.ResolveTwinID(ctx, tenant, agentID)
+		if twinID != "" {
+			netTopic = stream.TopicTwinNetworkEvents(tenant, twinID)
+		}
+	}
+	if err := s.stream.Producer().PublishTenant(ctx, netTopic, tenant, agentID, modelEvent); err != nil {
 		slog.Error("network event stream publish failed, attempting DLQ",
 			"error", err,
 			"tenant", tenant,

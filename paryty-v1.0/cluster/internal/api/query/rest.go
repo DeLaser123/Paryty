@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +20,7 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/controlplane"
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
 	"github.com/paryty/paryty-v1.0/cluster/internal/plan"
+	"github.com/paryty/paryty-v1.0/cluster/internal/security"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage/hot"
 	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
@@ -34,6 +37,7 @@ type QueryService struct {
 	twinAPI       TwinAPI                     // Phase 8: TwinService for agent/twin management
 	db            *pgxpool.Pool               // Phase 8: PostgreSQL control plane pool
 	planEngine    *plan.PlanEngine            // Phase 8: Plan engine for plan operations
+	audit         *security.AuditLogger       // Phase 8: Audit logger for admin actions
 }
 
 // TwinAPI defines the twin management operations needed by the REST layer.
@@ -44,19 +48,20 @@ type TwinAPI interface {
 	GetTwin(ctx context.Context, tenantID, twinID string) (map[string]interface{}, error)
 	UpdateTwin(ctx context.Context, tenantID, twinID, name, description string) (map[string]interface{}, error)
 	DeleteTwin(ctx context.Context, tenantID, twinID string) error
-	ListTwinAgents(ctx context.Context, twinID string) ([]map[string]interface{}, error)
+	ListTwinAgents(ctx context.Context, tenantID, twinID string) ([]map[string]interface{}, error)
 	AssignAgentToTwin(ctx context.Context, tenantID, twinID, agentID string) error
 	AcceptBacklog(ctx context.Context, agentID string) error
 	RejectBacklog(ctx context.Context, agentID string) error
 }
 
 // NewQueryService creates a new query service.
-func NewQueryService(store *storage.Store, apiKeyManager *controlplane.APIKeyManager, agentAssigner *twin.AgentAssigner, logger *zap.Logger) *QueryService {
+func NewQueryService(store *storage.Store, apiKeyManager *controlplane.APIKeyManager, agentAssigner *twin.AgentAssigner, logger *zap.Logger, audit *security.AuditLogger) *QueryService {
 	return &QueryService{
 		store:         store,
 		logger:        logger,
 		apiKeyManager: apiKeyManager,
 		agentAssigner: agentAssigner,
+		audit:         audit,
 	}
 }
 
@@ -466,7 +471,8 @@ func (s *QueryService) GetMetrics(c *gin.Context) {
 	}
 	batch, err := s.store.GetLatestMetrics(ctx, tenant, agentID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		s.logger.Error("Failed to get metrics", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -498,7 +504,8 @@ func (s *QueryService) GetAggregatedMetrics(c *gin.Context) {
 
 	metrics, err := s.store.QueryAggregatedMetrics(ctx, tenant, agentID, metricName, window, start, end)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		s.logger.Error("Failed to get aggregated metrics", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -534,7 +541,8 @@ func (s *QueryService) QueryTraces(c *gin.Context) {
 
 	traces, err := s.store.QueryTraces(ctx, tenant, service, start, end, limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		s.logger.Error("Failed to query traces", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -554,7 +562,8 @@ func (s *QueryService) GetTrace(c *gin.Context) {
 
 	traces, err := s.store.QueryTraces(ctx, tenant, "", time.Time{}, time.Now(), 1)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		s.logger.Error("Failed to query traces", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -584,7 +593,8 @@ func (s *QueryService) GetAlerts(c *gin.Context) {
 	}
 	alerts, err := s.store.GetActiveAlerts(ctx, tenant)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		s.logger.Error("Failed to get alerts", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -607,19 +617,19 @@ func (s *QueryService) QueryMetrics(c *gin.Context) {
 		Aggregation string            `json:"aggregation"`
 	}
 	if err := c.ShouldBindJSON(&query); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
 	// Parse time range (RFC3339 timestamps from TypeScript)
 	start, err := time.Parse(time.RFC3339, query.StartTime)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid startTime: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "invalid startTime format; use RFC3339"})
 		return
 	}
 	end, err := time.Parse(time.RFC3339, query.EndTime)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid endTime: " + err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "invalid endTime format; use RFC3339"})
 		return
 	}
 
@@ -768,7 +778,7 @@ func (s *QueryService) QueryTracesPost(c *gin.Context) {
 		Limit   int    `json:"limit"`
 	}
 	if err := c.ShouldBindJSON(&query); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
@@ -794,7 +804,8 @@ func (s *QueryService) QueryTracesPost(c *gin.Context) {
 
 	traces, err := s.store.QueryTraces(ctx, tenant, query.Service, start, end, query.Limit)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		s.logger.Error("Failed to query traces", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -813,7 +824,7 @@ func (s *QueryService) QueryEventsPost(c *gin.Context) {
 		Limit     int    `json:"limit"`
 	}
 	if err := c.ShouldBindJSON(&query); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
@@ -963,7 +974,7 @@ func (s *QueryService) AcknowledgeAlert(c *gin.Context) {
 		case errors.Is(err, hot.ErrAlertNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"error": "NOT_FOUND", "message": "alert not found"})
 		case errors.Is(err, hot.ErrInvalidTransition):
-			c.JSON(http.StatusConflict, gin.H{"error": "INVALID_STATE", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"error": "INVALID_STATE", "message": "alert cannot be acknowledged in its current state"})
 		default:
 			s.logger.Error("acknowledge alert failed",
 				zap.String("tenant", tenant),
@@ -993,7 +1004,8 @@ func (s *QueryService) ListAgents(c *gin.Context) {
 
 	agents, err := s.store.GetAllAgentStates(ctx, tenant)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		s.logger.Error("Failed to list agents", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 	if agents == nil {
@@ -1108,7 +1120,7 @@ func (s *QueryService) QueryNetworkEvents(c *gin.Context) {
 			zap.String("agent_id", agentID),
 			zap.String("type", eventType),
 		)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
 		return
 	}
 
@@ -1359,7 +1371,20 @@ func (s *QueryService) RegisterTwinRoutes(authGroup *gin.RouterGroup, writeMW, c
 	authGroup.GET("/agents/unassigned", s.ListUnassignedAgents)
 	authGroup.POST("/agents", writeMW, s.CreateAgent)
 	authGroup.GET("/agents/all", s.ListAllAgents)
+	authGroup.PATCH("/agents/:agent_id", writeMW, s.UpdateAgent)
 	authGroup.DELETE("/agents/:agent_id", writeMW, s.DeleteAgent)
+
+	// ═══ Dual Reality Agent System — Lifecycle Endpoints ═══
+	authGroup.POST("/agents/:agent_id/pair", writeMW, s.PairAgentREST)
+	authGroup.POST("/agents/:agent_id/unpair", writeMW, s.UnpairAgentREST)
+	authGroup.POST("/agents/:agent_id/retire", writeMW, s.RetireAgentREST)
+	authGroup.POST("/agents/:agent_id/blacklist", writeMW, s.BlacklistAgentREST)
+	authGroup.POST("/agents/:agent_id/unregister", writeMW, s.UnregisterAgentREST)
+	authGroup.GET("/agents/:agent_id/pairing-status", s.GetAgentPairingStatusREST)
+	authGroup.GET("/agents/check-blacklist/:agent_id", s.CheckBlacklistREST)
+
+	// Binary hosting — download agent binaries.
+	authGroup.GET("/agents/download/:platform", s.DownloadAgentBinary)
 }
 
 // tenantFromJWT extracts the tenant ID from the Gin context populated by JWT middleware.
@@ -1389,13 +1414,14 @@ func (s *QueryService) CreateTwin(c *gin.Context) {
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
 	twin, err := s.twinAPI.CreateTwin(c.Request.Context(), tenantID, req.Name, req.Description)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		s.logger.Error("Failed to create twin", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to create twin"})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": twin})
@@ -1415,7 +1441,8 @@ func (s *QueryService) ListTwins(c *gin.Context) {
 
 	twins, err := s.twinAPI.ListTwins(c.Request.Context(), tenantID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		s.logger.Error("Failed to list twins", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to list twins"})
 		return
 	}
 	if twins == nil {
@@ -1439,7 +1466,7 @@ func (s *QueryService) GetTwin(c *gin.Context) {
 	twinID := c.Param("twin_id")
 	twin, err := s.twinAPI.GetTwin(c.Request.Context(), tenantID, twinID)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "NOT_FOUND", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"error": "NOT_FOUND", "message": "Twin not found"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": twin})
@@ -1463,13 +1490,14 @@ func (s *QueryService) UpdateTwin(c *gin.Context) {
 		Description string `json:"description"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
 	twin, err := s.twinAPI.UpdateTwin(c.Request.Context(), tenantID, twinID, req.Name, req.Description)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		s.logger.Error("Failed to update twin", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to update twin"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": twin})
@@ -1489,7 +1517,8 @@ func (s *QueryService) DeleteTwin(c *gin.Context) {
 
 	twinID := c.Param("twin_id")
 	if err := s.twinAPI.DeleteTwin(c.Request.Context(), tenantID, twinID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		s.logger.Error("Failed to delete twin", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to delete twin"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted": true}})
@@ -1497,15 +1526,21 @@ func (s *QueryService) DeleteTwin(c *gin.Context) {
 
 // ListTwinAgents handles GET /api/v1/twins/:twin_id/agents
 func (s *QueryService) ListTwinAgents(c *gin.Context) {
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "UNAUTHENTICATED", "message": "Missing tenant context"})
+		return
+	}
 	if s.twinAPI == nil {
 		c.JSON(http.StatusNotImplemented, gin.H{"error": "NOT_IMPLEMENTED", "message": "Twin service requires PostgreSQL control plane"})
 		return
 	}
 
 	twinID := c.Param("twin_id")
-	agents, err := s.twinAPI.ListTwinAgents(c.Request.Context(), twinID)
+	agents, err := s.twinAPI.ListTwinAgents(c.Request.Context(), tenantID, twinID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		s.logger.Error("Failed to list twin agents", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to list twin agents"})
 		return
 	}
 	if agents == nil {
@@ -1531,12 +1566,13 @@ func (s *QueryService) AssignAgentToTwin(c *gin.Context) {
 		AgentID string `json:"agent_id" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
 	if err := s.twinAPI.AssignAgentToTwin(c.Request.Context(), tenantID, twinID, req.AgentID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		s.logger.Error("Failed to assign agent to twin", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to assign agent"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"accepted": true}})
@@ -1551,7 +1587,8 @@ func (s *QueryService) AcceptBacklog(c *gin.Context) {
 
 	agentID := c.Param("agent_id")
 	if err := s.twinAPI.AcceptBacklog(c.Request.Context(), agentID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		s.logger.Error("Failed to accept backlog", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to accept backlog"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"accepted": true}})
@@ -1566,7 +1603,8 @@ func (s *QueryService) RejectBacklog(c *gin.Context) {
 
 	agentID := c.Param("agent_id")
 	if err := s.twinAPI.RejectBacklog(c.Request.Context(), agentID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		s.logger.Error("Failed to reject backlog", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to reject backlog"})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted": true}})
@@ -1586,7 +1624,8 @@ func (s *QueryService) ListUnassignedAgents(c *gin.Context) {
 
 	agents, err := s.agentAssigner.ListUnassignedAgents(c.Request.Context(), tenantID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		s.logger.Error("Failed to list unassigned agents", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to list unassigned agents"})
 		return
 	}
 	if agents == nil {
@@ -1611,14 +1650,14 @@ func (s *QueryService) CreateAgent(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
 	agent, err := s.agentAssigner.CreateAgent(c.Request.Context(), tenantID, req.Name)
 	if err != nil {
 		s.logger.Error("Failed to create agent", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to create agent"})
 		return
 	}
 
@@ -1640,7 +1679,7 @@ func (s *QueryService) ListAllAgents(c *gin.Context) {
 	agents, err := s.agentAssigner.ListAllAgents(c.Request.Context(), tenantID)
 	if err != nil {
 		s.logger.Error("Failed to list agents", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to list agents"})
 		return
 	}
 	if agents == nil {
@@ -1665,11 +1704,42 @@ func (s *QueryService) DeleteAgent(c *gin.Context) {
 	agentID := c.Param("agent_id")
 	if err := s.agentAssigner.DeleteAgent(c.Request.Context(), agentID, tenantID); err != nil {
 		s.logger.Error("Failed to delete agent", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to delete agent"})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"message": "agent deleted"}})
+}
+
+// UpdateAgent handles PATCH /api/v1/agents/:agent_id — rename an agent.
+func (s *QueryService) UpdateAgent(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	var req struct {
+		Name string `json:"name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
+		return
+	}
+
+	agent, err := s.agentAssigner.UpdateAgent(c.Request.Context(), agentID, tenantID, req.Name)
+	if err != nil {
+		s.logger.Error("Failed to update agent", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to update agent"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": agent})
 }
 
 // â”€â”€ API Key Management Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -1699,7 +1769,8 @@ func (s *QueryService) ListApiKeys(c *gin.Context) {
 
 	keys, err := s.apiKeyManager.ListKeys(c.Request.Context(), tenantID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		s.logger.Error("Failed to list API keys", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to list API keys"})
 		return
 	}
 
@@ -1742,13 +1813,14 @@ func (s *QueryService) CreateApiKey(c *gin.Context) {
 		Name string `json:"name"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
 	rawKey, keyID, err := s.apiKeyManager.GenerateKey(c.Request.Context(), tenantID, req.Name)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		s.logger.Error("Failed to create API key", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to create API key"})
 		return
 	}
 
@@ -1759,6 +1831,16 @@ func (s *QueryService) CreateApiKey(c *gin.Context) {
 		"prefix":    rawKey[:16],
 		"createdAt": time.Now().UTC().Format(time.RFC3339),
 	})
+
+	// Audit log API key creation.
+	if s.audit != nil {
+		userID, _ := c.Get(string(plan.CtxUserID))
+		uid, _ := userID.(string)
+		s.audit.LogAction(tenantID, uid, "admin.apikey.create", "apikey", keyID, map[string]interface{}{
+			"key_id": keyID,
+			"name":   req.Name,
+		})
+	}
 }
 
 // DeleteApiKey handles DELETE /api/v1/api-keys/:key_id
@@ -1768,11 +1850,27 @@ func (s *QueryService) DeleteApiKey(c *gin.Context) {
 		return
 	}
 
-	keyID := c.Param("key_id")
-	if err := s.apiKeyManager.RevokeKey(c.Request.Context(), keyID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+	tenantID, ok := s.requireTenant(c)
+	if !ok {
 		return
 	}
+
+	keyID := c.Param("key_id")
+	if err := s.apiKeyManager.RevokeKey(c.Request.Context(), keyID, tenantID); err != nil {
+		s.logger.Error("Failed to revoke API key", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to revoke API key"})
+		return
+	}
+
+	// Audit log API key deletion.
+	if s.audit != nil {
+		userID, _ := c.Get(string(plan.CtxUserID))
+		uid, _ := userID.(string)
+		s.audit.LogAction(tenantID, uid, "admin.apikey.delete", "apikey", keyID, map[string]interface{}{
+			"key_id": keyID,
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted": true}})
 }
 
@@ -1784,10 +1882,16 @@ func (s *QueryService) RotateApiKey(c *gin.Context) {
 		return
 	}
 
+	tenantID, ok := s.requireTenant(c)
+	if !ok {
+		return
+	}
+
 	keyID := c.Param("key_id")
-	rawKey, err := s.apiKeyManager.RotateKey(c.Request.Context(), keyID)
+	rawKey, err := s.apiKeyManager.RotateKey(c.Request.Context(), keyID, tenantID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"message": err.Error()})
+		s.logger.Error("Failed to rotate API key", zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"message": "Failed to rotate API key"})
 		return
 	}
 
@@ -1798,6 +1902,15 @@ func (s *QueryService) RotateApiKey(c *gin.Context) {
 			"prefix": rawKey[:16],
 		},
 	})
+
+	// Audit log API key rotation.
+	if s.audit != nil {
+		userID, _ := c.Get(string(plan.CtxUserID))
+		uid, _ := userID.(string)
+		s.audit.LogAction(tenantID, uid, "admin.apikey.rotate", "apikey", keyID, map[string]interface{}{
+			"key_id": keyID,
+		})
+	}
 }
 
 // ── Phase 8: User Management Handlers ────────────────────────────────
@@ -1853,7 +1966,7 @@ func (s *QueryService) ListUsers(c *gin.Context) {
 	`, tenantID)
 	if err != nil {
 		s.logger.Error("Failed to list users", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Internal server error"})
 		return
 	}
 	defer rows.Close()
@@ -1894,13 +2007,13 @@ func (s *QueryService) CreateUser(c *gin.Context) {
 		Role     string `json:"role"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
 	// Validate password policy.
 	if err := auth.ValidatePasswordPolicy(req.Password); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Password does not meet policy requirements"})
 		return
 	}
 
@@ -1938,7 +2051,7 @@ func (s *QueryService) CreateUser(c *gin.Context) {
 			return
 		}
 		s.logger.Error("Failed to create user", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to create user"})
 		return
 	}
 
@@ -1982,7 +2095,7 @@ func (s *QueryService) GetUser(c *gin.Context) {
 			return
 		}
 		s.logger.Error("Failed to get user", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to get user"})
 		return
 	}
 
@@ -2002,13 +2115,26 @@ func (s *QueryService) UpdateUser(c *gin.Context) {
 
 	userID := c.Param("user_id")
 
+	// Prevent self-role-modification and self-deactivation.
+	currentUserID, _ := c.Get(string(plan.CtxUserID))
+	currentUID, _ := currentUserID.(string)
+
 	var req struct {
 		Name     *string `json:"name"`
 		Role     *string `json:"role"`
 		IsActive *bool   `json:"isActive"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
+		return
+	}
+
+	if userID == currentUID && req.Role != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "FORBIDDEN", "message": "You cannot change your own role."})
+		return
+	}
+	if userID == currentUID && req.IsActive != nil && !*req.IsActive {
+		c.JSON(http.StatusForbidden, gin.H{"error": "FORBIDDEN", "message": "You cannot deactivate yourself."})
 		return
 	}
 
@@ -2060,7 +2186,7 @@ func (s *QueryService) UpdateUser(c *gin.Context) {
 	tag, err := s.db.Exec(ctx, query, args...)
 	if err != nil {
 		s.logger.Error("Failed to update user", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Internal server error"})
 		return
 	}
 	if tag.RowsAffected() == 0 {
@@ -2078,11 +2204,22 @@ func (s *QueryService) UpdateUser(c *gin.Context) {
 	`, userID, tenantID).Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.IsActive, &createdAt)
 	if err != nil {
 		s.logger.Error("Failed to fetch updated user", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Internal server error"})
 		return
 	}
 
 	u.CreatedAt = createdAt.Format(time.RFC3339)
+
+	// Audit log user update.
+	if s.audit != nil {
+		currentUserID, _ := c.Get(string(plan.CtxUserID))
+		currentUID, _ := currentUserID.(string)
+		s.audit.LogAction(tenantID, currentUID, "admin.user.update", "user", userID, map[string]interface{}{
+			"target_user_id": userID,
+			"fields_updated":  len(setClauses) - 1, // Exclude updated_at
+		})
+	}
+
 	c.JSON(http.StatusOK, gin.H{"data": u})
 }
 
@@ -2096,7 +2233,15 @@ func (s *QueryService) DeleteUser(c *gin.Context) {
 		return
 	}
 
-	userID := c.Param("user_id")
+	userToDelete := c.Param("user_id")
+
+	// Prevent self-deactivation.
+	currentUserID, _ := c.Get(string(plan.CtxUserID))
+	currentUID, _ := currentUserID.(string)
+	if userToDelete == currentUID {
+		c.JSON(http.StatusForbidden, gin.H{"error": "FORBIDDEN", "message": "You cannot deactivate yourself."})
+		return
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 	defer cancel()
@@ -2104,15 +2249,22 @@ func (s *QueryService) DeleteUser(c *gin.Context) {
 	tag, err := s.db.Exec(ctx, `
 		UPDATE users SET is_active = false, updated_at = $1
 		WHERE id = $2 AND tenant_id = $3
-	`, time.Now().UTC(), userID, tenantID)
+	`, time.Now().UTC(), userToDelete, tenantID)
 	if err != nil {
 		s.logger.Error("Failed to deactivate user", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to deactivate user"})
 		return
 	}
 	if tag.RowsAffected() == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "NOT_FOUND", "message": "User not found"})
 		return
+	}
+
+	// Audit log user deactivation.
+	if s.audit != nil {
+		s.audit.LogAction(tenantID, currentUID, "admin.user.deactivate", "user", userToDelete, map[string]interface{}{
+			"target_user_id": userToDelete,
+		})
 	}
 
 	c.JSON(http.StatusOK, gin.H{"data": gin.H{"deleted": true}})
@@ -2154,7 +2306,7 @@ func (s *QueryService) GetTenant(c *gin.Context) {
 			return
 		}
 		s.logger.Error("Failed to get tenant", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Internal server error"})
 		return
 	}
 
@@ -2176,7 +2328,7 @@ func (s *QueryService) UpdateTenant(c *gin.Context) {
 		Name string `json:"name" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
@@ -2188,7 +2340,7 @@ func (s *QueryService) UpdateTenant(c *gin.Context) {
 	`, req.Name, tenantID)
 	if err != nil {
 		s.logger.Error("Failed to update tenant", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Internal server error"})
 		return
 	}
 	if tag.RowsAffected() == 0 {
@@ -2206,7 +2358,7 @@ func (s *QueryService) UpdateTenant(c *gin.Context) {
 	`, tenantID).Scan(&t.ID, &t.Name, &t.Status, &createdAt)
 	if err != nil {
 		s.logger.Error("Failed to fetch updated tenant", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Internal server error"})
 		return
 	}
 
@@ -2236,7 +2388,7 @@ func (s *QueryService) GetTenantPlan(c *gin.Context) {
 	stored, err := s.planEngine.GetTenantPlan(ctx, tenantID)
 	if err != nil {
 		s.logger.Error("Failed to get tenant plan", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Internal server error"})
 		return
 	}
 
@@ -2269,7 +2421,7 @@ func (s *QueryService) ChangePlan(c *gin.Context) {
 		PlanName string `json:"planName" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
@@ -2284,7 +2436,7 @@ func (s *QueryService) ChangePlan(c *gin.Context) {
 
 	if err := s.planEngine.AssignPlan(ctx, tenantID, req.PlanName); err != nil {
 		s.logger.Error("Failed to assign plan", zap.Error(err))
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Internal server error"})
 		return
 	}
 
@@ -2338,11 +2490,11 @@ func (s *QueryService) RLSTenantMiddleware() gin.HandlerFunc {
 			return
 		}
 
-		// Set the PostgreSQL session variable for RLS
-		// SET LOCAL does not support parameterized queries, so we use fmt.Sprintf.
-		// The tenant ID comes from a validated JWT token, so this is safe.
+		// Set the PostgreSQL session variable for RLS.
+		// Use set_config() with a parameterized query to prevent SQL injection.
 		ctx := c.Request.Context()
-		_, err := s.db.Exec(ctx, fmt.Sprintf("SET LOCAL app.current_tenant_id = '%s'", tenantID))
+		_, err := s.db.Exec(ctx,
+			"SELECT set_config('app.current_tenant_id', $1, true)", tenantID)
 		if err != nil {
 			s.logger.Error("Failed to set RLS tenant context",
 				zap.String("tenant_id", tenantID),
@@ -2358,4 +2510,206 @@ func (s *QueryService) RLSTenantMiddleware() gin.HandlerFunc {
 
 		c.Next()
 	}
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dual Reality Agent System — REST Handlers
+// ═══════════════════════════════════════════════════════════════════════
+
+// PairAgentREST pairs an edge agent with a cluster agent.
+func (s *QueryService) PairAgentREST(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	var req struct {
+		TwinID string `json:"twin_id" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"message": "twin_id is required"})
+		return
+	}
+
+	if err := s.agentAssigner.PairAgent(c.Request.Context(), agentID, req.TwinID, tenantID); err != nil {
+		s.logger.Error("Failed to pair agent", zap.String("agent_id", agentID), zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "OPERATION_FAILED", "message": "Failed to pair agent"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// UnpairAgentREST unlinks an edge agent from its cluster agent.
+func (s *QueryService) UnpairAgentREST(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	if err := s.agentAssigner.UnpairAgent(c.Request.Context(), agentID, tenantID); err != nil {
+		s.logger.Error("Failed to unpair agent", zap.String("agent_id", agentID), zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "OPERATION_FAILED", "message": "Failed to unpair agent"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// RetireAgentREST gracefully decommissions an edge agent.
+func (s *QueryService) RetireAgentREST(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	if err := s.agentAssigner.RetireAgent(c.Request.Context(), agentID, tenantID); err != nil {
+		s.logger.Error("Failed to retire agent", zap.String("agent_id", agentID), zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "OPERATION_FAILED", "message": "Failed to retire agent"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// BlacklistAgentREST blocks an edge agent from registering again.
+func (s *QueryService) BlacklistAgentREST(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		req.Reason = "blacklisted by operator"
+	}
+
+	if err := s.agentAssigner.BlacklistAgent(c.Request.Context(), agentID, tenantID, req.Reason); err != nil {
+		s.logger.Error("Failed to blacklist agent", zap.String("agent_id", agentID), zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "OPERATION_FAILED", "message": "Failed to blacklist agent"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true})
+}
+
+// UnregisterAgentREST completely removes an edge agent from the system.
+func (s *QueryService) UnregisterAgentREST(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	if err := s.agentAssigner.UnregisterAgent(c.Request.Context(), agentID, tenantID); err != nil {
+		s.logger.Error("Failed to unregister agent", zap.String("agent_id", agentID), zap.Error(err))
+		c.JSON(http.StatusBadRequest, gin.H{"error": "OPERATION_FAILED", "message": "Failed to unregister agent"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"success": true, "message": "Agent unregistered. All client data erased from edge agent."})
+}
+
+// GetAgentPairingStatusREST returns detailed pairing info.
+func (s *QueryService) GetAgentPairingStatusREST(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	ps, err := s.agentAssigner.GetAgentPairingStatus(c.Request.Context(), agentID)
+	if err != nil {
+		s.logger.Warn("Agent pairing status not found", zap.String("agent_id", agentID), zap.Error(err))
+		c.JSON(http.StatusNotFound, gin.H{"error": "NOT_FOUND", "message": "Agent pairing status not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"data": ps})
+}
+
+// CheckBlacklistREST checks if an edge agent is blacklisted.
+func (s *QueryService) CheckBlacklistREST(c *gin.Context) {
+	if s.agentAssigner == nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"message": "Agent management requires PostgreSQL control plane"})
+		return
+	}
+	tenantID, ok := tenantFromJWT(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "Missing tenant context"})
+		return
+	}
+
+	agentID := c.Param("agent_id")
+	blacklisted, err := s.agentAssigner.IsBlacklisted(c.Request.Context(), tenantID, agentID)
+	if err != nil {
+		s.logger.Error("Failed to check blacklist status", zap.String("agent_id", agentID), zap.Error(err))
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to check blacklist status"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"blacklisted": blacklisted})
+}
+
+// DownloadAgentBinary serves agent binaries for download.
+func (s *QueryService) DownloadAgentBinary(c *gin.Context) {
+	platform := c.Param("platform")
+
+	var filename string
+	switch platform {
+	case "windows":
+		filename = "paryty-agent-windows-amd64.exe"
+	case "linux":
+		filename = "paryty-agent-linux-amd64"
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"message": "unsupported platform; use 'windows' or 'linux'"})
+		return
+	}
+
+	// Look for binary in configured directory.
+	binaryDir := os.Getenv("PARYTY_BINARY_DIR")
+	if binaryDir == "" {
+		binaryDir = "./bin/agents"
+	}
+
+	path := filepath.Join(binaryDir, filename)
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		c.JSON(http.StatusNotFound, gin.H{"message": "agent binary not available for download; contact support"})
+		return
+	}
+
+	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
+	c.Header("Content-Type", "application/octet-stream")
+	c.File(path)
 }

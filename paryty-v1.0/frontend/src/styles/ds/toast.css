@@ -1,0 +1,36 @@
+/* Toast */
+.aef-toast-container {
+  position: fixed;
+  bottom: var(--aef-space-5);
+  right: var(--aef-space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-2);
+  pointer-events: none;
+  z-index: 220;
+}
+
+.aef-toast {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: 9px 20px;
+  background: var(--aef-surface-card);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-full);
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-primary);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  animation: aef-toast-in var(--aef-duration-standard) var(--aef-ease-settle) both;
+  pointer-events: auto;
+  min-width: 220px;
+}
+
+.aef-toast--success { border-left: 3px solid var(--aef-status-live); }
+.aef-toast--warning { border-left: 3px solid var(--aef-status-warning); }
+.aef-toast--error   { border-left: 3px solid var(--aef-counter-variant-b); }
+
+.aef-toast--success svg { color: var(--aef-status-live); }
+.aef-toast--warning svg { color: var(--aef-status-warning); }
+.aef-toast--error   svg { color: var(--aef-counter-variant-b); }

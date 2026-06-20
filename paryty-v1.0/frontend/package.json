@@ -10,7 +10,9 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:ds": "node src/paryty_design_system/__tests__/ds_refine_002_scrollbar_coverage.test.mjs"
+    "test:ds": "node src/paryty_design_system/__tests__/ds_refine_002_scrollbar_coverage.test.mjs",
+    "audit": "npm audit --audit-level=high",
+    "audit:fix": "npm audit fix"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.9",

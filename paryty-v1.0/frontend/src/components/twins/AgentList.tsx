@@ -35,13 +35,18 @@ function StatusDot({ status }: { status: TwinAgentInfo['status'] }) {
 }
 
 function StatusIcon({ status }: { status: TwinAgentInfo['status'] }) {
-  if (status === 'online') return <Wifi size={13} style={{ color: 'var(--aef-status-live)' }} />;
-  if (status === 'offline') return <WifiOff size={13} style={{ color: 'var(--aef-counter-variant-b)' }} />;
-  return <AlertTriangle size={13} style={{ color: 'var(--aef-status-warning)' }} />;
+  if (status === 'online') return <Wifi size={12} style={{ color: 'var(--aef-status-live)' }} />;
+  if (status === 'offline') return <WifiOff size={12} style={{ color: 'var(--aef-status-error)' }} />;
+  return <AlertTriangle size={12} style={{ color: 'var(--aef-status-warning)' }} />;
 }
 
-function timeSince(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
+function timeSince(iso: string | undefined): string {
+  // BUGFIX: Guard against undefined/null ISO string
+  if (!iso) return 'unknown';
+  const timestamp = new Date(iso).getTime();
+  // BUGFIX: Guard against invalid date strings that produce NaN
+  if (isNaN(timestamp)) return 'unknown';
+  const diff = Date.now() - timestamp;
   const mins = Math.floor(diff / 60_000);
   const hrs = Math.floor(mins / 60);
   const days = Math.floor(hrs / 24);
@@ -61,15 +66,19 @@ export function AgentList({ agents, onAcceptBacklog, onRejectBacklog }: AgentLis
     [onRejectBacklog],
   );
 
-  if (agents.length === 0) {
+  // BUGFIX: Guard against undefined/null agents array
+  if (!agents || agents.length === 0) {
     return (
-      <div style={{
-        padding: 'var(--aef-space-4)',
-        textAlign: 'center',
-        fontFamily: 'var(--aef-font-body)',
-        fontSize: 11,
-        color: 'var(--aef-text-secondary)',
-      }}>
+      <div
+        style={{
+          padding: 'var(--aef-space-4)',
+          textAlign: 'center',
+          fontFamily: 'var(--aef-font-body)',
+          fontSize: 'var(--aef-font-size-xs)',
+          color: 'var(--aef-text-secondary)',
+        }}
+        data-testid="agent-list-empty"
+      >
         No agents assigned to this twin.
       </div>
     );
@@ -79,7 +88,8 @@ export function AgentList({ agents, onAcceptBacklog, onRejectBacklog }: AgentLis
     <div data-testid="assigned-agent-list">
       {agents.map((agent) => {
         const isOffline = agent.status === 'offline';
-        const hasBacklog = agent.backlogBytes > 0;
+        // BUGFIX: Guard against undefined backlogBytes
+        const hasBacklog = (agent.backlogBytes ?? 0) > 0;
 
         return (
           <div
@@ -99,11 +109,11 @@ export function AgentList({ agents, onAcceptBacklog, onRejectBacklog }: AgentLis
             {/* Agent info */}
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--aef-space-2)' }}>
-                <Server size={13} style={{ color: 'var(--aef-text-secondary)' }} />
+                <Server size={12} style={{ color: 'var(--aef-text-secondary)' }} />
                 <span
                   style={{
                     fontFamily: 'var(--aef-font-body)',
-                    fontSize: 12,
+                    fontSize: 'var(--aef-font-size-xs)',
                     fontWeight: 500,
                     color: 'var(--aef-text-primary)',
                   }}
@@ -114,8 +124,8 @@ export function AgentList({ agents, onAcceptBacklog, onRejectBacklog }: AgentLis
                 <span
                   style={{
                     fontFamily: 'var(--aef-font-body)',
-                    fontSize: 10,
-                    color: isOffline ? 'var(--aef-counter-variant-b)' : 'var(--aef-text-secondary)',
+                    fontSize: 'var(--aef-font-size-2xs)',
+                    color: isOffline ? 'var(--aef-status-error)' : 'var(--aef-text-secondary)',
                     textTransform: 'capitalize',
                   }}
                 >
@@ -135,7 +145,7 @@ export function AgentList({ agents, onAcceptBacklog, onRejectBacklog }: AgentLis
               >
                 <span style={{
                   fontFamily: 'var(--aef-font-body)',
-                  fontSize: 10,
+                  fontSize: 'var(--aef-font-size-2xs)',
                   color: 'var(--aef-text-secondary)',
                 }}>
                   {/* Real throughput would come from metrics; show placeholder for now */}
@@ -144,11 +154,11 @@ export function AgentList({ agents, onAcceptBacklog, onRejectBacklog }: AgentLis
                 {hasBacklog && (
                   <span style={{
                     fontFamily: 'var(--aef-font-body)',
-                    fontSize: 10,
-                    color: 'var(--aef-warning)',
+                    fontSize: 'var(--aef-font-size-2xs)',
+                    color: 'var(--aef-status-warning)',
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 4,
+                    gap: 'var(--aef-space-1)',
                   }}>
                     <AlertTriangle size={10} /> Backlog
                   </span>

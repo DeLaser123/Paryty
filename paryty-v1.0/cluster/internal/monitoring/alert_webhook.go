@@ -12,26 +12,8 @@ import (
 )
 
 // =============================================================================
-// Alert Interface
+// Alert Interface (types defined in alert_rules.go)
 // =============================================================================
-
-// AlertSeverity represents the severity level of an alert.
-type AlertSeverity string
-
-const (
-	AlertSeverityCritical AlertSeverity = "critical"
-	AlertSeverityWarning  AlertSeverity = "warning"
-	AlertSeverityInfo     AlertSeverity = "info"
-)
-
-// Alert represents a monitoring alert.
-type Alert struct {
-	Name      string        `json:"name"`
-	Severity  AlertSeverity `json:"severity"`
-	Timestamp time.Time     `json:"timestamp"`
-	Message   string        `json:"message"`
-	Labels    map[string]string `json:"labels,omitempty"`
-}
 
 // AlertChannel is the interface for sending alerts.
 type AlertChannel interface {
@@ -166,11 +148,11 @@ func (n *NoOpAlertChannel) Send(_ context.Context, _ Alert) error {
 // NewAlert creates a new Alert with the current timestamp.
 func NewAlert(name string, severity AlertSeverity, message string, labels map[string]string) Alert {
 	return Alert{
-		Name:      name,
-		Severity:  severity,
-		Timestamp: time.Now().UTC(),
-		Message:   message,
-		Labels:    labels,
+		Name:     name,
+		Severity: severity,
+		StartedAt: time.Now().UTC(),
+		Message:  message,
+		Labels:   labels,
 	}
 }
 

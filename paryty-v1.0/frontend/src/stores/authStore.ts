@@ -2,7 +2,7 @@
  * Auth store — manages authentication state for the Paryti SaaS platform.
  *
  * Access tokens are kept in memory only for security.
- * Refresh tokens persist in localStorage for session recovery.
+ * Refresh tokens are stored in httpOnly cookies (set by backend).
  *
  * @module stores/authStore
  */
@@ -20,32 +20,8 @@ import type {
 } from '../types/auth';
 
 // ─── Storage Helpers ──────────────────────────────────────────────────
-
-const REFRESH_STORAGE_KEY = 'paryty_refresh_token';
-
-function getStoredRefreshToken(): string | null {
-  try {
-    return localStorage.getItem(REFRESH_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function setStoredRefreshToken(token: string): void {
-  try {
-    localStorage.setItem(REFRESH_STORAGE_KEY, token);
-  } catch {
-    // Silently fail if localStorage is unavailable
-  }
-}
-
-function clearStoredRefreshToken(): void {
-  try {
-    localStorage.removeItem(REFRESH_STORAGE_KEY);
-  } catch {
-    // Silently fail
-  }
-}
+// Note: Refresh tokens are now stored in httpOnly cookies by the backend.
+// No localStorage storage is needed for security.
 
 // ─── Store Shape ─────────────────────────────────────────────────────
 
@@ -85,23 +61,15 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   isLoading: true,
 
   initAuth: async () => {
-    const storedRefresh = getStoredRefreshToken();
-    if (!storedRefresh) {
-      set({ isLoading: false });
-      return;
-    }
-
-    // Attempt silent refresh
-    set({ refreshToken: storedRefresh });
+    // With httpOnly cookies, we attempt silent refresh directly.
+    // The refresh token cookie will be sent automatically.
     try {
       const success = await get().refreshAuth();
       if (!success) {
-        clearStoredRefreshToken();
-        set({ refreshToken: null, isLoading: false });
+        set({ isLoading: false });
       }
     } catch {
-      clearStoredRefreshToken();
-      set({ refreshToken: null, isLoading: false });
+      set({ isLoading: false });
     }
   },
 
@@ -109,11 +77,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     const client = getRestClient();
     const response = await client.post<LoginResponse>('/api/v1/auth/login', params);
 
-    setStoredRefreshToken(response.refreshToken);
+    // Refresh token is now in httpOnly cookie (set by backend).
+    // No need to store in localStorage.
 
     set({
       accessToken: response.accessToken,
-      refreshToken: response.refreshToken,
+      refreshToken: null, // Not stored in JS anymore
       user: response.user,
       tenant: response.tenant,
       isAuthenticated: true,
@@ -131,11 +100,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     const client = getRestClient();
     const response = await client.post<LoginResponse>('/api/v1/auth/register', params);
 
-    setStoredRefreshToken(response.refreshToken);
+    // Refresh token is now in httpOnly cookie (set by backend).
+    // No need to store in localStorage.
 
     set({
       accessToken: response.accessToken,
-      refreshToken: response.refreshToken,
+      refreshToken: null, // Not stored in JS anymore
       user: response.user,
       tenant: response.tenant,
       isAuthenticated: true,
@@ -152,12 +122,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     const { accessToken } = get();
     try {
       if (accessToken) {
-        await getRestClient().post('/api/v1/auth/logout');
+        // Refresh token will be sent automatically via httpOnly cookie.
+        await getRestClient().post('/api/v1/auth/logout', {});
       }
     } catch {
       // Best-effort logout — always clear local state
     }
-    clearStoredRefreshToken();
     set({
       accessToken: null,
       refreshToken: null,
@@ -169,22 +139,17 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   refreshAuth: async () => {
-    const { refreshToken } = get();
-    if (!refreshToken) {
-      return false;
-    }
-
     try {
       const client = getRestClient();
-      const response = await client.post<RefreshResponse>('/api/v1/auth/refresh', {
-        refreshToken,
-      });
+      // Refresh token is sent automatically via httpOnly cookie.
+      const response = await client.post<RefreshResponse>('/api/v1/auth/refresh', {}, { skipAuth: true });
 
-      setStoredRefreshToken(response.refreshToken);
+      // Refresh token is now in httpOnly cookie (set by backend).
+      // No need to store in localStorage.
 
       set({
         accessToken: response.accessToken,
-        refreshToken: response.refreshToken,
+        refreshToken: null, // Not stored in JS anymore
         user: response.user,
         tenant: response.tenant,
         isAuthenticated: true,
@@ -195,7 +160,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       usePlanStore.getState().fetchCurrentPlan();
       return true;
     } catch {
-      clearStoredRefreshToken();
       set({
         accessToken: null,
         refreshToken: null,
@@ -209,10 +173,11 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   setAuth: (data) => {
-    setStoredRefreshToken(data.refreshToken);
+    // Refresh token is now in httpOnly cookie (set by backend).
+    // No need to store in localStorage.
     set({
       accessToken: data.accessToken,
-      refreshToken: data.refreshToken,
+      refreshToken: null, // Not stored in JS anymore
       user: data.user,
       tenant: data.tenant,
       isAuthenticated: true,
@@ -221,7 +186,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   clearAuth: () => {
-    clearStoredRefreshToken();
+    // Refresh token is in httpOnly cookie — backend will clear it on logout.
     // Clear plan state as well — nobody is authenticated.
     usePlanStore.setState({
       currentPlan: null,

@@ -59,10 +59,14 @@ export interface CreateParytyDraft {
 // ─── Twin Detail Page Types (Task 13) ───────────────────────────────────────
 
 export interface TwinConfig {
-  /** Agent IDs whose telemetry feeds this Digital Paryty. */
-  agentIds: string[];
-  /** Optional tenant label override. */
-  tenantLabel?: string;
+  /** Agent labels for auto-assignment (key-value pairs). */
+  agentLabels?: Record<string, string>;
+  /** Enabled collectors (e.g., ['cpu', 'memory', 'disk']). */
+  enabledCollectors?: string[];
+  /** Collection interval in seconds. */
+  collectionIntervalSeconds?: number;
+  /** Sampling rate (0.0 - 1.0). */
+  samplingRate?: number;
 }
 
 export interface TwinDetails {
@@ -95,7 +99,7 @@ export interface TwinAgentInfo {
  * Backend uses: active, degraded, pending, inactive
  * Frontend uses: healthy, degraded, unhealthy, unknown
  */
-function mapTwinStatus(backendStatus: string): HealthStatus {
+export function mapTwinStatus(backendStatus: string): HealthStatus {
   switch (backendStatus) {
     case 'active':
       return 'healthy';
@@ -122,8 +126,8 @@ export function backendTwinToDigitalParyty(twin: TwinDetails): DigitalParyty {
     health: mapTwinStatus(twin.status),
     abilities: [], // Backend doesn't track abilities; populated locally
     config: {
-      agentIds: twin.config?.agentIds ?? [],
-      tenantLabel: twin.config?.tenantLabel,
+      agentIds: [], // Not available from backend; agents are tracked via assignments
+      tenantLabel: undefined,
     },
     summary: {},
     createdAt: twin.createdAt,

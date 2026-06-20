@@ -233,6 +233,33 @@ service TwinService {
 
   // RejectBacklog instructs the agent to permanently delete its local backlog.
   rpc RejectBacklog(RejectBacklogRequest) returns (RejectBacklogResponse);
+
+  // ═══════════════════════════════════════════════════════════════════
+  // Dual Reality Agent System — Lifecycle Management RPCs
+  // ═══════════════════════════════════════════════════════════════════
+
+  // PairAgentToTwin links an edge agent to a cluster agent (twin).
+  rpc PairAgentToTwin(PairAgentToTwinRequest) returns (PairAgentToTwinResponse);
+
+  // UnpairAgent unlinks an edge agent from its cluster agent.
+  // Edge becomes rogue, cluster becomes unconfigured.
+  rpc UnpairAgent(UnpairAgentRequest) returns (UnpairAgentResponse);
+
+  // RetireAgent gracefully decommissions an edge agent.
+  rpc RetireAgent(RetireAgentRequest) returns (RetireAgentResponse);
+
+  // BlacklistAgent blocks an edge agent from ever registering again.
+  rpc BlacklistAgent(BlacklistAgentRequest) returns (BlacklistAgentResponse);
+
+  // UnregisterAgent completely removes an edge agent from the system.
+  // Erases all traces of client association.
+  rpc UnregisterAgent(UnregisterAgentRequest) returns (google.protobuf.Empty);
+
+  // GetAgentPairingStatus returns detailed pairing info for the smart modal.
+  rpc GetAgentPairingStatus(GetAgentPairingStatusRequest) returns (AgentPairingStatusResponse);
+
+  // CheckBlacklist checks if an edge agent is in the blacklist.
+  rpc CheckBlacklist(CheckBlacklistRequest) returns (CheckBlacklistResponse);
 }
 
 message CreateTwinRequest {
@@ -378,4 +405,99 @@ message RejectBacklogRequest {
 message RejectBacklogResponse {
   // Whether the backlog deletion command was dispatched.
   bool deleted = 1;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Dual Reality Agent System — Lifecycle Management Messages
+// ═══════════════════════════════════════════════════════════════════════
+
+message PairAgentToTwinRequest {
+  // Edge agent ID to pair.
+  string agent_id = 1;
+  // Cluster agent (twin) ID to pair with.
+  string twin_id = 2;
+}
+
+message PairAgentToTwinResponse {
+  bool success = 1;
+  string error = 2;
+}
+
+message UnpairAgentRequest {
+  // Edge agent ID to unpair.
+  string agent_id = 1;
+}
+
+message UnpairAgentResponse {
+  bool success = 1;
+}
+
+message RetireAgentRequest {
+  // Edge agent ID to retire.
+  string agent_id = 1;
+}
+
+message RetireAgentResponse {
+  bool success = 1;
+}
+
+message BlacklistAgentRequest {
+  // Edge agent ID to blacklist.
+  string agent_id = 1;
+  // Reason for blacklisting.
+  string reason = 2;
+}
+
+message BlacklistAgentResponse {
+  bool success = 1;
+}
+
+message UnregisterAgentRequest {
+  // Edge agent ID to unregister.
+  string agent_id = 1;
+}
+
+message GetAgentPairingStatusRequest {
+  // Edge agent ID to query.
+  string agent_id = 1;
+}
+
+message AgentPairingStatusResponse {
+  string agent_id = 1;
+  // Edge agent lifecycle status.
+  string edge_status = 2;
+  // Cluster agent (twin) ID if paired.
+  string cluster_agent_id = 3;
+  // Cluster agent display name.
+  string cluster_agent_name = 4;
+  // Cluster agent status.
+  string cluster_agent_status = 5;
+  // Whether the edge agent is currently paired.
+  bool is_paired = 6;
+  // When the pairing was established.
+  google.protobuf.Timestamp paired_at = 7;
+  // Edge agent operating system.
+  string os = 8;
+  // Edge agent CPU architecture.
+  string arch = 9;
+  // Edge agent hostname.
+  string hostname = 10;
+  // When the agent was retired (if applicable).
+  google.protobuf.Timestamp retired_at = 11;
+  // When the agent was blacklisted (if applicable).
+  google.protobuf.Timestamp blacklisted_at = 12;
+  // Reason for blacklisting (if applicable).
+  string blacklist_reason = 13;
+}
+
+message CheckBlacklistRequest {
+  // Edge agent ID to check.
+  string agent_id = 1;
+}
+
+message CheckBlacklistResponse {
+  // Whether the agent is blacklisted.
+  bool blacklisted = 1;
+  // Reason for blacklisting (if applicable).
+  string reason = 2;
 }

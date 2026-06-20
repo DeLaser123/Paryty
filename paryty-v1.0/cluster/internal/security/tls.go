@@ -22,15 +22,10 @@ func ServerTLS(certFile, keyFile, clientCAFile string) (*tls.Config, error) {
 
 	cfg := &tls.Config{
 		Certificates: []tls.Certificate{cert},
-		MinVersion:   tls.VersionTLS12,
-		// Prefer modern, secure cipher suites.
-		CipherSuites: []uint16{
-			tls.TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384,
-			tls.TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256,
-			tls.TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256,
-		},
-		PreferServerCipherSuites: true,
+		MinVersion:   tls.VersionTLS13,
+		// TLS 1.3 negotiates cipher suites automatically; CipherSuites
+		// and PreferServerCipherSuites are ignored when MinVersion is 1.3.
+		// All TLS 1.3 suites provide forward secrecy and AEAD encryption.
 	}
 
 	// Enable mTLS if a client CA is provided.
@@ -57,7 +52,7 @@ func ServerTLS(certFile, keyFile, clientCAFile string) (*tls.Config, error) {
 // For mTLS, provide both certFile and keyFile for the client certificate.
 func ClientTLS(serverCAFile, certFile, keyFile string) (*tls.Config, error) {
 	cfg := &tls.Config{
-		MinVersion: tls.VersionTLS12,
+		MinVersion: tls.VersionTLS13,
 	}
 
 	// Load custom server CA if provided.
@@ -105,12 +100,12 @@ func LoadTLSFromEnv() (*tls.Config, error) {
 	return ServerTLS(certFile, keyFile, clientCAFile)
 }
 
-// RequireMTLS returns true if PARYTY_TLS_CERT_FILE and PARYTY_TLS_CA_FILE are set.
+// RequireMTLS returns true if PARYTY_TLS_CERT_FILE and PARYTY_TLS_CLIENT_CA_FILE are set.
 // This is the enforcement gate — if true, all connections must use mTLS.
 //
 // In production, this should return true to ensure encrypted and authenticated
 // communication between agents and the cluster.
 func RequireMTLS() bool {
 	return os.Getenv("PARYTY_TLS_CERT_FILE") != "" &&
-		os.Getenv("PARYTY_TLS_CA_FILE") != ""
+		os.Getenv("PARYTY_TLS_CLIENT_CA_FILE") != ""
 }

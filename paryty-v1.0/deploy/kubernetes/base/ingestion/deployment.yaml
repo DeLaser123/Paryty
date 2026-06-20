@@ -24,7 +24,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: ingestion
-          image: ghcr.io/paryty/paryty-ingestion:latest
+          image: ghcr.io/paryty/paryty-ingestion:v1.0.0  # Pin to specific version
           ports:
             - name: grpc
               containerPort: 8080

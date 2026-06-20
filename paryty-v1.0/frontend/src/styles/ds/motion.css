@@ -1,0 +1,96 @@
+/* === Motion primitives === */
+
+.aef-motion-hover-lift {
+  transition:
+    transform var(--aef-duration-fast) var(--aef-ease-settle),
+    box-shadow var(--aef-duration-fast) var(--aef-ease-settle),
+    border-color var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.aef-motion-hover-lift:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(255, 255, 255, 0.05);
+  border-color: var(--aef-border-strong);
+}
+
+.aef-motion-press-depth {
+  transition:
+    transform var(--aef-duration-instant) var(--aef-ease-exit),
+    background var(--aef-duration-fast) var(--aef-ease-exit);
+  border: none;
+  outline: none;
+}
+
+.aef-motion-press-depth:hover { background: var(--aef-surface-hover); }
+.aef-motion-press-depth:active { transform: scale(0.95); background: var(--aef-surface-mid); }
+
+.aef-motion-focus-ring {
+  border: none;
+  outline: none;
+  transition:
+    outline-offset var(--aef-duration-fast) var(--aef-ease-settle),
+    box-shadow var(--aef-duration-fast) var(--aef-ease-settle);
+}
+
+.aef-motion-focus-ring:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.7);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.07);
+}
+
+.aef-motion-loading {
+  background: var(--aef-surface-hover);
+  pointer-events: none;
+}
+
+.aef-motion-enter-el {
+  animation: aef-panel-enter var(--aef-duration-standard) var(--aef-ease-settle) both;
+  color: var(--aef-text-primary);
+}
+
+.aef-motion-state-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--aef-status-live);
+  animation: aef-live-pulse 2s var(--aef-ease-linear) infinite;
+}
+
+/* === Active card state === */
+
+.aef-container-card,
+.aef-table-card {
+  transition: border-color var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.aef-card-active {
+  border-color: var(--aef-text-primary) !important;
+  transition: border-color var(--aef-duration-fast) var(--aef-spring-subtle) !important;
+}
+
+/* === Icon interactive grammar === */
+
+.aef-icon-interactive {
+  cursor: pointer;
+  transition:
+    transform var(--aef-duration-instant) var(--aef-ease-exit),
+    color var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.aef-icon-interactive:hover {
+  transform: scale(1.14);
+  transition-timing-function: var(--aef-spring-subtle);
+}
+
+.aef-icon-interactive:active {
+  transform: scale(0.86);
+  transition-duration: var(--aef-duration-instant);
+  transition-timing-function: var(--aef-ease-exit);
+}
+
+/* === Spring motion utility classes === */
+
+.aef-spring-subtle  { transition-timing-function: var(--aef-spring-subtle);  }
+.aef-spring-normal  { transition-timing-function: var(--aef-spring-normal);  }
+.aef-spring-obvious { transition-timing-function: var(--aef-spring-obvious); }

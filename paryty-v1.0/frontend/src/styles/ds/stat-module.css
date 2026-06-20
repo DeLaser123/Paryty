@@ -1,0 +1,22 @@
+/* - Stat module - */
+.aef-stat-module {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px var(--aef-space-3);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-control);
+  background: var(--aef-surface-card);
+}
+
+.aef-stat-module__label {
+  font-family: var(--aef-font-heading);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+}
+
+.aef-stat-module__value {
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+  color: var(--aef-text-primary);
+}

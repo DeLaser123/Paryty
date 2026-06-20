@@ -1,0 +1,59 @@
+﻿/* Counter card - Paryty Design System primitive */
+.aef-counter {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-3);
+  padding: 10px var(--aef-space-4);
+  border-radius: var(--aef-radius-sm);
+  min-width: 130px;
+}
+
+.aef-counter-neutral {
+  background: var(--aef-counter-neutral-bg);
+  border: var(--aef-counter-neutral-border);
+  color: var(--aef-counter-neutral-text);
+}
+
+.aef-counter-active {
+  background: var(--aef-counter-active-bg);
+  border: none;
+  color: var(--aef-counter-active-text);
+}
+
+.aef-counter-variant-a {
+  background: var(--aef-counter-variant-a);
+  border: none;
+  color: var(--aef-counter-variant-text);
+}
+
+.aef-counter-variant-b {
+  background: var(--aef-counter-variant-b);
+  border: none;
+  color: var(--aef-counter-variant-text);
+}
+
+.aef-counter__icon {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.aef-counter__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.aef-counter__label {
+  font-family: var(--aef-font-heading);
+  font-size: 10px;
+  font-weight: 500;
+  opacity: 0.7;
+}
+
+.aef-counter__value {
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+}

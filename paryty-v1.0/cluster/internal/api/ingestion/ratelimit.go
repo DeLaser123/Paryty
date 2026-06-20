@@ -1,5 +1,5 @@
 // Rate limiting for the ingestion gRPC adapter.
-// Uses per-agent token-bucket rate limiting with automatic stale entry cleanup.
+// Uses per-tenant token-bucket rate limiting with automatic stale entry cleanup.
 package api
 
 import (
@@ -14,14 +14,16 @@ const cleanupInterval = 5 * time.Minute
 // staleThreshold is the duration after which an unused bucket is considered stale.
 const staleThreshold = 10 * time.Minute
 
-// RateLimiter implements per-agent token-bucket rate limiting.
-// It is safe for concurrent use.
+// RateLimiter implements per-tenant token-bucket rate limiting.
+// It is safe for concurrent use. The rate limiter is keyed by tenant ID
+// (extracted from gRPC context by the AuthInterceptor), not by agent ID.
+// This prevents a tenant with many agents from collectively exceeding limits.
 type RateLimiter struct {
 	buckets      sync.Map // map[string]*tokenBucket
 	maxPerMinute int
 }
 
-// tokenBucket is a per-agent token bucket.
+// tokenBucket is a per-tenant token bucket.
 type tokenBucket struct {
 	tokens     float64
 	maxTokens  float64
@@ -30,7 +32,7 @@ type tokenBucket struct {
 	mu         sync.Mutex
 }
 
-// NewRateLimiter creates a RateLimiter that allows maxPerMinute requests per agent per minute.
+// NewRateLimiter creates a RateLimiter that allows maxPerMinute requests per tenant per minute.
 // Call StartCleanup with a context to begin periodic stale entry removal.
 func NewRateLimiter(maxPerMinute int) *RateLimiter {
 	if maxPerMinute <= 0 {
@@ -59,11 +61,11 @@ func (rl *RateLimiter) StartCleanup(ctx context.Context) {
 	}()
 }
 
-// Allow checks whether the agent identified by agentID is allowed to proceed.
+// Allow checks whether the tenant identified by tenantID is allowed to proceed.
 // It returns true if a token is available and decrements the token count.
 // Returns false if the rate limit is exceeded.
-func (rl *RateLimiter) Allow(agentID string) bool {
-	bucket := rl.getOrCreateBucket(agentID)
+func (rl *RateLimiter) Allow(tenantID string) bool {
+	bucket := rl.getOrCreateBucket(tenantID)
 	bucket.mu.Lock()
 	defer bucket.mu.Unlock()
 
@@ -86,9 +88,9 @@ func (rl *RateLimiter) Allow(agentID string) bool {
 	return true
 }
 
-// getOrCreateBucket returns the token bucket for the given agent, creating one if needed.
-func (rl *RateLimiter) getOrCreateBucket(agentID string) *tokenBucket {
-	if v, ok := rl.buckets.Load(agentID); ok {
+// getOrCreateBucket returns the token bucket for the given tenant, creating one if needed.
+func (rl *RateLimiter) getOrCreateBucket(tenantID string) *tokenBucket {
+	if v, ok := rl.buckets.Load(tenantID); ok {
 		return v.(*tokenBucket)
 	}
 
@@ -99,7 +101,7 @@ func (rl *RateLimiter) getOrCreateBucket(agentID string) *tokenBucket {
 		lastAccess: time.Now(),
 	}
 
-	actual, _ := rl.buckets.LoadOrStore(agentID, bucket)
+	actual, _ := rl.buckets.LoadOrStore(tenantID, bucket)
 	return actual.(*tokenBucket)
 }
 

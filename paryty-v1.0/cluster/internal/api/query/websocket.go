@@ -16,15 +16,22 @@ import (
 )
 
 // newUpgrader builds a websocket.Upgrader whose origin policy mirrors the
-// HTTP CORS configuration. With no configured origins every origin is
-// allowed (development). With explicit origins, cross-origin upgrade
-// attempts from unlisted origins are rejected — defense-in-depth against
+// HTTP CORS configuration. With no configured origins, ALL connections are
+// rejected (secure-by-default). To allow localhost for development, explicitly
+// configure it in the allowed origins list. With explicit origins, cross-origin
+// upgrade attempts from unlisted origins are rejected — defense-in-depth against
 // cross-site WebSocket hijacking on top of the mandatory JWT.
-func newUpgrader(allowedOrigins []string) websocket.Upgrader {
+func newUpgrader(allowedOrigins []string, logger *zap.Logger) websocket.Upgrader {
+	if len(allowedOrigins) == 0 {
+		logger.Warn("WebSocket origin check: no allowed origins configured, rejecting all connections")
+	}
 	return websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			if len(allowedOrigins) == 0 {
-				return true
+				// Secure-by-default: reject all connections when no origins are
+				// explicitly configured. To allow localhost for development,
+				// add "http://localhost:3000" to the allowed origins list.
+				return false
 			}
 			origin := r.Header.Get("Origin")
 			if origin == "" {
@@ -67,12 +74,13 @@ type tenantScopedMessage struct {
 }
 
 // NewWebSocketHandler creates a new WebSocket handler. allowedOrigins
-// mirrors the HTTP CORS allow-list (empty = allow all, development only).
+// mirrors the HTTP CORS allow-list. When empty, ALL WebSocket connections
+// are rejected (secure-by-default) — configure explicit origins for production.
 func NewWebSocketHandler(store *storage.Store, logger *zap.Logger, allowedOrigins []string) *WebSocketHandler {
 	h := &WebSocketHandler{
 		store:       store,
 		logger:      logger,
-		upgrader:    newUpgrader(allowedOrigins),
+		upgrader:    newUpgrader(allowedOrigins, logger),
 		broadcast:   make(chan []byte, 256),
 		eventFanout: make(chan tenantScopedMessage, 256),
 	}

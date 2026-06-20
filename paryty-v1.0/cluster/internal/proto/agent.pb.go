@@ -42,7 +42,13 @@ type AgentRegistration struct {
 	// Assigned twin ID (empty if unassigned).
 	TwinId string `protobuf:"bytes,8,opt,name=twin_id,json=twinId,proto3" json:"twin_id,omitempty"`
 	// Client/tenant ID the agent reports under.
-	ClientId      string `protobuf:"bytes,9,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ClientId string `protobuf:"bytes,9,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// Dual Reality: cluster agent ID for auto-pairing on registration.
+	ClusterAgentId string `protobuf:"bytes,10,opt,name=cluster_agent_id,json=clusterAgentId,proto3" json:"cluster_agent_id,omitempty"`
+	// Dual Reality: OS of the machine (e.g., "windows", "linux").
+	Os string `protobuf:"bytes,11,opt,name=os,proto3" json:"os,omitempty"`
+	// Dual Reality: CPU architecture (e.g., "amd64", "arm64").
+	Arch          string `protobuf:"bytes,12,opt,name=arch,proto3" json:"arch,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -140,6 +146,27 @@ func (x *AgentRegistration) GetClientId() string {
 	return ""
 }
 
+func (x *AgentRegistration) GetClusterAgentId() string {
+	if x != nil {
+		return x.ClusterAgentId
+	}
+	return ""
+}
+
+func (x *AgentRegistration) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *AgentRegistration) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
 // AgentRegistrationResponse is returned by the cluster after registration.
 type AgentRegistrationResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -228,7 +255,11 @@ type AgentConfig struct {
 	// Assigned twin ID.
 	TwinId string `protobuf:"bytes,10,opt,name=twin_id,json=twinId,proto3" json:"twin_id,omitempty"`
 	// Assigned client ID.
-	ClientId      string `protobuf:"bytes,11,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	ClientId string `protobuf:"bytes,11,opt,name=client_id,json=clientId,proto3" json:"client_id,omitempty"`
+	// Dual Reality: assigned cluster agent ID.
+	ClusterAgentId string `protobuf:"bytes,12,opt,name=cluster_agent_id,json=clusterAgentId,proto3" json:"cluster_agent_id,omitempty"`
+	// Dual Reality: whether this agent is blacklisted.
+	IsBlacklisted bool `protobuf:"varint,13,opt,name=is_blacklisted,json=isBlacklisted,proto3" json:"is_blacklisted,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -338,6 +369,20 @@ func (x *AgentConfig) GetClientId() string {
 		return x.ClientId
 	}
 	return ""
+}
+
+func (x *AgentConfig) GetClusterAgentId() string {
+	if x != nil {
+		return x.ClusterAgentId
+	}
+	return ""
+}
+
+func (x *AgentConfig) GetIsBlacklisted() bool {
+	if x != nil {
+		return x.IsBlacklisted
+	}
+	return false
 }
 
 // MetricBatch is the top-level message sent from agent to cluster.
@@ -2005,7 +2050,7 @@ var File_paryty_v1_agent_proto protoreflect.FileDescriptor
 
 const file_paryty_v1_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x15paryty/v1/agent.proto\x12\tparyty.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x16paryty/v1/common.proto\x1a\x14paryty/v1/ebpf.proto\"\xe5\x02\n" +
+	"\x15paryty/v1/agent.proto\x12\tparyty.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x16paryty/v1/common.proto\x1a\x14paryty/v1/ebpf.proto\"\xb3\x03\n" +
 	"\x11AgentRegistration\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1a\n" +
 	"\bhostname\x18\x02 \x01(\tR\bhostname\x12!\n" +
@@ -2016,13 +2061,17 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	"\n" +
 	"started_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x12\x17\n" +
 	"\atwin_id\x18\b \x01(\tR\x06twinId\x12\x1b\n" +
-	"\tclient_id\x18\t \x01(\tR\bclientId\"\xa7\x01\n" +
+	"\tclient_id\x18\t \x01(\tR\bclientId\x12(\n" +
+	"\x10cluster_agent_id\x18\n" +
+	" \x01(\tR\x0eclusterAgentId\x12\x0e\n" +
+	"\x02os\x18\v \x01(\tR\x02os\x12\x12\n" +
+	"\x04arch\x18\f \x01(\tR\x04arch\"\xa7\x01\n" +
 	"\x19AgentRegistrationResponse\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12.\n" +
 	"\x06config\x18\x02 \x01(\v2\x16.paryty.v1.AgentConfigR\x06config\x12;\n" +
 	"\vserver_time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
-	"serverTime\"\xb3\x03\n" +
+	"serverTime\"\x84\x04\n" +
 	"\vAgentConfig\x124\n" +
 	"\x16collection_interval_ms\x18\x01 \x01(\x05R\x14collectionIntervalMs\x12#\n" +
 	"\rsampling_rate\x18\x02 \x01(\x02R\fsamplingRate\x12#\n" +
@@ -2035,7 +2084,9 @@ const file_paryty_v1_agent_proto_rawDesc = "" +
 	"\x11identity_assigned\x18\t \x01(\bR\x10identityAssigned\x12\x17\n" +
 	"\atwin_id\x18\n" +
 	" \x01(\tR\x06twinId\x12\x1b\n" +
-	"\tclient_id\x18\v \x01(\tR\bclientId\"\xd7\x05\n" +
+	"\tclient_id\x18\v \x01(\tR\bclientId\x12(\n" +
+	"\x10cluster_agent_id\x18\f \x01(\tR\x0eclusterAgentId\x12%\n" +
+	"\x0eis_blacklisted\x18\r \x01(\bR\risBlacklisted\"\xd7\x05\n" +
 	"\vMetricBatch\x12\x19\n" +
 	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1d\n" +
 	"\n" +

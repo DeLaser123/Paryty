@@ -3,6 +3,7 @@ package warm
 import (
 	"context"
 	"fmt"
+	"regexp"
 	"sort"
 	"time"
 
@@ -196,6 +197,15 @@ func (rm *RetentionManager) processRule(ctx context.Context, rule RetentionRule)
 // This is a fast metadata-only operation in QuestDB — it does not scan or
 // rewrite data. The partition files are removed from disk.
 func (rm *RetentionManager) DropPartition(ctx context.Context, table string, partition string) error {
+	if err := validateIdentifier(table); err != nil {
+		return fmt.Errorf("drop partition: %w", err)
+	}
+	// Partition names are YYYY-MM-DD format from internal time formatting;
+	// validate as a defense-in-depth measure.
+	if _, err := parsePartitionDate(partition); err != nil {
+		return fmt.Errorf("drop partition: invalid partition name: %w", err)
+	}
+
 	query := dropPartitionQuery(table, partition)
 
 	if _, err := rm.pool.Exec(ctx, query); err != nil {
@@ -215,6 +225,10 @@ func (rm *RetentionManager) DropPartition(ctx context.Context, table string, par
 // Returns an empty slice if the table has no data or doesn't exist yet.
 // The returned slice is sorted in ascending order (oldest first).
 func (rm *RetentionManager) ListPartitions(ctx context.Context, table string) ([]string, error) {
+	if err := validateIdentifier(table); err != nil {
+		return nil, fmt.Errorf("list partitions: %w", err)
+	}
+
 	query := listPartitionsQuery(table)
 
 	rows, err := rm.pool.Query(ctx, query)
@@ -269,6 +283,20 @@ func (rm *RetentionManager) ArchiveTableData(ctx context.Context, table string, 
 }
 
 // ---- SQL Generation ----
+
+// validIdentifier matches safe SQL identifiers: alphanumeric + underscores,
+// must start with a letter or underscore. This prevents SQL injection via
+// table or partition names in DDL statements.
+var validIdentifier = regexp.MustCompile(`^[a-zA-Z_][a-zA-Z0-9_]*$`)
+
+// validateIdentifier checks that an identifier is safe for use in DDL.
+// Returns an error if the identifier contains disallowed characters.
+func validateIdentifier(name string) error {
+	if !validIdentifier.MatchString(name) {
+		return fmt.Errorf("invalid identifier %q: must match [a-zA-Z_][a-zA-Z0-9_]*", name)
+	}
+	return nil
+}
 
 // dropPartitionQuery returns the QuestDB SQL for dropping a partition.
 // The partition must be in "YYYY-MM-DD" format.

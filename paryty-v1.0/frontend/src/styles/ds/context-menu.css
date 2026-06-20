@@ -1,0 +1,99 @@
+/* Context menu */
+.aef-context-surface {
+  border: 1px dashed var(--aef-border-strong);
+  border-radius: var(--aef-radius-card);
+  padding: var(--aef-space-6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--aef-space-2);
+  min-height: 100px;
+  cursor: default;
+  user-select: none;
+  color: var(--aef-text-secondary);
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.aef-context-surface:hover {
+  background: var(--aef-surface-low);
+}
+
+.aef-context-surface__icon {
+  color: var(--aef-border-strong);
+  margin-bottom: var(--aef-space-1);
+}
+
+.aef-context-surface__hint {
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+.aef-context-menu {
+  background: var(--aef-surface-card);
+  border: var(--aef-border-width) solid var(--aef-border-strong);
+  border-radius: var(--aef-radius-sheet);
+  padding: 5px;
+  min-width: 150px;
+  max-width: 350px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
+  z-index: 150;
+  animation: aef-scale-in var(--aef-duration-fast) var(--aef-ease-settle) both;
+  transform-origin: top left;
+}
+
+.aef-context-item {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: 7px var(--aef-space-3);
+  border-radius: var(--aef-radius-pill);
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-primary);
+  cursor: pointer;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.aef-context-item__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.aef-context-item:hover,
+.aef-context-item:focus-visible {
+  background: var(--aef-surface-hover);
+  outline: none;
+}
+
+.aef-context-item--destructive {
+  color: var(--aef-counter-variant-b);
+}
+
+.aef-context-item--destructive:hover {
+  background: rgba(220, 71, 20, 0.1);
+}
+
+.aef-context-divider {
+  height: 1px;
+  background: var(--aef-border);
+  margin: var(--aef-space-1) 0;
+}
+
+.aef-context-kbd {
+  margin-left: auto;
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+  background: var(--aef-surface-mid);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-control);
+  padding: 1px 5px;
+}

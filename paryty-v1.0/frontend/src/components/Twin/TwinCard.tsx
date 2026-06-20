@@ -1,8 +1,8 @@
 /**
  * TwinCard — card component for displaying a Digital Paryty in list views.
  *
- * Shows twin name, status badge, agent count, system label,
- * and a clickable area that navigates to the twin detail page.
+ * Uses DS aef-container-card composition with __header (name + badge)
+ * and __body (description + stats). Hover lift animation, DS typography.
  *
  * @module components/Twin/TwinCard
  */
@@ -12,6 +12,7 @@ import { useNavigate } from 'react-router-dom';
 import { Server, Calendar } from 'lucide-react';
 import clsx from 'clsx';
 import type { TwinDetails } from '../../types/digitalParyty';
+import { mapTwinStatus } from '../../types/digitalParyty';
 import { TwinStatusBadge } from './TwinStatusBadge';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -46,8 +47,9 @@ function formatDate(iso: string): string {
 /**
  * A clickable card representing a single Digital Paryty twin.
  *
- * Uses the `aef-container-card` class for the outer shell and
- * the design system typography variables for consistent styling.
+ * Composed from DS primitives: aef-container-card with __header/__body,
+ * aef-badge for status, aef-meta-pill for metadata, aef-motion-hover-lift
+ * for interactive feedback.
  */
 export const TwinCard = memo(function TwinCard({
   twin,
@@ -77,12 +79,12 @@ export const TwinCard = memo(function TwinCard({
 
   return (
     <div
-      className={clsx('aef-container-card', 'twin-card', className)}
-      style={{
-        padding: compact ? 'var(--aef-space-3) var(--aef-space-4)' : 'var(--aef-space-4) var(--aef-space-5)',
-        cursor: 'pointer',
-        transition: 'border-color 0.15s ease',
-      }}
+      className={clsx(
+        'aef-container-card',
+        'aef-motion-hover-lift',
+        className,
+      )}
+      style={{ cursor: 'pointer' }}
       role="button"
       tabIndex={0}
       onClick={handleClick}
@@ -90,94 +92,53 @@ export const TwinCard = memo(function TwinCard({
       data-testid={`twin-card-${twin.id}`}
       aria-label={`View twin: ${twin.name}`}
     >
-      {/* Header row: name + status */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 'var(--aef-space-3)',
-          marginBottom: compact ? 'var(--aef-space-2)' : 'var(--aef-space-3)',
-        }}
-      >
-        <h3
-          style={{
-            margin: 0,
-            fontFamily: 'var(--aef-font-heading)',
-            fontSize: compact ? 13 : 15,
-            fontWeight: 600,
-            color: 'var(--aef-text-primary)',
-            lineHeight: 1.3,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            flex: 1,
-            minWidth: 0,
-          }}
-        >
+      {/* Header: twin name + status badge */}
+      <div className="aef-container-card__header">
+        <span className="aef-container-card__title">
           {twin.name}
-        </h3>
-        <TwinStatusBadge status={twin.status as 'healthy' | 'degraded' | 'unhealthy' | 'unknown'} />
+        </span>
+        <TwinStatusBadge status={mapTwinStatus(twin.status)} />
       </div>
 
-      {/* System label */}
-      {twin.description && !compact && (
-        <p
-          style={{
-            margin: 0,
-            fontFamily: 'var(--aef-font-body)',
-            fontSize: 11,
-            color: 'var(--aef-text-secondary)',
-            lineHeight: 1.5,
-            marginBottom: 'var(--aef-space-3)',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {twin.description}
-        </p>
-      )}
+      {/* Body: description + stats */}
+      <div className="aef-container-card__body" style={{ gap: 'var(--aef-space-2)' }}>
+        {/* Description */}
+        {twin.description && !compact && (
+          <p
+            style={{
+              margin: 0,
+              fontFamily: 'var(--aef-font-body)',
+              fontSize: 'var(--aef-font-size-xs)',
+              color: 'var(--aef-text-secondary)',
+              lineHeight: 'var(--aef-line-height-normal)',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {twin.description}
+          </p>
+        )}
 
-      {/* Stats row */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--aef-space-4)',
-          flexWrap: 'wrap',
-        }}
-      >
-        {/* Agent count */}
-        <span
+        {/* Stats row */}
+        <div
           style={{
-            display: 'inline-flex',
+            display: 'flex',
             alignItems: 'center',
-            gap: 4,
-            fontFamily: 'var(--aef-font-body)',
-            fontSize: 10,
-            color: 'var(--aef-text-secondary)',
+            gap: 'var(--aef-space-2)',
+            flexWrap: 'wrap',
           }}
         >
-          <Server size={11} />
-          {twin.agentCount} agent{twin.agentCount !== 1 ? 's' : ''}
-        </span>
+          <span className="aef-meta-pill">
+            <Server size={10} style={{ marginRight: 'var(--aef-space-1)' }} />
+            {twin.agentCount} agent{twin.agentCount !== 1 ? 's' : ''}
+          </span>
 
-        {/* Updated date */}
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            fontFamily: 'var(--aef-font-body)',
-            fontSize: 10,
-            color: 'var(--aef-text-secondary)',
-            marginLeft: 'auto',
-          }}
-        >
-          <Calendar size={10} />
-          {formatDate(twin.updatedAt)}
-        </span>
+          <span className="aef-meta-pill" style={{ marginLeft: 'auto' }}>
+            <Calendar size={10} style={{ marginRight: 'var(--aef-space-1)' }} />
+            {formatDate(twin.updatedAt)}
+          </span>
+        </div>
       </div>
     </div>
   );

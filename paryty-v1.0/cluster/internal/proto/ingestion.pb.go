@@ -42,19 +42,28 @@ const (
 	AgentCommandType_AGENT_COMMAND_TYPE_UPLOAD_BACKLOG AgentCommandType = 6
 	// Agent should permanently delete local backlog.
 	AgentCommandType_AGENT_COMMAND_TYPE_DELETE_BACKLOG AgentCommandType = 7
+	// Agent should gracefully shut down.
+	AgentCommandType_AGENT_COMMAND_TYPE_RETIRE AgentCommandType = 8
+	// Agent is blacklisted — shut down and persist blacklist state.
+	AgentCommandType_AGENT_COMMAND_TYPE_BLACKLIST AgentCommandType = 9
+	// Agent should clear identity and continue as rogue.
+	AgentCommandType_AGENT_COMMAND_TYPE_UNPAIR AgentCommandType = 10
 )
 
 // Enum value maps for AgentCommandType.
 var (
 	AgentCommandType_name = map[int32]string{
-		0: "AGENT_COMMAND_TYPE_UNSPECIFIED",
-		1: "AGENT_COMMAND_TYPE_RESTART",
-		2: "AGENT_COMMAND_TYPE_UPDATE_CONFIG",
-		3: "AGENT_COMMAND_TYPE_FLUSH_BUFFER",
-		4: "AGENT_COMMAND_TYPE_TOGGLE_LAYER",
-		5: "AGENT_COMMAND_TYPE_ASSIGN_IDENTITY",
-		6: "AGENT_COMMAND_TYPE_UPLOAD_BACKLOG",
-		7: "AGENT_COMMAND_TYPE_DELETE_BACKLOG",
+		0:  "AGENT_COMMAND_TYPE_UNSPECIFIED",
+		1:  "AGENT_COMMAND_TYPE_RESTART",
+		2:  "AGENT_COMMAND_TYPE_UPDATE_CONFIG",
+		3:  "AGENT_COMMAND_TYPE_FLUSH_BUFFER",
+		4:  "AGENT_COMMAND_TYPE_TOGGLE_LAYER",
+		5:  "AGENT_COMMAND_TYPE_ASSIGN_IDENTITY",
+		6:  "AGENT_COMMAND_TYPE_UPLOAD_BACKLOG",
+		7:  "AGENT_COMMAND_TYPE_DELETE_BACKLOG",
+		8:  "AGENT_COMMAND_TYPE_RETIRE",
+		9:  "AGENT_COMMAND_TYPE_BLACKLIST",
+		10: "AGENT_COMMAND_TYPE_UNPAIR",
 	}
 	AgentCommandType_value = map[string]int32{
 		"AGENT_COMMAND_TYPE_UNSPECIFIED":     0,
@@ -65,6 +74,9 @@ var (
 		"AGENT_COMMAND_TYPE_ASSIGN_IDENTITY": 5,
 		"AGENT_COMMAND_TYPE_UPLOAD_BACKLOG":  6,
 		"AGENT_COMMAND_TYPE_DELETE_BACKLOG":  7,
+		"AGENT_COMMAND_TYPE_RETIRE":          8,
+		"AGENT_COMMAND_TYPE_BLACKLIST":       9,
+		"AGENT_COMMAND_TYPE_UNPAIR":          10,
 	}
 )
 
@@ -974,7 +986,7 @@ const file_paryty_v1_ingestion_proto_rawDesc = "" +
 	"\x11requested_changes\x18\x02 \x03(\v29.paryty.v1.AgentConfigUpdateRequest.RequestedChangesEntryR\x10requestedChanges\x1aC\n" +
 	"\x15RequestedChangesEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\xbc\x02\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01*\x9c\x03\n" +
 	"\x10AgentCommandType\x12\"\n" +
 	"\x1eAGENT_COMMAND_TYPE_UNSPECIFIED\x10\x00\x12\x1e\n" +
 	"\x1aAGENT_COMMAND_TYPE_RESTART\x10\x01\x12$\n" +
@@ -983,7 +995,11 @@ const file_paryty_v1_ingestion_proto_rawDesc = "" +
 	"\x1fAGENT_COMMAND_TYPE_TOGGLE_LAYER\x10\x04\x12&\n" +
 	"\"AGENT_COMMAND_TYPE_ASSIGN_IDENTITY\x10\x05\x12%\n" +
 	"!AGENT_COMMAND_TYPE_UPLOAD_BACKLOG\x10\x06\x12%\n" +
-	"!AGENT_COMMAND_TYPE_DELETE_BACKLOG\x10\a2\x95\x03\n" +
+	"!AGENT_COMMAND_TYPE_DELETE_BACKLOG\x10\a\x12\x1d\n" +
+	"\x19AGENT_COMMAND_TYPE_RETIRE\x10\b\x12 \n" +
+	"\x1cAGENT_COMMAND_TYPE_BLACKLIST\x10\t\x12\x1d\n" +
+	"\x19AGENT_COMMAND_TYPE_UNPAIR\x10\n" +
+	"2\x95\x03\n" +
 	"\x10IngestionService\x12S\n" +
 	"\rRegisterAgent\x12\x1c.paryty.v1.AgentRegistration\x1a$.paryty.v1.AgentRegistrationResponse\x12I\n" +
 	"\rStreamMetrics\x12\x19.paryty.v1.AgentToCluster\x1a\x19.paryty.v1.ClusterToAgent(\x010\x01\x12A\n" +

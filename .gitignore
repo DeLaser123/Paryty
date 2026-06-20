@@ -85,3 +85,10 @@ temp/
 # Windows reserved device names
 # ────────────────────────────────────────────────────────────
 nul
+
+# Temporary files with sensitive data
+tmp_*.json
+tmp_*.py
+*_keys.py
+tmp_register.json
+.env.dev

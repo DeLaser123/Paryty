@@ -456,6 +456,15 @@ pub struct AgentRegistration {
     /// Client/tenant ID the agent reports under.
     #[prost(string, tag = "9")]
     pub client_id: ::prost::alloc::string::String,
+    /// Dual Reality: cluster agent ID for auto-pairing on registration.
+    #[prost(string, tag = "10")]
+    pub cluster_agent_id: ::prost::alloc::string::String,
+    /// Dual Reality: OS of the machine (e.g., "windows", "linux").
+    #[prost(string, tag = "11")]
+    pub os: ::prost::alloc::string::String,
+    /// Dual Reality: CPU architecture (e.g., "amd64", "arm64").
+    #[prost(string, tag = "12")]
+    pub arch: ::prost::alloc::string::String,
 }
 /// AgentRegistrationResponse is returned by the cluster after registration.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -508,6 +517,12 @@ pub struct AgentConfig {
     /// Assigned client ID.
     #[prost(string, tag = "11")]
     pub client_id: ::prost::alloc::string::String,
+    /// Dual Reality: assigned cluster agent ID.
+    #[prost(string, tag = "12")]
+    pub cluster_agent_id: ::prost::alloc::string::String,
+    /// Dual Reality: whether this agent is blacklisted.
+    #[prost(bool, tag = "13")]
+    pub is_blacklisted: bool,
 }
 /// MetricBatch is the top-level message sent from agent to cluster.
 #[allow(clippy::derive_partial_eq_without_eq)]
@@ -1172,6 +1187,12 @@ pub enum AgentCommandType {
     UploadBacklog = 6,
     /// Agent should permanently delete local backlog.
     DeleteBacklog = 7,
+    /// Agent should gracefully shut down.
+    Retire = 8,
+    /// Agent is blacklisted — shut down and persist blacklist state.
+    Blacklist = 9,
+    /// Agent should clear identity and continue as rogue.
+    Unpair = 10,
 }
 impl AgentCommandType {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -1188,6 +1209,9 @@ impl AgentCommandType {
             AgentCommandType::AssignIdentity => "AGENT_COMMAND_TYPE_ASSIGN_IDENTITY",
             AgentCommandType::UploadBacklog => "AGENT_COMMAND_TYPE_UPLOAD_BACKLOG",
             AgentCommandType::DeleteBacklog => "AGENT_COMMAND_TYPE_DELETE_BACKLOG",
+            AgentCommandType::Retire => "AGENT_COMMAND_TYPE_RETIRE",
+            AgentCommandType::Blacklist => "AGENT_COMMAND_TYPE_BLACKLIST",
+            AgentCommandType::Unpair => "AGENT_COMMAND_TYPE_UNPAIR",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -1201,6 +1225,9 @@ impl AgentCommandType {
             "AGENT_COMMAND_TYPE_ASSIGN_IDENTITY" => Some(Self::AssignIdentity),
             "AGENT_COMMAND_TYPE_UPLOAD_BACKLOG" => Some(Self::UploadBacklog),
             "AGENT_COMMAND_TYPE_DELETE_BACKLOG" => Some(Self::DeleteBacklog),
+            "AGENT_COMMAND_TYPE_RETIRE" => Some(Self::Retire),
+            "AGENT_COMMAND_TYPE_BLACKLIST" => Some(Self::Blacklist),
+            "AGENT_COMMAND_TYPE_UNPAIR" => Some(Self::Unpair),
             _ => None,
         }
     }
@@ -5672,6 +5699,139 @@ pub struct RejectBacklogResponse {
     #[prost(bool, tag = "1")]
     pub deleted: bool,
 }
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PairAgentToTwinRequest {
+    /// Edge agent ID to pair.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+    /// Cluster agent (twin) ID to pair with.
+    #[prost(string, tag = "2")]
+    pub twin_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct PairAgentToTwinResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+    #[prost(string, tag = "2")]
+    pub error: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UnpairAgentRequest {
+    /// Edge agent ID to unpair.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UnpairAgentResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RetireAgentRequest {
+    /// Edge agent ID to retire.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct RetireAgentResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BlacklistAgentRequest {
+    /// Edge agent ID to blacklist.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+    /// Reason for blacklisting.
+    #[prost(string, tag = "2")]
+    pub reason: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct BlacklistAgentResponse {
+    #[prost(bool, tag = "1")]
+    pub success: bool,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct UnregisterAgentRequest {
+    /// Edge agent ID to unregister.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetAgentPairingStatusRequest {
+    /// Edge agent ID to query.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct AgentPairingStatusResponse {
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+    /// Edge agent lifecycle status.
+    #[prost(string, tag = "2")]
+    pub edge_status: ::prost::alloc::string::String,
+    /// Cluster agent (twin) ID if paired.
+    #[prost(string, tag = "3")]
+    pub cluster_agent_id: ::prost::alloc::string::String,
+    /// Cluster agent display name.
+    #[prost(string, tag = "4")]
+    pub cluster_agent_name: ::prost::alloc::string::String,
+    /// Cluster agent status.
+    #[prost(string, tag = "5")]
+    pub cluster_agent_status: ::prost::alloc::string::String,
+    /// Whether the edge agent is currently paired.
+    #[prost(bool, tag = "6")]
+    pub is_paired: bool,
+    /// When the pairing was established.
+    #[prost(message, optional, tag = "7")]
+    pub paired_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Edge agent operating system.
+    #[prost(string, tag = "8")]
+    pub os: ::prost::alloc::string::String,
+    /// Edge agent CPU architecture.
+    #[prost(string, tag = "9")]
+    pub arch: ::prost::alloc::string::String,
+    /// Edge agent hostname.
+    #[prost(string, tag = "10")]
+    pub hostname: ::prost::alloc::string::String,
+    /// When the agent was retired (if applicable).
+    #[prost(message, optional, tag = "11")]
+    pub retired_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// When the agent was blacklisted (if applicable).
+    #[prost(message, optional, tag = "12")]
+    pub blacklisted_at: ::core::option::Option<::prost_types::Timestamp>,
+    /// Reason for blacklisting (if applicable).
+    #[prost(string, tag = "13")]
+    pub blacklist_reason: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CheckBlacklistRequest {
+    /// Edge agent ID to check.
+    #[prost(string, tag = "1")]
+    pub agent_id: ::prost::alloc::string::String,
+}
+#[allow(clippy::derive_partial_eq_without_eq)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct CheckBlacklistResponse {
+    /// Whether the agent is blacklisted.
+    #[prost(bool, tag = "1")]
+    pub blacklisted: bool,
+    /// Reason for blacklisting (if applicable).
+    #[prost(string, tag = "2")]
+    pub reason: ::prost::alloc::string::String,
+}
 /// Generated client implementations.
 pub mod auth_service_client {
     #![allow(unused_variables, dead_code, missing_docs, clippy::let_unit_value)]
@@ -6620,6 +6780,189 @@ pub mod twin_service_client {
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(GrpcMethod::new("paryty.v1.TwinService", "RejectBacklog"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// PairAgentToTwin links an edge agent to a cluster agent (twin).
+        pub async fn pair_agent_to_twin(
+            &mut self,
+            request: impl tonic::IntoRequest<super::PairAgentToTwinRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PairAgentToTwinResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/PairAgentToTwin",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "PairAgentToTwin"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// UnpairAgent unlinks an edge agent from its cluster agent.
+        /// Edge becomes rogue, cluster becomes unconfigured.
+        pub async fn unpair_agent(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UnpairAgentRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnpairAgentResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/UnpairAgent",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "UnpairAgent"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// RetireAgent gracefully decommissions an edge agent.
+        pub async fn retire_agent(
+            &mut self,
+            request: impl tonic::IntoRequest<super::RetireAgentRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RetireAgentResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/RetireAgent",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "RetireAgent"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// BlacklistAgent blocks an edge agent from ever registering again.
+        pub async fn blacklist_agent(
+            &mut self,
+            request: impl tonic::IntoRequest<super::BlacklistAgentRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BlacklistAgentResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/BlacklistAgent",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "BlacklistAgent"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// UnregisterAgent completely removes an edge agent from the system.
+        /// Erases all traces of client association.
+        pub async fn unregister_agent(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UnregisterAgentRequest>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status> {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/UnregisterAgent",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "UnregisterAgent"));
+            self.inner.unary(req, path, codec).await
+        }
+        /// GetAgentPairingStatus returns detailed pairing info for the smart modal.
+        pub async fn get_agent_pairing_status(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetAgentPairingStatusRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AgentPairingStatusResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/GetAgentPairingStatus",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("paryty.v1.TwinService", "GetAgentPairingStatus"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// CheckBlacklist checks if an edge agent is in the blacklist.
+        pub async fn check_blacklist(
+            &mut self,
+            request: impl tonic::IntoRequest<super::CheckBlacklistRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CheckBlacklistResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::new(
+                        tonic::Code::Unknown,
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic::codec::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/paryty.v1.TwinService/CheckBlacklist",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("paryty.v1.TwinService", "CheckBlacklist"));
             self.inner.unary(req, path, codec).await
         }
     }
@@ -7797,6 +8140,61 @@ pub mod twin_service_server {
             tonic::Response<super::RejectBacklogResponse>,
             tonic::Status,
         >;
+        /// PairAgentToTwin links an edge agent to a cluster agent (twin).
+        async fn pair_agent_to_twin(
+            &self,
+            request: tonic::Request<super::PairAgentToTwinRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::PairAgentToTwinResponse>,
+            tonic::Status,
+        >;
+        /// UnpairAgent unlinks an edge agent from its cluster agent.
+        /// Edge becomes rogue, cluster becomes unconfigured.
+        async fn unpair_agent(
+            &self,
+            request: tonic::Request<super::UnpairAgentRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnpairAgentResponse>,
+            tonic::Status,
+        >;
+        /// RetireAgent gracefully decommissions an edge agent.
+        async fn retire_agent(
+            &self,
+            request: tonic::Request<super::RetireAgentRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::RetireAgentResponse>,
+            tonic::Status,
+        >;
+        /// BlacklistAgent blocks an edge agent from ever registering again.
+        async fn blacklist_agent(
+            &self,
+            request: tonic::Request<super::BlacklistAgentRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::BlacklistAgentResponse>,
+            tonic::Status,
+        >;
+        /// UnregisterAgent completely removes an edge agent from the system.
+        /// Erases all traces of client association.
+        async fn unregister_agent(
+            &self,
+            request: tonic::Request<super::UnregisterAgentRequest>,
+        ) -> std::result::Result<tonic::Response<()>, tonic::Status>;
+        /// GetAgentPairingStatus returns detailed pairing info for the smart modal.
+        async fn get_agent_pairing_status(
+            &self,
+            request: tonic::Request<super::GetAgentPairingStatusRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::AgentPairingStatusResponse>,
+            tonic::Status,
+        >;
+        /// CheckBlacklist checks if an edge agent is in the blacklist.
+        async fn check_blacklist(
+            &self,
+            request: tonic::Request<super::CheckBlacklistRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::CheckBlacklistResponse>,
+            tonic::Status,
+        >;
     }
     #[derive(Debug)]
     pub struct TwinServiceServer<T: TwinService> {
@@ -8369,6 +8767,333 @@ pub mod twin_service_server {
                     let fut = async move {
                         let inner = inner.0;
                         let method = RejectBacklogSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/PairAgentToTwin" => {
+                    #[allow(non_camel_case_types)]
+                    struct PairAgentToTwinSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::PairAgentToTwinRequest>
+                    for PairAgentToTwinSvc<T> {
+                        type Response = super::PairAgentToTwinResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::PairAgentToTwinRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::pair_agent_to_twin(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = PairAgentToTwinSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/UnpairAgent" => {
+                    #[allow(non_camel_case_types)]
+                    struct UnpairAgentSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::UnpairAgentRequest>
+                    for UnpairAgentSvc<T> {
+                        type Response = super::UnpairAgentResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UnpairAgentRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::unpair_agent(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = UnpairAgentSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/RetireAgent" => {
+                    #[allow(non_camel_case_types)]
+                    struct RetireAgentSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::RetireAgentRequest>
+                    for RetireAgentSvc<T> {
+                        type Response = super::RetireAgentResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::RetireAgentRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::retire_agent(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = RetireAgentSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/BlacklistAgent" => {
+                    #[allow(non_camel_case_types)]
+                    struct BlacklistAgentSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::BlacklistAgentRequest>
+                    for BlacklistAgentSvc<T> {
+                        type Response = super::BlacklistAgentResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::BlacklistAgentRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::blacklist_agent(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = BlacklistAgentSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/UnregisterAgent" => {
+                    #[allow(non_camel_case_types)]
+                    struct UnregisterAgentSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::UnregisterAgentRequest>
+                    for UnregisterAgentSvc<T> {
+                        type Response = ();
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UnregisterAgentRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::unregister_agent(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = UnregisterAgentSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/GetAgentPairingStatus" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetAgentPairingStatusSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::GetAgentPairingStatusRequest>
+                    for GetAgentPairingStatusSvc<T> {
+                        type Response = super::AgentPairingStatusResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetAgentPairingStatusRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::get_agent_pairing_status(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = GetAgentPairingStatusSvc(inner);
+                        let codec = tonic::codec::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/paryty.v1.TwinService/CheckBlacklist" => {
+                    #[allow(non_camel_case_types)]
+                    struct CheckBlacklistSvc<T: TwinService>(pub Arc<T>);
+                    impl<
+                        T: TwinService,
+                    > tonic::server::UnaryService<super::CheckBlacklistRequest>
+                    for CheckBlacklistSvc<T> {
+                        type Response = super::CheckBlacklistResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::CheckBlacklistRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as TwinService>::check_blacklist(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let inner = inner.0;
+                        let method = CheckBlacklistSvc(inner);
                         let codec = tonic::codec::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

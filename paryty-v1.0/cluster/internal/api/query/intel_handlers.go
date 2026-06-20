@@ -14,6 +14,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/paryty/paryty-v1.0/cluster/internal/intelligence"
 	"go.uber.org/zap"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 // IntelHandlers holds the intelligence API handlers for Gin routing.
@@ -125,6 +127,8 @@ func (h *IntelHandlers) handleForecast(c *gin.Context) {
 		return
 	}
 
+	tenantID := c.GetString("tenant_id")
+
 	if req.HorizonSeconds == 0 {
 		req.HorizonSeconds = 86400 // default 1 day
 	}
@@ -136,6 +140,7 @@ func (h *IntelHandlers) handleForecast(c *gin.Context) {
 	}
 
 	freq := &intelligence.ForecastRequest{
+		TenantID:        tenantID,
 		ServiceID:       req.ServiceID,
 		MetricName:      req.MetricName,
 		Horizon:         time.Duration(req.HorizonSeconds) * time.Second,
@@ -163,7 +168,7 @@ func (h *IntelHandlers) handleForecast(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"metricName": resp.MetricName,
 		"agentId":    resp.ServiceID,
-		"tenantId":   "default",
+		"tenantId":   tenantID,
 		"points":     points,
 		"modelInfo": gin.H{
 			"bestModel":       resp.Model,
@@ -193,6 +198,8 @@ func (h *IntelHandlers) handleForecastBatch(c *gin.Context) {
 		return
 	}
 
+	tenantID := c.GetString("tenant_id")
+
 	batchReq := &intelligence.ForecastBatchRequest{}
 	for _, q := range req.Queries {
 		if q.HorizonSeconds == 0 {
@@ -205,6 +212,7 @@ func (h *IntelHandlers) handleForecastBatch(c *gin.Context) {
 			q.ServiceID = "default"
 		}
 		batchReq.Requests = append(batchReq.Requests, intelligence.ForecastRequest{
+			TenantID:        tenantID,
 			ServiceID:       q.ServiceID,
 			MetricName:      q.MetricName,
 			Horizon:         time.Duration(q.HorizonSeconds) * time.Second,
@@ -234,7 +242,7 @@ func (h *IntelHandlers) handleForecastBatch(c *gin.Context) {
 		results = append(results, gin.H{
 			"metricName": r.MetricName,
 			"agentId":    r.ServiceID,
-			"tenantId":   "default",
+			"tenantId":   tenantID,
 			"points":     points,
 			"modelInfo": gin.H{
 				"bestModel":       r.Model,
@@ -253,30 +261,36 @@ func (h *IntelHandlers) handleForecastBatch(c *gin.Context) {
 func (h *IntelHandlers) handleModelAccuracy(c *gin.Context) {
 	metricName := c.Query("metric")
 	serviceID := c.Query("service_id")
+	tenantID := c.GetString("tenant_id")
 
+	_ = serviceID // reserved for future use
 	req := &intelligence.ModelAccuracyRequest{
-		ServiceID:  serviceID,
+		TenantID:   tenantID,
 		MetricName: metricName,
 	}
 
 	resp, err := h.forecastClient.GetModelAccuracy(c.Request.Context(), req)
 	if err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Unimplemented {
+			c.JSON(http.StatusOK, gin.H{})
+			return
+		}
 		h.logger.Error("Get model accuracy failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get model accuracy"})
 		return
 	}
 
-	// Transform flat backend response into the Record<string, ModelInfo> shape
+	// Transform backend response into the Record<string, ModelInfo> shape
 	// that the frontend expects. Each metric gets its own ModelInfo entry.
 	result := gin.H{}
-	if resp.Accuracy != nil {
-		for metric, score := range resp.Accuracy {
+	if resp.Models != nil {
+		for metric, modelResp := range resp.Models {
 			result[metric] = gin.H{
-				"bestModel":       "Ensemble",
-				"weights":         gin.H{"Linear Regression": 0.3, "Prophet": 0.3, "XGBoost": 0.4},
-				"accuracy":        gin.H{"Linear Regression": score, "Prophet": score, "XGBoost": score},
-				"lastTrained":     resp.LastTrained,
-				"trainingSamples": resp.SampleCount,
+				"bestModel":       modelResp.Model,
+				"weights":         gin.H{modelResp.Model: 1.0},
+				"accuracy":        gin.H{modelResp.Model: modelResp.ConfidenceScore},
+				"lastTrained":     modelResp.GeneratedAt,
+				"trainingSamples": 0,
 			}
 		}
 	}
@@ -306,8 +320,10 @@ func (h *IntelHandlers) handleRetrainModels(c *gin.Context) {
 		return
 	}
 
+	tenantID := c.GetString("tenant_id")
+
 	resp, err := h.forecastClient.RetrainModels(c.Request.Context(), &intelligence.RetrainRequest{
-		ServiceID:  req.ServiceID,
+		TenantID:    tenantID,
 		MetricName: req.MetricName,
 		Force:      req.Force,
 	})
@@ -338,6 +354,8 @@ func (h *IntelHandlers) handleDetectAnomalies(c *gin.Context) {
 		return
 	}
 
+	tenantID := c.GetString("tenant_id")
+
 	if req.WindowMin == 0 {
 		req.WindowMin = 60
 	}
@@ -349,9 +367,9 @@ func (h *IntelHandlers) handleDetectAnomalies(c *gin.Context) {
 	}
 
 	detectReq := &intelligence.AnomalyDetectionRequest{
+		TenantID:    tenantID,
 		ServiceID:   req.AgentId,
 		MetricName:  req.MetricName,
-		Window:      time.Duration(req.WindowMin) * time.Minute,
 		Sensitivity: req.Sensitivity,
 		Values:      req.Values,
 		Timestamps:  req.Timestamps,
@@ -377,30 +395,40 @@ func (h *IntelHandlers) handleDetectAnomalies(c *gin.Context) {
 func (h *IntelHandlers) handleAnomalyStatus(c *gin.Context) {
 	resp, err := h.anomalyClient.GetDetectionStatus(c.Request.Context())
 	if err != nil {
+		if s, ok := status.FromError(err); ok && s.Code() == codes.Unimplemented {
+			c.JSON(http.StatusOK, gin.H{"models": gin.H{}})
+			return
+		}
 		h.logger.Error("Get detection status failed", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to get detection status"})
 		return
 	}
 
 	// Transform raw gRPC response to frontend AnomalyDetectionStatus shape (camelCase)
+	models := gin.H{}
+	for name, status := range resp.Models {
+		models[name] = gin.H{
+			"name":        status.Name,
+			"trained":     status.Trained,
+			"accuracy":    status.Accuracy,
+			"lastUpdated": status.LastUpdated,
+		}
+	}
+	// Provide defaults if no models reported
+	if len(models) == 0 {
+		models["isolation_forest"] = gin.H{
+			"name": "Isolation Forest", "trained": false, "accuracy": 0.0, "lastUpdated": "",
+		}
+		models["statistical_zscore"] = gin.H{
+			"name": "Statistical Z-Score", "trained": false, "accuracy": 0.0, "lastUpdated": "",
+		}
+	}
+
 	c.JSON(http.StatusOK, gin.H{
-		"models": gin.H{
-			"isolation_forest": gin.H{
-				"name":        "Isolation Forest",
-				"trained":     resp.ModelsLoaded > 0,
-				"accuracy":    0.85,
-				"lastUpdated": resp.LastTraining,
-			},
-			"statistical_zscore": gin.H{
-				"name":        "Statistical Z-Score",
-				"trained":     resp.ModelsLoaded > 0,
-				"accuracy":    0.78,
-				"lastUpdated": resp.LastTraining,
-			},
-		},
-		"lastTraining":         resp.LastTraining,
-		"anomaliesDetected24h": int(resp.DetectionRate * 24),
-		"falsePositiveRate":    0.05,
+		"models":                models,
+		"lastTraining":          resp.LastTraining,
+		"anomaliesDetected24h": resp.AnomaliesDetected24h,
+		"falsePositiveRate":     resp.FalsePositiveRate,
 	})
 }
 
@@ -417,6 +445,8 @@ func (h *IntelHandlers) handleExplainAnomaly(c *gin.Context) {
 		return
 	}
 
+	tenantID := c.GetString("tenant_id")
+
 	// Build an anomaly ID from the request parameters.
 	anomalyID := req.MetricName + ":" + req.AgentId
 	if req.Timestamp > 0 {
@@ -424,7 +454,10 @@ func (h *IntelHandlers) handleExplainAnomaly(c *gin.Context) {
 	}
 
 	resp, err := h.anomalyClient.ExplainAnomaly(c.Request.Context(), &intelligence.ExplainAnomalyRequest{
-		AnomalyID: anomalyID,
+		AgentID:    req.AgentId,
+		TenantID:   tenantID,
+		MetricName: req.MetricName,
+		Timestamp:  req.Timestamp,
 	})
 	if err != nil {
 		h.logger.Error("Explain anomaly failed", zap.Error(err))
@@ -432,18 +465,22 @@ func (h *IntelHandlers) handleExplainAnomaly(c *gin.Context) {
 		return
 	}
 
-	// Build proper Anomaly from the response and request context
-	anomaly := intelligence.Anomaly{
-		ID:          anomalyID,
-		MetricName:  req.MetricName,
-		ServiceID:   req.AgentId,
-		Timestamp:   time.Unix(req.Timestamp, 0),
-		Severity:    "medium",
-		Description: resp.RootCause,
+	// Use response anomaly or build a fallback
+	var anomaly intelligence.Anomaly
+	if resp.Anomaly != nil {
+		anomaly = *resp.Anomaly
+	} else {
+		anomaly = intelligence.Anomaly{
+			ID:         anomalyID,
+			MetricName: req.MetricName,
+			ServiceID:  req.AgentId,
+			Timestamp:  time.Unix(req.Timestamp, 0),
+			Severity:   "medium",
+		}
 	}
 
 	// Use response data for similar incidents and recommendations
-	similarIncidents := resp.ContributingFactors
+	similarIncidents := resp.SimilarIncidents
 	if similarIncidents == nil {
 		similarIncidents = []string{}
 	}

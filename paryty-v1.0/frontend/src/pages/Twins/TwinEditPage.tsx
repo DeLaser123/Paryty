@@ -100,7 +100,7 @@ export const TwinEditPage = memo(function TwinEditPage() {
   if (isLoading) {
     return (
       <div className="dp-page" data-testid="twin-edit-page">
-        <div className="dp-page__inner" style={{ maxWidth: 600 }}>
+        <div className="dp-page__inner" style={{ maxWidth: 'var(--aef-content-width-form)' }}>
           <div
             style={{
               display: 'flex',
@@ -108,7 +108,7 @@ export const TwinEditPage = memo(function TwinEditPage() {
               justifyContent: 'center',
               padding: 'var(--aef-space-12)',
               fontFamily: 'var(--aef-font-body)',
-              fontSize: 12,
+              fontSize: 'var(--aef-font-size-sm)',
               color: 'var(--aef-text-secondary)',
             }}
           >
@@ -124,7 +124,7 @@ export const TwinEditPage = memo(function TwinEditPage() {
   if (error || !twin) {
     return (
       <div className="dp-page" data-testid="twin-edit-page">
-        <div className="dp-page__inner" style={{ maxWidth: 600 }}>
+        <div className="dp-page__inner" style={{ maxWidth: 'var(--aef-content-width-form)' }}>
           <div className="dp-header">
             <div className="dp-header__title-block">
               <button
@@ -133,7 +133,7 @@ export const TwinEditPage = memo(function TwinEditPage() {
                 onClick={() => navigate('/twins')}
                 style={{ marginBottom: 'var(--aef-space-2)' }}
               >
-                <ArrowLeft size={14} /> Back to twins
+                <ArrowLeft size={12} /> Back to twins
               </button>
               <h1 className="dp-header__title">Twin Not Found</h1>
               <p className="dp-header__sub">
@@ -150,7 +150,7 @@ export const TwinEditPage = memo(function TwinEditPage() {
 
   return (
     <div className="dp-page" data-testid="twin-edit-page">
-      <div className="dp-page__inner" style={{ maxWidth: 600 }}>
+      <div className="dp-page__inner" style={{ maxWidth: 'var(--aef-content-width-form)' }}>
         {/* Page header */}
         <div className="dp-header">
           <div className="dp-header__title-block">
@@ -161,7 +161,7 @@ export const TwinEditPage = memo(function TwinEditPage() {
               style={{ marginBottom: 'var(--aef-space-2)' }}
               data-testid="te-back-btn"
             >
-              <ArrowLeft size={14} /> Back to twin
+              <ArrowLeft size={12} /> Back to twin
             </button>
             <h1 className="dp-header__title">Edit Digital Paryty</h1>
             <p className="dp-header__sub">
@@ -205,14 +205,14 @@ export const TwinEditPage = memo(function TwinEditPage() {
             className="aef-btn aef-btn-active"
             form="twin-config-form"
             disabled={isSubmitting}
-            style={{ opacity: isSubmitting ? 0.4 : 1 }}
+            style={{ opacity: isSubmitting ? 'var(--aef-disabled-opacity)' : 1 }}
             data-testid="te-save-btn"
           >
             {isSubmitting ? (
               'Saving…'
             ) : (
               <>
-                <Save size={14} /> Save Changes
+                <Save size={12} /> Save Changes
               </>
             )}
           </button>

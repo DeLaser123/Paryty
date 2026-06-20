@@ -176,8 +176,8 @@ cluster:
       addr: "localhost:8812"
       ilp_addr: "localhost:9009"
       database: "paryty"
-      username: "admin"
-      password: "quest"
+      username: "${PARYTY_QUESTDB_USERNAME}"
+      password: "${PARYTY_QUESTDB_PASSWORD}"
       max_conns: 20
       ilp:
         addr: "localhost:9009"
@@ -229,8 +229,8 @@ cluster:
     cold:
       # Runtime connection config
       endpoint: "localhost:8333"
-      access_key: "minioadmin"
-      secret_key: "minioadmin"
+      access_key: "${PARYTY_SWFS_ACCESS_KEY}"
+      secret_key: "${PARYTY_SWFS_SECRET_KEY}"
       use_ssl: false
       region: "us-east-1"
       bucket: "paryty-cold-storage"

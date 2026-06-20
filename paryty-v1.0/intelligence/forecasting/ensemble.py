@@ -66,6 +66,7 @@ class ForecastEnsemble:
         self._last_fit_ts: int = 0
         self._last_predict_ts: int = 0
         self._n_training_points: int = 0
+        self._last_holdout_mapes: dict[str, float] = {}
 
     # ------------------------------------------------------------------
     # Fitting
@@ -134,6 +135,7 @@ class ForecastEnsemble:
         self.update_weights()
         self._last_fit_ts = int(time.time())
         self._n_training_points = len(values)
+        self._last_holdout_mapes = dict(mapes)
 
         logger.info(
             "ensemble_fitted",
@@ -185,6 +187,16 @@ class ForecastEnsemble:
         else:
             self._weights = dict(ec.default_weights)
 
+        # Re-clamp after renormalization (renorm can push weights above max_weight)
+        for name in _MODEL_NAMES:
+            self._weights[name] = max(
+                ec.min_weight, min(ec.max_weight, self._weights.get(name, 0.0))
+            )
+        # Final renormalization
+        total = sum(self._weights.values())
+        if total > 0:
+            self._weights = {k: v / total for k, v in self._weights.items()}
+
         return self._weights
 
     # ------------------------------------------------------------------
@@ -227,7 +239,35 @@ class ForecastEnsemble:
                 logger.warning("model_predict_failed", model=name, error=str(exc))
 
         if not predictions:
-            raise RuntimeError("All sub-models failed – cannot produce forecast.")
+            # Fallback chain: try individual models in priority order
+            logger.warning("all_ensemble_models_failed_trying_fallback")
+            for name, model in [
+                ("linear", self._linear),
+                ("prophet", self._prophet),
+                ("xgboost", self._xgboost),
+            ]:
+                if model.is_fitted:
+                    try:
+                        result = model.predict(horizon_seconds, step_seconds)
+                        logger.info("fallback_model_succeeded", model=name)
+                        return result
+                    except Exception:
+                        continue
+
+            # Last resort: naive persistence forecast (repeat last value)
+            logger.warning("using_persistence_fallback")
+            now = int(time.time())
+            n_steps = max(1, horizon_seconds // step_seconds)
+            last_val = self._linear._last_value if hasattr(self._linear, '_last_value') else 0.0
+            ts_list = [now + i * step_seconds for i in range(n_steps)]
+            return ForecastResult(
+                timestamps=ts_list,
+                values=[last_val] * n_steps,
+                lower_bound=[last_val * 0.8] * n_steps,
+                upper_bound=[last_val * 1.2] * n_steps,
+                confidence=0.1,
+                model_name="persistence_fallback",
+            )
 
         # Redistribute weights among active models
         w_sum = sum(active_weights.values())
@@ -273,6 +313,7 @@ class ForecastEnsemble:
         return {
             "weights": dict(self._weights),
             "mapes": avg_mapes,
+            "holdout_mapes": dict(self._last_holdout_mapes),
             "history_depth": {
                 name: len(self._accuracy_history[name]) for name in _MODEL_NAMES
             },
@@ -312,3 +353,167 @@ class ForecastEnsemble:
     def xgboost(self) -> XGBoostForecaster:
         """Access the xgboost forecaster."""
         return self._xgboost
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def get_state(self) -> dict[str, Any]:
+        """Return serializable state for persistence."""
+        return {
+            "weights": dict(self._weights),
+            "accuracy_history": {
+                name: list(history)
+                for name, history in self._accuracy_history.items()
+            },
+            "last_fit_ts": self._last_fit_ts,
+            "last_predict_ts": self._last_predict_ts,
+            "n_training_points": self._n_training_points,
+        }
+
+    def set_state(self, state: dict[str, Any]) -> None:
+        """Restore state from a persisted dict."""
+        ec = self._config.ensemble
+        self._weights = state.get("weights", dict(ec.default_weights))
+        for name, values in state.get("accuracy_history", {}).items():
+            if name in self._accuracy_history:
+                self._accuracy_history[name] = deque(
+                    values, maxlen=ec.accuracy_history_size
+                )
+        self._last_fit_ts = state.get("last_fit_ts", 0)
+        self._last_predict_ts = state.get("last_predict_ts", 0)
+        self._n_training_points = state.get("n_training_points", 0)
+
+    # ------------------------------------------------------------------
+    # Meta-learning
+    # ------------------------------------------------------------------
+
+    def compute_meta_features(self, timestamps: list[int], values: list[float]) -> dict[str, float]:
+        """Compute meta-features for context-aware model weighting.
+
+        These features help the meta-learner decide which model to trust
+        based on data characteristics.
+
+        Args:
+            timestamps: Recent timestamps.
+            values: Recent metric values.
+
+        Returns:
+            Dictionary of meta-features.
+        """
+        import pandas as pd
+
+        if len(values) < 10:
+            return {}
+
+        ts_arr = np.asarray(timestamps, dtype=np.int64)
+        val_arr = np.asarray(values, dtype=np.float64)
+
+        # Time-based features
+        dt = pd.to_datetime(ts_arr, unit='s')
+        hour = float(dt.hour.iloc[-1]) if hasattr(dt, 'iloc') else float(dt[-1].hour)
+        day_of_week = float(dt.dayofweek.iloc[-1]) if hasattr(dt, 'iloc') else float(dt[-1].dayofweek)
+
+        # Data characteristics
+        recent = val_arr[-min(100, len(val_arr)):]
+        data_mean = float(np.mean(recent))
+        data_std = float(np.std(recent))
+        data_cv = data_std / abs(data_mean) if abs(data_mean) > 1e-9 else 0.0
+
+        # Trend strength
+        if len(recent) >= 10:
+            x = np.arange(len(recent), dtype=np.float64)
+            slope = float(np.polyfit(x, recent, 1)[0])
+            trend_strength = abs(slope) / (data_std + 1e-9)
+        else:
+            trend_strength = 0.0
+
+        # Seasonality proxy (autocorrelation at lag 24 for hourly data)
+        if len(recent) >= 48:
+            mean_val = np.mean(recent)
+            var_val = np.var(recent)
+            if var_val > 1e-9:
+                acf_24 = float(np.mean((recent[24:] - mean_val) * (recent[:-24] - mean_val)) / var_val)
+            else:
+                acf_24 = 0.0
+        else:
+            acf_24 = 0.0
+
+        # Volatility regime
+        if len(recent) >= 20:
+            short_vol = float(np.std(recent[-10:]))
+            long_vol = float(np.std(recent[-50:])) if len(recent) >= 50 else data_std
+            volatility_ratio = short_vol / (long_vol + 1e-9)
+        else:
+            volatility_ratio = 1.0
+
+        return {
+            "hour_of_day": hour / 23.0,
+            "day_of_week": day_of_week / 6.0,
+            "data_mean": data_mean,
+            "data_std": data_std,
+            "data_cv": data_cv,
+            "trend_strength": trend_strength,
+            "seasonality_acf": acf_24,
+            "volatility_ratio": volatility_ratio,
+            "n_recent": float(len(recent)),
+        }
+
+    def get_contextual_weights(
+        self,
+        timestamps: list[int],
+        values: list[float],
+    ) -> dict[str, float]:
+        """Get ensemble weights adjusted for current data context.
+
+        Uses meta-features to adjust base weights when sufficient
+        prediction history is available.
+
+        Args:
+            timestamps: Recent timestamps.
+            values: Recent metric values.
+
+        Returns:
+            Adjusted model weights.
+        """
+        base_weights = dict(self._weights)
+        meta_features = self.compute_meta_features(timestamps, values)
+
+        if not meta_features:
+            return base_weights
+
+        # Simple heuristic adjustments based on meta-features
+        adjustments = {"linear": 0.0, "prophet": 0.0, "xgboost": 0.0}
+
+        # High trend strength: favor linear/xgboost
+        if meta_features.get("trend_strength", 0) > 0.5:
+            adjustments["linear"] += 0.05
+            adjustments["xgboost"] += 0.05
+            adjustments["prophet"] -= 0.10
+
+        # Strong seasonality: favor prophet
+        if abs(meta_features.get("seasonality_acf", 0)) > 0.3:
+            adjustments["prophet"] += 0.10
+            adjustments["linear"] -= 0.05
+            adjustments["xgboost"] -= 0.05
+
+        # High volatility: favor xgboost (non-linear)
+        if meta_features.get("volatility_ratio", 1.0) > 1.3:
+            adjustments["xgboost"] += 0.08
+            adjustments["linear"] -= 0.04
+            adjustments["prophet"] -= 0.04
+
+        # Apply adjustments
+        adjusted = {}
+        for name in _MODEL_NAMES:
+            adjusted[name] = max(
+                self._config.ensemble.min_weight,
+                min(self._config.ensemble.max_weight, base_weights.get(name, 0.33) + adjustments.get(name, 0.0))
+            )
+
+        # Renormalize
+        total = sum(adjusted.values())
+        if total > 0:
+            adjusted = {k: v / total for k, v in adjusted.items()}
+
+        return adjusted

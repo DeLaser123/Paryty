@@ -1,8 +1,8 @@
 /**
  * TwinDeleteDialog — confirmation modal for deleting a Digital Paryty twin.
  *
- * Renders a centered overlay dialog with a warning message, twin name,
- * and cancel/confirm buttons. Calls the twins API to delete on confirm.
+ * Uses DS modal composition: aef-modal-overlay + aef-modal with
+ * __header, __body, and __footer sections. Animated via aef-modal-enter.
  *
  * @module pages/Twins/TwinDeleteDialog
  */
@@ -30,9 +30,7 @@ interface TwinDeleteDialogProps {
 /**
  * Modal dialog for confirming twin deletion.
  *
- * Displays a warning with the twin name, requires explicit confirm action,
- * and handles the delete API call with loading/error states. Closes on
- * Escape key or clicking the backdrop.
+ * Uses DS modal composition for consistent styling, animation, and accessibility.
  */
 export const TwinDeleteDialog = memo(function TwinDeleteDialog({
   twinId,
@@ -92,73 +90,28 @@ export const TwinDeleteDialog = memo(function TwinDeleteDialog({
 
   return (
     <div
-      className="twin-delete-dialog-backdrop"
-      style={{
-        position: 'fixed',
-        inset: 0,
-        zIndex: 1000,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: 'rgba(0, 0, 0, 0.5)',
-        backdropFilter: 'blur(2px)',
-      }}
+      className="aef-modal-overlay"
       onClick={handleBackdropClick}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Confirm twin deletion"
       data-testid="twin-delete-dialog"
     >
       <div
-        className="aef-container-card"
-        style={{
-          width: '100%',
-          maxWidth: 420,
-          margin: 'var(--aef-space-4)',
-          padding: 0,
-          overflow: 'hidden',
-        }}
+        className="aef-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Confirm twin deletion"
       >
         {/* Header */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            padding: 'var(--aef-space-4) var(--aef-space-5)',
-            borderBottom: 'var(--aef-border-width) solid var(--aef-border)',
-          }}
-        >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 'var(--aef-space-2)',
-            }}
-          >
-            <AlertTriangle
-              size={16}
-              style={{ color: 'var(--aef-error)' }}
-            />
-            <h2
-              style={{
-                margin: 0,
-                fontFamily: 'var(--aef-font-heading)',
-                fontSize: 15,
-                fontWeight: 600,
-                color: 'var(--aef-text-primary)',
-              }}
-            >
-              Delete Digital Paryty
-            </h2>
+        <div className="aef-modal-header">
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--aef-space-2)' }}>
+            <AlertTriangle size={14} style={{ color: 'var(--aef-status-error)' }} />
+            <span className="aef-modal-title">Delete Digital Paryty</span>
           </div>
           <button
             type="button"
-            className="aef-btn aef-btn-inactive"
+            className="aef-modal-close"
             onClick={onClose}
             disabled={isDeleting}
             aria-label="Close dialog"
-            style={{ padding: 'var(--aef-space-1) var(--aef-space-2)' }}
             data-testid="td-close-btn"
           >
             <X size={14} />
@@ -166,19 +119,10 @@ export const TwinDeleteDialog = memo(function TwinDeleteDialog({
         </div>
 
         {/* Body */}
-        <div style={{ padding: 'var(--aef-space-4) var(--aef-space-5)' }}>
-          <p
-            style={{
-              margin: 0,
-              fontFamily: 'var(--aef-font-body)',
-              fontSize: 12,
-              color: 'var(--aef-text-primary)',
-              lineHeight: 1.6,
-              marginBottom: 'var(--aef-space-3)',
-            }}
-          >
+        <div className="aef-modal-body">
+          <p className="aef-modal-para">
             Are you sure you want to delete{' '}
-            <strong>&ldquo;{twinName}&rdquo;</strong>?
+            <strong style={{ color: 'var(--aef-text-primary)' }}>&ldquo;{twinName}&rdquo;</strong>?
             This action cannot be undone. All associated agent assignments
             and configuration will be permanently removed.
           </p>
@@ -188,17 +132,16 @@ export const TwinDeleteDialog = memo(function TwinDeleteDialog({
             <div
               style={{
                 padding: 'var(--aef-space-2) var(--aef-space-3)',
-                background: 'var(--aef-surface-low)',
-                border: 'var(--aef-border-width) solid var(--aef-error)',
+                background: 'var(--aef-status-error-soft)',
+                border: 'var(--aef-border-width) solid var(--aef-status-error)',
                 borderRadius: 'var(--aef-radius-control)',
-                marginBottom: 'var(--aef-space-3)',
               }}
             >
               <span
                 style={{
                   fontFamily: 'var(--aef-font-body)',
-                  fontSize: 11,
-                  color: 'var(--aef-error)',
+                  fontSize: 'var(--aef-font-size-xs)',
+                  color: 'var(--aef-status-error)',
                 }}
               >
                 {error}
@@ -208,16 +151,7 @@ export const TwinDeleteDialog = memo(function TwinDeleteDialog({
         </div>
 
         {/* Footer */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'flex-end',
-            gap: 'var(--aef-space-3)',
-            padding: 'var(--aef-space-3) var(--aef-space-5)',
-            borderTop: 'var(--aef-border-width) solid var(--aef-border)',
-            background: 'var(--aef-surface-low)',
-          }}
-        >
+        <div className="aef-modal-footer">
           <button
             type="button"
             className="aef-btn aef-btn-inactive"
@@ -233,10 +167,10 @@ export const TwinDeleteDialog = memo(function TwinDeleteDialog({
             onClick={handleConfirm}
             disabled={isDeleting}
             style={{
-              background: 'var(--aef-error)',
-              color: '#fff',
+              background: 'var(--aef-status-error)',
+              color: 'var(--aef-btn-active-text)',
               border: 'none',
-              opacity: isDeleting ? 0.6 : 1,
+              opacity: isDeleting ? 'var(--aef-disabled-opacity)' : 1,
             }}
             data-testid="td-confirm-btn"
           >
@@ -244,7 +178,7 @@ export const TwinDeleteDialog = memo(function TwinDeleteDialog({
               'Deleting…'
             ) : (
               <>
-                <Trash2 size={14} /> Delete Twin
+                <Trash2 size={12} /> Delete Twin
               </>
             )}
           </button>

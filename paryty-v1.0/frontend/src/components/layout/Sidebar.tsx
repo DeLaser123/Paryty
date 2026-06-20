@@ -39,7 +39,13 @@ interface NavItem {
   path: string;
   /** Optional feature flag — item is hidden if plan lacks this feature. */
   feature?: string;
+  /** Optional prefetch function for heavy lazy routes. */
+  prefetch?: () => void;
 }
+
+// Prefetch functions for heavy lazy routes — triggers chunk download on hover.
+const prefetchTopology = () => import('../../components/topology/TopologyCanvas');
+const prefetchMetrics = () => import('../../components/MetricsView');
 
 /** Props for the Sidebar component. */
 interface SidebarProps {
@@ -114,8 +120,8 @@ export function Sidebar({ activePath }: SidebarProps) {
   const navItems = useMemo<NavItem[]>(() => {
     const items: NavItem[] = [
       { label: 'Dashboard', icon: <LayoutDashboard size={16} />, path: '/' },
-      { label: 'Topology',  icon: <Globe size={16} />,           path: '/topology' },
-      { label: 'Metrics',   icon: <BarChart2 size={16} />,       path: '/metrics' },
+      { label: 'Topology',  icon: <Globe size={16} />,           path: '/topology',  prefetch: prefetchTopology },
+      { label: 'Metrics',   icon: <BarChart2 size={16} />,       path: '/metrics',   prefetch: prefetchMetrics },
       { label: 'Alerts',    icon: <AlertTriangle size={16} />,   path: '/alerts' },
       { label: 'Agents',    icon: <Server size={16} />,          path: '/agents' },
     ];
@@ -193,6 +199,8 @@ export function Sidebar({ activePath }: SidebarProps) {
               )}
               data-testid={`nav-${item.label.toLowerCase()}`}
               aria-current={isActive ? 'page' : undefined}
+              onMouseEnter={item.prefetch}
+              onFocus={item.prefetch}
             >
               <span className="ds-nav-item__icon">{item.icon}</span>
               {!collapsed && <span className="ds-nav-item__label">{item.label}</span>}

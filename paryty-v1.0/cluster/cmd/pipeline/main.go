@@ -221,6 +221,7 @@ func main() {
 	producer := streamEngine.Producer()
 
 	// Input topics for the pipeline.
+	// Includes default tenant topics + twin-scoped topics (via regex) + orphan topic.
 	inputTopics := cfg.Cluster.Processing.Pipeline.InputTopics
 	if len(inputTopics) == 0 {
 		inputTopics = []string{
@@ -228,6 +229,9 @@ func main() {
 			stream.DefaultTopicNetworkEvents(),
 			stream.DefaultTopicTraces(),
 			stream.DefaultTopicEvents(),
+			stream.TopicOrphan(stream.DefaultTenant), // orphan topic for unassigned agents
+			// Regex pattern for twin-scoped topics: paryty.<tenant>.twins.*
+			fmt.Sprintf("paryty\\.%s\\.twins\\..*", stream.DefaultTenant),
 		}
 	}
 

@@ -3,6 +3,7 @@ import { getRestClient } from '../api/rest';
 import type { DigitalParyty, CreateParytyDraft, TwinDetails } from '../types/digitalParyty';
 import { backendTwinToDigitalParyty } from '../types/digitalParyty';
 import type { AbilityId } from '../types/ability';
+import type { AgentManagementInfo } from '../types/agent';
 
 // ─── localStorage helpers ──────────────────────────────────────────────────
 
@@ -79,6 +80,15 @@ interface DashboardState {
 
   /** Delete a twin by ID. */
   deleteTwin: (id: string) => Promise<void>;
+
+  /** Agent management list. */
+  agents: AgentManagementInfo[];
+
+  /** Whether agent list is being fetched. */
+  agentsLoading: boolean;
+
+  /** Fetch all agents from the backend. */
+  fetchAgents: () => Promise<void>;
 }
 
 // ─── Initial draft ─────────────────────────────────────────────────────────
@@ -97,6 +107,9 @@ export const useDashboardStore = create<DashboardState>()((set, get) => ({
   isLoading: false,
   error: null,
   activeTwinId: loadActiveTwinId(),
+
+  agents: [],
+  agentsLoading: false,
 
   openWizard: () => set({ wizardOpen: true, draft: emptyDraft(), wizardStep: 0 }),
   closeWizard: () => set({ wizardOpen: false }),
@@ -204,6 +217,17 @@ export const useDashboardStore = create<DashboardState>()((set, get) => ({
     });
     if (activeTwinId === id) {
       saveActiveTwinId(null);
+    }
+  },
+
+  fetchAgents: async () => {
+    set({ agentsLoading: true });
+    try {
+      const client = getRestClient();
+      const resp = await client.get<{ data: AgentManagementInfo[] }>('/api/v1/agents/all');
+      set({ agents: resp.data ?? [], agentsLoading: false });
+    } catch {
+      set({ agentsLoading: false });
     }
   },
 }));

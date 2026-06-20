@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { getRestClient } from '../api/rest';
 import type { Alert, AlertRule, AlertState } from '../types/alert';
 
 // ─── Grouping ──────────────────────────────────────────────────
@@ -41,6 +42,7 @@ interface AlertsState {
   setFilterSeverity: (severity: string | null) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
+  fetchAlerts: () => Promise<void>;
   acknowledgeAlert: (alertId: string) => void;
   silenceAlert: (alertId: string, durationMs: number) => void;
 
@@ -99,6 +101,18 @@ export const useAlertsStore = create<AlertsState>()((set, get) => ({
   setLoading: (loading) => set({ isLoading: loading }),
 
   setError: (error) => set({ error }),
+
+  fetchAlerts: async () => {
+    set({ isLoading: true });
+    try {
+      const client = getRestClient();
+      const data = await client.getAlerts();
+      set({ alerts: data ?? [], isLoading: false, error: null });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to fetch alerts';
+      set({ isLoading: false, error: message });
+    }
+  },
 
   /**
    * Acknowledge an alert. Updates alert state locally

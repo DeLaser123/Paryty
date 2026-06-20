@@ -1,12 +1,13 @@
 ﻿# Paryty Development Docker Compose
+# Usage: podman-compose --env-file ../../.env.dev -f docker-compose.dev.yaml up -d
 version: '3.8'
 
 services:
   redpanda:
     image: docker.io/redpandadata/redpanda:latest
     ports:
-      - "9092:9092"
-      - "9644:9644"
+      - "${PARYTY_PORT_REDPANDA_KAFKA}:9092"
+      - "${PARYTY_PORT_REDPANDA_ADMIN}:9644"
     cap_add:
       - SYS_NICE
       - IPC_LOCK
@@ -39,97 +40,122 @@ services:
       - redpanda:33145
     volumes:
       - /mnt/d/ParytyData/redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
 
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
     ports:
-      - "6379:6379"
+      - "${PARYTY_PORT_DRAGONFLY}:6379"
     volumes:
       - /mnt/d/ParytyData/dragonfly:/data
 
   questdb:
     image: questdb/questdb:latest
     ports:
-      - "9000:9000"  # PostgreSQL wire protocol
-      - "9009:9009"  # Web console
-      - "8812:8812"  # InfluxDB line protocol
+      - "${PARYTY_PORT_QUESTDB_WEB}:9000"  # Web console + REST
+      - "${PARYTY_PORT_QUESTDB_ILP}:9009"  # InfluxDB line protocol
+      - "${PARYTY_PORT_QUESTDB_PG}:8812"   # PostgreSQL wire protocol
     volumes:
       - questdb_data:/var/lib/questdb
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/localhost/9000"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   postgres:
     image: postgres:16-alpine
     ports:
-      - "5432:5432"
+      - "${PARYTY_PORT_POSTGRES}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
       POSTGRES_DB: paryty
       POSTGRES_USER: paryty
       POSTGRES_PASSWORD: paryty
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paryty -d paryty"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   seaweedfs-master:
     image: chrislusf/seaweedfs:latest
     ports:
-      - "9333:9333"  # Master server
-      - "19333:19333"  # Master gRPC
+      - "${PARYTY_PORT_SWFS_MASTER}:9333"        # Master server
+      - "${PARYTY_PORT_SWFS_MASTER_GRPC}:19333"   # Master gRPC
     command: master -ip=seaweedfs-master -port=9333 -volumePreallocate=false
     volumes:
       - /mnt/d/ParytyData/seaweedfs-master:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9333/cluster/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   seaweedfs-volume:
     image: chrislusf/seaweedfs:latest
     ports:
-      - "8080:8080"  # Volume server
-      - "18080:18080"  # Volume gRPC
-    command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:8080
+      - "${PARYTY_PORT_SWFS_VOLUME}:8080"        # Volume server (was 8080, now 18080)
+      - "${PARYTY_PORT_SWFS_VOLUME_GRPC}:18080"   # Volume gRPC
+    command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:${PARYTY_PORT_SWFS_VOLUME}
     volumes:
       - /mnt/d/ParytyData/seaweedfs-volume:/data
     depends_on:
       - seaweedfs-master
+    healthcheck:
+      test: ["CMD-SHELL", "cat /proc/net/tcp | grep -q :1F90"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   seaweedfs-filer:
     image: chrislusf/seaweedfs:latest
     ports:
-      - "8888:8888"  # Filer server
-      - "18888:18888"  # Filer gRPC
+      - "${PARYTY_PORT_SWFS_FILER}:8888"        # Filer server
+      - "${PARYTY_PORT_SWFS_FILER_GRPC}:18888"   # Filer gRPC
     command: filer -master=seaweedfs-master:9333 -port=8888
     volumes:
       - /mnt/d/ParytyData/seaweedfs-filer:/data
     depends_on:
       - seaweedfs-master
       - seaweedfs-volume
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8888/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   seaweedfs-s3:
     image: chrislusf/seaweedfs:latest
     ports:
-      - "8333:8333"  # S3 API gateway
+      - "${PARYTY_PORT_SWFS_S3}:8333"  # S3 API gateway
     command: s3 -filer=seaweedfs-filer:8888 -port=8333
     depends_on:
       - seaweedfs-filer
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8333"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # --- Paryty Services ---
-
-  paryty-agent:
-    image: paryty/agent:latest
-    ports:
-      - "9090:9090"  # gRPC
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - ../../configs/agent/agent.yaml:/app/configs/agent/agent.yaml:ro
-    environment:
-      PARYTY_CLUSTER_ENDPOINT: paryty-ingestion:8080
-      PARYTY_LOG_LEVEL: info
-      PARYTY_API_KEY: "pk_live_27e00f019ed5bdcc74e984a7ad947bf531165ff98acf6acf3d6d956e4d6ee200"
-    privileged: true
-    pid: host
-    depends_on:
-      - paryty-ingestion
 
   paryty-ingestion:
     image: paryty/ingestion:latest
     ports:
-      - "50052:8080"  # gRPC ingestion (host:50052 -> container:8080)
+      - "${PARYTY_PORT_INGESTION}:8080"  # gRPC ingestion
     environment:
       DATABASE_URL: postgres://paryty:paryty@postgres:5432/paryty?sslmode=disable
       PARYTY_INGESTION_PORT: "8080"
@@ -138,6 +164,8 @@ services:
       PARYTY_QUESTDB_ADDR: questdb:8812
       PARYTY_QUESTDB_ILP_ADDR: questdb:9009
       PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
+      PARYTY_QUESTDB_USERNAME: "${PARYTY_QUESTDB_USERNAME:-admin}"
+      PARYTY_QUESTDB_PASSWORD: "${PARYTY_QUESTDB_PASSWORD:-quest}"
     volumes:
       - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
     depends_on:
@@ -146,11 +174,17 @@ services:
       - questdb
       - seaweedfs-s3
     restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8080"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   paryty-query:
     image: paryty/query:latest
     ports:
-      - "8082:8080"  # REST/WS/SSE API
+      - "${PARYTY_PORT_QUERY}:8080"  # REST/WS/SSE API
     environment:
       DATABASE_URL: postgres://paryty:paryty@postgres:5432/paryty?sslmode=disable
       PARYTY_JWT_SECRET: "61a61ee4dce5c4e8c6378b71bfefbfb7c94cfc54351ff6db8d93b2b4687b605d"
@@ -159,7 +193,11 @@ services:
       PARYTY_DRAGONFLY_ADDR: dragonfly:6379
       PARYTY_QUESTDB_ADDR: questdb:8812
       PARYTY_QUESTDB_ILP_ADDR: questdb:9009
+      PARYTY_QUESTDB_USERNAME: "${PARYTY_QUESTDB_USERNAME:-admin}"
+      PARYTY_QUESTDB_PASSWORD: "${PARYTY_QUESTDB_PASSWORD:-quest}"
       PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
+      PARYTY_CORS_ORIGINS: "http://localhost:3000,http://127.0.0.1:3000"
+      PARYTY_INTELLIGENCE_ADDR: "paryty-intelligence:50051"
     volumes:
       - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
       - ../../configs/cluster/plans.yaml:/app/configs/cluster/plans.yaml:ro
@@ -169,6 +207,12 @@ services:
       - questdb
       - seaweedfs-s3
     restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/health || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
 
   paryty-pipeline:
     image: paryty/pipeline:latest
@@ -182,6 +226,8 @@ services:
       PARYTY_SEAWEEDFS_SECRET_KEY: "paryty-dev-secret"
       PARYTY_SEAWEEDFS_BUCKET: paryty
       PARYTY_SEAWEEDFS_USE_SSL: "false"
+      PARYTY_QUESTDB_USERNAME: "${PARYTY_QUESTDB_USERNAME:-admin}"
+      PARYTY_QUESTDB_PASSWORD: "${PARYTY_QUESTDB_PASSWORD:-quest}"
     volumes:
       - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
     depends_on:
@@ -197,30 +243,15 @@ services:
       retries: 3
       start_period: 10s
 
-  paryty-frontend:
-    build:
-      context: ../../frontend
-      dockerfile: ../deploy/docker/Dockerfile.frontend.dev
-    volumes:
-      - ../../frontend/src:/app/src
-      - ../../frontend/public:/app/public
-      - ../../frontend/index.html:/app/index.html
-    environment:
-      # Use Docker internal networking — reach query service directly by service name
-      # This bypasses host port mapping entirely (avoids wslrelay port squatting)
-      VITE_API_URL: "http://paryty-query:8080"
-      VITE_WS_URL: "ws://paryty-query:8080"
-    ports:
-      - "5173:3000"  # Host 5173 → container 3000 (Vite dev server)
-    depends_on:
-      - paryty-query
+  # paryty-frontend:  # EXCLUDED — run natively via `npm run dev` in frontend/
+  #   See .env.dev for VITE_API_URL / VITE_WS_URL settings.
 
   # --- Phase 6: Intelligence Layer ---
 
   paryty-intelligence:
     image: paryty-intelligence:latest
     ports:
-      - "50051:50051"  # gRPC intelligence service
+      - "${PARYTY_PORT_INTELLIGENCE}:50051"  # gRPC intelligence service
     environment:
       INTELLIGENCE_PORT: "50051"
       QUESTDB_HOST: questdb
@@ -243,22 +274,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
-
-  # Gai-Tech Linux Agent (Phase 6 validation tenant)
-  paryty-agent-gai-tech:
-    image: paryty/agent:latest
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - ../../configs/agent/agent-gai-tech-linux.yaml:/app/configs/agent/agent.yaml:ro
-    environment:
-      PARYTY_CLUSTER_ENDPOINT: paryty-ingestion:8080
-      PARYTY_LOG_LEVEL: info
-      PARYTY_TENANT_ID: gai-tech
-    privileged: true
-    pid: host
-    depends_on:
-      - paryty-ingestion
 
 volumes:
   questdb_data:

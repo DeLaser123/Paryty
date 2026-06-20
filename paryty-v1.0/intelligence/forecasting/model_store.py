@@ -182,7 +182,8 @@ class ForecastModelStore:
         versions: list[int] = []
         for p in existing:
             stem = p.stem  # e.g. "linear_cpu_usage_v3"
-            parts = stem.split("_v")
+            # Use rsplit to handle metric names containing "_v" (e.g. "cpu_v2_usage")
+            parts = stem.rsplit("_v", 1)
             if len(parts) == 2:
                 try:
                     versions.append(int(parts[-1]))

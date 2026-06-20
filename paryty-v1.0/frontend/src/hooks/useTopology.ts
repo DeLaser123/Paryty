@@ -39,7 +39,7 @@ export function useTopology() {
         const data = await client.getTopology();
         if (mountedRef.current) setTopology(data);
       } catch (err) {
-        if (mountedRef.current) setError((err as Error).message);
+        if (mountedRef.current) setError(err instanceof Error ? err.message : String(err));
       } finally {
         if (mountedRef.current) setLoading(false);
       }

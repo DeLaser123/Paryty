@@ -11,7 +11,7 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     server: {
-      host: '0.0.0.0',
+      host: mode === 'development' ? 'localhost' : '0.0.0.0',
       port: 3000,
       headers: {
         'Cross-Origin-Opener-Policy': 'same-origin',
@@ -30,7 +30,21 @@ export default defineConfig(({ mode }) => {
     },
     build: {
       outDir: 'dist',
-      sourcemap: true,
+      sourcemap: mode === 'development',
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            // React core — changes only on major version bumps
+            if (id.includes('node_modules/react-dom') || id.includes('node_modules/react/')) {
+              return 'vendor-react';
+            }
+            // Router + state management — changes infrequently
+            if (id.includes('node_modules/react-router') || id.includes('node_modules/zustand')) {
+              return 'vendor-router';
+            }
+          },
+        },
+      },
     },
     worker: {
       format: 'es',

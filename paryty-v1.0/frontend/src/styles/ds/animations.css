@@ -1,0 +1,98 @@
+/* === Keyframes === */
+
+@keyframes aef-spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+@keyframes aef-scale-settle {
+  0%   { transform: scale(1.25); }
+  60%  { transform: scale(0.94); }
+  100% { transform: scale(1); }
+}
+
+@keyframes aef-warn-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+
+@keyframes aef-live-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.8); }
+}
+
+@keyframes aef-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes aef-dropdown-in {
+  from { transform: translateY(-6px) scaleY(0.92); opacity: 0; }
+  to   { transform: translateY(0)     scaleY(1);    opacity: 1; }
+}
+
+@keyframes aef-dropdown-in-up {
+  from { transform: translateY(6px) scaleY(0.92); opacity: 0; }
+  to   { transform: translateY(0)    scaleY(1);    opacity: 1; }
+}
+
+@keyframes aef-scale-in {
+  from { transform: scale(0.94); opacity: 0; }
+  to   { transform: scale(1);    opacity: 1; }
+}
+
+@keyframes aef-modal-enter {
+  from { transform: translateY(20px) scale(0.97); opacity: 0; }
+  to   { transform: translateY(0)    scale(1);    opacity: 1; }
+}
+
+@keyframes aef-toast-in {
+  from { transform: translateX(120%); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
+}
+
+@keyframes aef-panel-enter {
+  from { transform: translateY(10px) scale(0.96); opacity: 0; }
+  to   { transform: translateY(0)    scale(1);    opacity: 1; }
+}
+
+/* === aef-spin utility (used in dropdown loading item) === */
+.aef-spin {
+  animation: aef-spin var(--aef-duration-slow) var(--aef-ease-linear) infinite;
+}
+
+/* === Reduced Motion Fallback === */
+@media (prefers-reduced-motion: reduce) {
+  .aef-container-card,
+  .aef-table-card,
+  .aef-card-active,
+  .aef-icon-interactive,
+  .aef-anim-sidebar,
+  .aef-anim-nav-label,
+  .aef-nav-glidepill,
+  .aef-dropdown-chevron,
+  .aef-dropdown-menu,
+  .aef-dropdown-menu--flip-up,
+  .aef-modal-overlay,
+  .aef-modal,
+  .aef-modal--detached,
+  .aef-cmd-overlay,
+  .aef-cmd-palette,
+  .aef-context-menu,
+  .aef-toast,
+  .aef-motion-hover-lift,
+  .aef-motion-press-depth,
+  .aef-motion-enter-el,
+  .aef-btn {
+    transition: none !important;
+    animation: none !important;
+  }
+
+  .aef-icon--state-loading svg,
+  .aef-icon--state-success,
+  .aef-icon--state-warning,
+  .aef-motion-state-dot,
+  .aef-spin {
+    animation: none !important;
+  }
+}

@@ -335,7 +335,9 @@ function ApiKeysTab() {
       return;
     }
     try {
-      const result = await client.put<RotateApiKeyResponse>(`/api/v1/api-keys/${id}/rotate`);
+      // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
+      const resp = await client.put<{ data: RotateApiKeyResponse }>(`/api/v1/api-keys/${id}/rotate`);
+      const result = resp.data;
       setNewKey({ ...result, name, createdAt: new Date().toISOString() });
       addToast({ type: 'success', message: 'API key rotated. Copy the new key now — it won\'t be shown again.' });
       fetchKeys();

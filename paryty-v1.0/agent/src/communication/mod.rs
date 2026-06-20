@@ -98,6 +98,8 @@ pub struct Client {
     topic_prefix: Arc<RwLock<Option<String>>>,
     /// Whether identity has been fully assigned and validated.
     identity_valid: Arc<AtomicBool>,
+    /// Cluster agent ID for auto-pairing (from config/env/CLI).
+    cluster_agent_id: Option<String>,
 
     // ── Backlog Tracking ───────────────────────────────────────────────
     /// Estimated backlog bytes (persisted edge buffer size + in-memory).
@@ -154,6 +156,7 @@ impl Client {
             client_id: Arc::new(RwLock::new(client_id)),
             topic_prefix: Arc::new(RwLock::new(topic_prefix)),
             identity_valid: Arc::new(AtomicBool::new(identity_assigned)),
+            cluster_agent_id: config.agent.cluster_agent_id.clone(),
             backlog_bytes: Arc::new(AtomicU64::new(0)),
             backlog_since_epoch: Arc::new(AtomicI64::new(0)),
         })
@@ -243,6 +246,29 @@ impl Client {
         }
     }
 
+    /// Clear all identity state, reverting the agent to an unpaired/rogue state.
+    ///
+    /// Sets `twin_id`, `client_id`, `topic_prefix` to empty and
+    /// `identity_valid` to false. Also clears the gRPC client identity
+    /// metadata so subsequent RPCs do not carry stale identity.
+    pub async fn clear_identity(&self) {
+        {
+            let mut tid = self.twin_id.write().await;
+            *tid = None;
+        }
+        {
+            let mut cid = self.client_id.write().await;
+            *cid = None;
+        }
+        {
+            let mut tp = self.topic_prefix.write().await;
+            *tp = None;
+        }
+        self.identity_valid.store(false, Ordering::Release);
+        self.grpc.update_identity(None, None);
+        info!("Identity cleared — agent is now unpaired (rogue)");
+    }
+
     /// Check whether identity has been fully assigned.
     pub fn is_identity_assigned(&self) -> bool {
         self.identity_valid.load(Ordering::Acquire)
@@ -293,6 +319,9 @@ impl Client {
             started_at: None,
             twin_id: String::new(),
             client_id: String::new(),
+            cluster_agent_id: self.cluster_agent_id.clone().unwrap_or_default(),
+            os: std::env::consts::OS.to_string(),
+            arch: std::env::consts::ARCH.to_string(),
         };
 
         let response: AgentRegistrationResponse =
@@ -357,18 +386,22 @@ impl Client {
                     Err(e) => {
                         // Check if this is an authentication error
                         let error_msg = e.to_string().to_lowercase();
-                        if error_msg.contains("unauthenticated") || error_msg.contains("unauthorized") {
+                        if error_msg.contains("unauthenticated")
+                            || error_msg.contains("unauthorized")
+                        {
                             warn!(error = %e, "Registration failed with auth error — attempting key refresh");
-                            
+
                             // Attempt to refresh the API key from config/env
                             let key_refreshed = client.grpc.refresh_api_key().await;
-                            
+
                             if key_refreshed {
                                 info!("API key refreshed from config, retrying registration immediately");
                                 // Don't increment attempt counter for auth errors with successful refresh
                                 continue;
                             } else {
-                                warn!("API key refresh failed — agent will not be able to register");
+                                warn!(
+                                    "API key refresh failed — agent will not be able to register"
+                                );
                                 // Use longer backoff for auth errors when key cannot be refreshed
                                 let delay = std::time::Duration::from_secs(60);
                                 tokio::select! {
@@ -1232,6 +1265,22 @@ impl Client {
                 self.buffer.delete_all_backlog();
                 info!("Backlog deleted permanently");
             }
+            Ok(AgentCommandType::Retire) => {
+                warn!("Received RETIRE command from cluster — shutting down gracefully");
+                self.cancel_token.cancel();
+            }
+            Ok(AgentCommandType::Blacklist) => {
+                error!("Received BLACKLIST command from cluster — agent is blacklisted");
+                if let Err(e) = std::fs::write(".paryty-blacklisted", "true") {
+                    warn!(error = %e, "Failed to persist blacklist state to disk");
+                }
+                self.cancel_token.cancel();
+            }
+            Ok(AgentCommandType::Unpair) => {
+                warn!("Received UNPAIR command from cluster — clearing identity");
+                self.clear_identity().await;
+                info!("Agent unpaired — continuing as rogue agent");
+            }
             Ok(AgentCommandType::Unspecified) | Err(_) => {
                 warn!(
                     command_type = command_type,
@@ -1828,6 +1877,7 @@ mod tests {
                 tenant_id: None,
                 twin_id: None,
                 client_id: None,
+                cluster_agent_id: None,
                 self_metrics: crate::config::SelfMetricsConfig { enabled: false, port: 9090 },
             },
             layers: crate::config::LayersConfig {

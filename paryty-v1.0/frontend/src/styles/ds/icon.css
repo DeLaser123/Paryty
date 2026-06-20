@@ -1,0 +1,46 @@
+/* ParytyIcon base */
+.aef-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color var(--aef-duration-fast) var(--aef-ease-exit),
+    transform var(--aef-duration-instant) var(--aef-ease-exit);
+  cursor: default;
+  border-radius: var(--aef-radius-full);
+}
+
+/* Tone */
+.aef-icon--tone-default { color: var(--aef-icon); }
+.aef-icon--tone-muted   { color: var(--aef-text-secondary); }
+.aef-icon--tone-live    { color: var(--aef-status-live); }
+.aef-icon--tone-warning { color: var(--aef-status-warning); }
+.aef-icon--tone-accent-a { color: var(--aef-counter-variant-a); }
+.aef-icon--tone-accent-b { color: var(--aef-counter-variant-b); }
+
+/* Size */
+.aef-icon--sz-xs { width: 20px; height: 20px; }
+.aef-icon--sz-sm { width: 24px; height: 24px; }
+.aef-icon--sz-md { width: 28px; height: 28px; }
+.aef-icon--sz-lg { width: 32px; height: 32px; }
+.aef-icon--sz-xl { width: 40px; height: 40px; }
+
+/* States */
+.aef-icon--state-hover  { transform: scale(1.1); }
+.aef-icon--state-pressed { transform: scale(0.9); }
+.aef-icon--state-active { color: var(--aef-selected-bg); }
+.aef-icon--state-disabled { opacity: 0.3; }
+
+.aef-icon--state-loading svg {
+  animation: aef-spin var(--aef-duration-slow) var(--aef-ease-linear) infinite;
+}
+
+.aef-icon--state-success {
+  color: var(--aef-status-live);
+  animation: aef-scale-settle var(--aef-duration-standard) var(--aef-ease-settle) both;
+}
+
+.aef-icon--state-warning {
+  color: var(--aef-status-warning);
+  animation: aef-warn-pulse 2s var(--aef-ease-linear) infinite;
+}

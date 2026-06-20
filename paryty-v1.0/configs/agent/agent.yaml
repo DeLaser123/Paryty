@@ -3,7 +3,7 @@
 agent:
   id: "auto"
   cluster_endpoint: "localhost:50052"
-  api_key: "pk_live_27e00f019ed5bdcc74e984a7ad947bf531165ff98acf6acf3d6d956e4d6ee200"
+  api_key: "${PARYTY_API_KEY}"
   self_metrics:
     enabled: true
     port: 9100

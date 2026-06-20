@@ -1,0 +1,29 @@
+MACRO REGIME SCORING WORKSHEET,,,,,
+Sovereign Analyst Protocol v1.0,,,,,
+,,,,,
+INPUT SECTION,,,,,
+Date:,2026-06-18,,,,
+VIX Spot:,22,,,,
+VIX Futures M1:,21.5,,,,
+VIX Futures M2:,21.8,,,,
+"10Y-2Y Spread (bps):",45,,,,
+HY OAS (bps):,420,,,,
+10Y TIPS Real Yield (%):,2.20,,,,
+,,,,,
+SCORING SECTION,,,,,
+,VIX Level,VIX Term Structure,Yield Curve,Credit Spread,
+Raw Value:,=B3,"=B5-B4 (M1 vs Spot)",=B6,=B7,
+Score (0-3):,"=IF(B3<15,0,IF(B3<20,1,IF(B3<30,2,3)))","=IF(B5>B3,0,IF(ABS(B5-B3)<0.5,1,IF(ABS(B5-B3)/B3<0.05,2,3)))","=IF(B6>100,0,IF(B6>25,1,IF(B6>-25,2,3)))","=IF(B7<350,0,IF(B7<500,1,IF(B7<700,2,3)))",
+,,,,,
+"Composite Regime Score:",=SUM(B13:E13),,,,
+"Regime Classification:",=IF(B14<=3,"R1: Risk-On Expansion",IF(B14<=6,"R2: Risk-On Late-Cycle",IF(B14<=9,"R3: Risk-Off Contraction","R4: Crisis/Liquidity Shock"))),,,,
+,,,,,
+GOLD REAL YIELD OVERLAY,,,,,
+Real Yield Regime:,=IF(B9<0,"STRONGLY BULLISH for Gold",IF(B9<1,"BULLISH for Gold",IF(B9<2,"NEUTRAL (headwind)","BEARISH (high opportunity cost)"))),,,,
+,,,,,
+REGIME-DEPENDENT LAYER WEIGHTS,,,,,
+,Layer 1 (Regime),Layer 2 (Flows),Layer 3 (Correlation),Layer 4 (Positioning),Layer 5 (Timing)
+R1 (Expansion):,15%,25%,15%,25%,20%
+R2 (Late-Cycle):,20%,25%,20%,15%,20%
+R3 (Contraction):,25%,20%,20%,15%,20%
+R4 (Crisis):,35%,15%,15%,15%,20%

@@ -1,13 +1,16 @@
 /**
  * TwinHeader — displays twin name, IDs with copy buttons, and status badge.
  *
+ * Uses DS aef-container-card composition: __header (name + status badge)
+ * and __body (ID stat-modules + agent count).
+ *
  * @module components/twins/TwinHeader
  */
 
 import { useCallback, useState } from 'react';
-import { Copy, Check } from 'lucide-react';
-import clsx from 'clsx';
+import { Copy, Check, Server } from 'lucide-react';
 import type { TwinDetails } from '../../types/digitalParyty';
+import { DetachableCard } from '../common/DetachableCard';
 
 interface TwinHeaderProps {
   twin: TwinDetails;
@@ -37,140 +40,88 @@ function CopyButton({ text, label }: { text: string; label: string }) {
       type="button"
       className="aef-btn aef-btn-inactive"
       onClick={handleCopy}
-      title={`Copy ${label}`}
       aria-label={`Copy ${label}`}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 4,
-        padding: '2px 8px',
-        fontSize: 11,
+        gap: 'var(--aef-space-1)',
+        padding: 'var(--aef-space-0-5) var(--aef-space-2)',
+        fontSize: 'var(--aef-font-size-2xs)',
       }}
       data-testid={`copy-${label.toLowerCase().replace(/\s+/g, '-')}`}
     >
-      {copied ? <Check size={11} /> : <Copy size={11} />}
+      {copied ? <Check size={10} /> : <Copy size={10} />}
       {copied ? 'Copied' : 'Copy'}
     </button>
   );
 }
 
+/** Status-to-badge-variant mapping */
+const STATUS_BADGE: Record<string, { variant: string; label: string }> = {
+  active: { variant: 'badge-valid', label: 'Healthy' },
+  healthy: { variant: 'badge-valid', label: 'Healthy' },
+  degraded: { variant: 'badge-warning', label: 'Degraded' },
+  pending: { variant: 'badge-pending', label: 'Pending' },
+  inactive: { variant: 'badge-pending', label: 'Inactive' },
+  unhealthy: { variant: 'badge-warning', label: 'Unhealthy' },
+  unknown: { variant: 'badge-pending', label: 'Unknown' },
+};
+
 export function TwinHeader({ twin }: TwinHeaderProps) {
-  const statusLabel = twin.status === 'healthy' ? '● Healthy' : `● ${twin.status}`;
+  const badge = STATUS_BADGE[twin.status] ?? STATUS_BADGE['unknown'];
 
   return (
-    <div
-      className="aef-container-card"
-      style={{ padding: 'var(--aef-space-4) var(--aef-space-5)' }}
-      data-testid="twin-header"
+    <DetachableCard
+      title={twin.name}
+      icon={<Server size={14} />}
+      headerAction={
+        <span className={`aef-badge ${badge.variant}`}>
+          {badge.label}
+        </span>
+      }
+      testId="twin-header"
     >
-      {/* Twin name */}
-      <div style={{ marginBottom: 'var(--aef-space-3)' }}>
-        <h2
-          style={{
-            fontFamily: 'var(--aef-font-heading)',
-            fontSize: 18,
-            fontWeight: 600,
-            color: 'var(--aef-text-primary)',
-            margin: 0,
-            lineHeight: 1.3,
-          }}
-        >
-          Twin: &ldquo;{twin.name}&rdquo;
-        </h2>
-      </div>
-
-      {/* IDs row */}
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          gap: 'var(--aef-space-4)',
-          marginBottom: 'var(--aef-space-3)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--aef-space-2)' }}>
-          <span
-            style={{
-              fontFamily: 'var(--aef-font-body)',
-              fontSize: 11,
-              color: 'var(--aef-text-secondary)',
-            }}
-          >
-            Twin ID:
-          </span>
-          <code
-            style={{
-              fontFamily: 'var(--aef-font-mono, monospace)',
-              fontSize: 11,
-              color: 'var(--aef-text-primary)',
-              background: 'var(--aef-surface-low)',
-              padding: '1px 6px',
-              borderRadius: 'var(--aef-radius-control)',
-            }}
-          >
-            {truncateId(twin.id)}
-          </code>
-          <CopyButton text={twin.id} label="Twin ID" />
+      {/* Twin ID row */}
+      <div className="aef-stat-module">
+          <span className="aef-stat-module__label">Twin ID</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--aef-space-2)' }}>
+            <code
+              style={{
+                fontFamily: 'var(--aef-font-body)',
+                fontSize: 'var(--aef-font-size-xs)',
+                color: 'var(--aef-text-primary)',
+              }}
+            >
+              {truncateId(twin.id)}
+            </code>
+            <CopyButton text={twin.id} label="Twin ID" />
+          </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--aef-space-2)' }}>
-          <span
-            style={{
-              fontFamily: 'var(--aef-font-body)',
-              fontSize: 11,
-              color: 'var(--aef-text-secondary)',
-            }}
-          >
-            Client ID:
-          </span>
-          <code
-            style={{
-              fontFamily: 'var(--aef-font-mono, monospace)',
-              fontSize: 11,
-              color: 'var(--aef-text-primary)',
-              background: 'var(--aef-surface-low)',
-              padding: '1px 6px',
-              borderRadius: 'var(--aef-radius-control)',
-            }}
-          >
-            {truncateId(twin.tenantId)}
-          </code>
-          <CopyButton text={twin.tenantId} label="Client ID" />
+        {/* Client ID row */}
+        <div className="aef-stat-module">
+          <span className="aef-stat-module__label">Client ID</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--aef-space-2)' }}>
+            <code
+              style={{
+                fontFamily: 'var(--aef-font-body)',
+                fontSize: 'var(--aef-font-size-xs)',
+                color: 'var(--aef-text-primary)',
+              }}
+            >
+              {truncateId(twin.tenantId)}
+            </code>
+            <CopyButton text={twin.tenantId} label="Client ID" />
+          </div>
         </div>
-      </div>
 
-      {/* Status row */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 'var(--aef-space-3)',
-        }}
-      >
-        <span
-          className={clsx('dp-card__health-dot', `dp-card__health-dot--${twin.status === 'healthy' ? 'healthy' : 'degraded'}`)}
-          style={{ marginTop: 0 }}
-        />
-        <span
-          style={{
-            fontFamily: 'var(--aef-font-body)',
-            fontSize: 12,
-            fontWeight: 500,
-            color: 'var(--aef-text-primary)',
-          }}
-        >
-          {statusLabel}
-        </span>
-        <span
-          style={{
-            fontFamily: 'var(--aef-font-body)',
-            fontSize: 11,
-            color: 'var(--aef-text-secondary)',
-          }}
-        >
-          {twin.agentCount} agent{twin.agentCount !== 1 ? 's' : ''} connected
-        </span>
-      </div>
-    </div>
+        {/* Agent count */}
+        <div className="aef-stat-module">
+          <span className="aef-stat-module__label">Connected Agents</span>
+          <span className="aef-stat-module__value">
+            {twin.agentCount} agent{twin.agentCount !== 1 ? 's' : ''}
+          </span>
+        </div>
+    </DetachableCard>
   );
 }

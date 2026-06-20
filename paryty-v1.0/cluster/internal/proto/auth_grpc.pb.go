@@ -760,17 +760,24 @@ var PlanService_ServiceDesc = grpc.ServiceDesc{
 }
 
 const (
-	TwinService_CreateTwin_FullMethodName        = "/paryty.v1.TwinService/CreateTwin"
-	TwinService_ListTwins_FullMethodName         = "/paryty.v1.TwinService/ListTwins"
-	TwinService_GetTwin_FullMethodName           = "/paryty.v1.TwinService/GetTwin"
-	TwinService_UpdateTwin_FullMethodName        = "/paryty.v1.TwinService/UpdateTwin"
-	TwinService_DeleteTwin_FullMethodName        = "/paryty.v1.TwinService/DeleteTwin"
-	TwinService_GetTwinConfig_FullMethodName     = "/paryty.v1.TwinService/GetTwinConfig"
-	TwinService_ResolveIdentity_FullMethodName   = "/paryty.v1.TwinService/ResolveIdentity"
-	TwinService_AssignAgentToTwin_FullMethodName = "/paryty.v1.TwinService/AssignAgentToTwin"
-	TwinService_ListTwinAgents_FullMethodName    = "/paryty.v1.TwinService/ListTwinAgents"
-	TwinService_AcceptBacklog_FullMethodName     = "/paryty.v1.TwinService/AcceptBacklog"
-	TwinService_RejectBacklog_FullMethodName     = "/paryty.v1.TwinService/RejectBacklog"
+	TwinService_CreateTwin_FullMethodName            = "/paryty.v1.TwinService/CreateTwin"
+	TwinService_ListTwins_FullMethodName             = "/paryty.v1.TwinService/ListTwins"
+	TwinService_GetTwin_FullMethodName               = "/paryty.v1.TwinService/GetTwin"
+	TwinService_UpdateTwin_FullMethodName            = "/paryty.v1.TwinService/UpdateTwin"
+	TwinService_DeleteTwin_FullMethodName            = "/paryty.v1.TwinService/DeleteTwin"
+	TwinService_GetTwinConfig_FullMethodName         = "/paryty.v1.TwinService/GetTwinConfig"
+	TwinService_ResolveIdentity_FullMethodName       = "/paryty.v1.TwinService/ResolveIdentity"
+	TwinService_AssignAgentToTwin_FullMethodName     = "/paryty.v1.TwinService/AssignAgentToTwin"
+	TwinService_ListTwinAgents_FullMethodName        = "/paryty.v1.TwinService/ListTwinAgents"
+	TwinService_AcceptBacklog_FullMethodName         = "/paryty.v1.TwinService/AcceptBacklog"
+	TwinService_RejectBacklog_FullMethodName         = "/paryty.v1.TwinService/RejectBacklog"
+	TwinService_PairAgentToTwin_FullMethodName       = "/paryty.v1.TwinService/PairAgentToTwin"
+	TwinService_UnpairAgent_FullMethodName           = "/paryty.v1.TwinService/UnpairAgent"
+	TwinService_RetireAgent_FullMethodName           = "/paryty.v1.TwinService/RetireAgent"
+	TwinService_BlacklistAgent_FullMethodName        = "/paryty.v1.TwinService/BlacklistAgent"
+	TwinService_UnregisterAgent_FullMethodName       = "/paryty.v1.TwinService/UnregisterAgent"
+	TwinService_GetAgentPairingStatus_FullMethodName = "/paryty.v1.TwinService/GetAgentPairingStatus"
+	TwinService_CheckBlacklist_FullMethodName        = "/paryty.v1.TwinService/CheckBlacklist"
 )
 
 // TwinServiceClient is the client API for TwinService service.
@@ -801,6 +808,22 @@ type TwinServiceClient interface {
 	AcceptBacklog(ctx context.Context, in *AcceptBacklogRequest, opts ...grpc.CallOption) (*AcceptBacklogResponse, error)
 	// RejectBacklog instructs the agent to permanently delete its local backlog.
 	RejectBacklog(ctx context.Context, in *RejectBacklogRequest, opts ...grpc.CallOption) (*RejectBacklogResponse, error)
+	// PairAgentToTwin links an edge agent to a cluster agent (twin).
+	PairAgentToTwin(ctx context.Context, in *PairAgentToTwinRequest, opts ...grpc.CallOption) (*PairAgentToTwinResponse, error)
+	// UnpairAgent unlinks an edge agent from its cluster agent.
+	// Edge becomes rogue, cluster becomes unconfigured.
+	UnpairAgent(ctx context.Context, in *UnpairAgentRequest, opts ...grpc.CallOption) (*UnpairAgentResponse, error)
+	// RetireAgent gracefully decommissions an edge agent.
+	RetireAgent(ctx context.Context, in *RetireAgentRequest, opts ...grpc.CallOption) (*RetireAgentResponse, error)
+	// BlacklistAgent blocks an edge agent from ever registering again.
+	BlacklistAgent(ctx context.Context, in *BlacklistAgentRequest, opts ...grpc.CallOption) (*BlacklistAgentResponse, error)
+	// UnregisterAgent completely removes an edge agent from the system.
+	// Erases all traces of client association.
+	UnregisterAgent(ctx context.Context, in *UnregisterAgentRequest, opts ...grpc.CallOption) (*emptypb.Empty, error)
+	// GetAgentPairingStatus returns detailed pairing info for the smart modal.
+	GetAgentPairingStatus(ctx context.Context, in *GetAgentPairingStatusRequest, opts ...grpc.CallOption) (*AgentPairingStatusResponse, error)
+	// CheckBlacklist checks if an edge agent is in the blacklist.
+	CheckBlacklist(ctx context.Context, in *CheckBlacklistRequest, opts ...grpc.CallOption) (*CheckBlacklistResponse, error)
 }
 
 type twinServiceClient struct {
@@ -921,6 +944,76 @@ func (c *twinServiceClient) RejectBacklog(ctx context.Context, in *RejectBacklog
 	return out, nil
 }
 
+func (c *twinServiceClient) PairAgentToTwin(ctx context.Context, in *PairAgentToTwinRequest, opts ...grpc.CallOption) (*PairAgentToTwinResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(PairAgentToTwinResponse)
+	err := c.cc.Invoke(ctx, TwinService_PairAgentToTwin_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *twinServiceClient) UnpairAgent(ctx context.Context, in *UnpairAgentRequest, opts ...grpc.CallOption) (*UnpairAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UnpairAgentResponse)
+	err := c.cc.Invoke(ctx, TwinService_UnpairAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *twinServiceClient) RetireAgent(ctx context.Context, in *RetireAgentRequest, opts ...grpc.CallOption) (*RetireAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(RetireAgentResponse)
+	err := c.cc.Invoke(ctx, TwinService_RetireAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *twinServiceClient) BlacklistAgent(ctx context.Context, in *BlacklistAgentRequest, opts ...grpc.CallOption) (*BlacklistAgentResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(BlacklistAgentResponse)
+	err := c.cc.Invoke(ctx, TwinService_BlacklistAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *twinServiceClient) UnregisterAgent(ctx context.Context, in *UnregisterAgentRequest, opts ...grpc.CallOption) (*emptypb.Empty, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(emptypb.Empty)
+	err := c.cc.Invoke(ctx, TwinService_UnregisterAgent_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *twinServiceClient) GetAgentPairingStatus(ctx context.Context, in *GetAgentPairingStatusRequest, opts ...grpc.CallOption) (*AgentPairingStatusResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AgentPairingStatusResponse)
+	err := c.cc.Invoke(ctx, TwinService_GetAgentPairingStatus_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *twinServiceClient) CheckBlacklist(ctx context.Context, in *CheckBlacklistRequest, opts ...grpc.CallOption) (*CheckBlacklistResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(CheckBlacklistResponse)
+	err := c.cc.Invoke(ctx, TwinService_CheckBlacklist_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // TwinServiceServer is the server API for TwinService service.
 // All implementations must embed UnimplementedTwinServiceServer
 // for forward compatibility.
@@ -949,6 +1042,22 @@ type TwinServiceServer interface {
 	AcceptBacklog(context.Context, *AcceptBacklogRequest) (*AcceptBacklogResponse, error)
 	// RejectBacklog instructs the agent to permanently delete its local backlog.
 	RejectBacklog(context.Context, *RejectBacklogRequest) (*RejectBacklogResponse, error)
+	// PairAgentToTwin links an edge agent to a cluster agent (twin).
+	PairAgentToTwin(context.Context, *PairAgentToTwinRequest) (*PairAgentToTwinResponse, error)
+	// UnpairAgent unlinks an edge agent from its cluster agent.
+	// Edge becomes rogue, cluster becomes unconfigured.
+	UnpairAgent(context.Context, *UnpairAgentRequest) (*UnpairAgentResponse, error)
+	// RetireAgent gracefully decommissions an edge agent.
+	RetireAgent(context.Context, *RetireAgentRequest) (*RetireAgentResponse, error)
+	// BlacklistAgent blocks an edge agent from ever registering again.
+	BlacklistAgent(context.Context, *BlacklistAgentRequest) (*BlacklistAgentResponse, error)
+	// UnregisterAgent completely removes an edge agent from the system.
+	// Erases all traces of client association.
+	UnregisterAgent(context.Context, *UnregisterAgentRequest) (*emptypb.Empty, error)
+	// GetAgentPairingStatus returns detailed pairing info for the smart modal.
+	GetAgentPairingStatus(context.Context, *GetAgentPairingStatusRequest) (*AgentPairingStatusResponse, error)
+	// CheckBlacklist checks if an edge agent is in the blacklist.
+	CheckBlacklist(context.Context, *CheckBlacklistRequest) (*CheckBlacklistResponse, error)
 	mustEmbedUnimplementedTwinServiceServer()
 }
 
@@ -991,6 +1100,27 @@ func (UnimplementedTwinServiceServer) AcceptBacklog(context.Context, *AcceptBack
 }
 func (UnimplementedTwinServiceServer) RejectBacklog(context.Context, *RejectBacklogRequest) (*RejectBacklogResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RejectBacklog not implemented")
+}
+func (UnimplementedTwinServiceServer) PairAgentToTwin(context.Context, *PairAgentToTwinRequest) (*PairAgentToTwinResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method PairAgentToTwin not implemented")
+}
+func (UnimplementedTwinServiceServer) UnpairAgent(context.Context, *UnpairAgentRequest) (*UnpairAgentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnpairAgent not implemented")
+}
+func (UnimplementedTwinServiceServer) RetireAgent(context.Context, *RetireAgentRequest) (*RetireAgentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method RetireAgent not implemented")
+}
+func (UnimplementedTwinServiceServer) BlacklistAgent(context.Context, *BlacklistAgentRequest) (*BlacklistAgentResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method BlacklistAgent not implemented")
+}
+func (UnimplementedTwinServiceServer) UnregisterAgent(context.Context, *UnregisterAgentRequest) (*emptypb.Empty, error) {
+	return nil, status.Error(codes.Unimplemented, "method UnregisterAgent not implemented")
+}
+func (UnimplementedTwinServiceServer) GetAgentPairingStatus(context.Context, *GetAgentPairingStatusRequest) (*AgentPairingStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetAgentPairingStatus not implemented")
+}
+func (UnimplementedTwinServiceServer) CheckBlacklist(context.Context, *CheckBlacklistRequest) (*CheckBlacklistResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method CheckBlacklist not implemented")
 }
 func (UnimplementedTwinServiceServer) mustEmbedUnimplementedTwinServiceServer() {}
 func (UnimplementedTwinServiceServer) testEmbeddedByValue()                     {}
@@ -1211,6 +1341,132 @@ func _TwinService_RejectBacklog_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _TwinService_PairAgentToTwin_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PairAgentToTwinRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TwinServiceServer).PairAgentToTwin(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TwinService_PairAgentToTwin_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TwinServiceServer).PairAgentToTwin(ctx, req.(*PairAgentToTwinRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TwinService_UnpairAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnpairAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TwinServiceServer).UnpairAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TwinService_UnpairAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TwinServiceServer).UnpairAgent(ctx, req.(*UnpairAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TwinService_RetireAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RetireAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TwinServiceServer).RetireAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TwinService_RetireAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TwinServiceServer).RetireAgent(ctx, req.(*RetireAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TwinService_BlacklistAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(BlacklistAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TwinServiceServer).BlacklistAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TwinService_BlacklistAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TwinServiceServer).BlacklistAgent(ctx, req.(*BlacklistAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TwinService_UnregisterAgent_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UnregisterAgentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TwinServiceServer).UnregisterAgent(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TwinService_UnregisterAgent_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TwinServiceServer).UnregisterAgent(ctx, req.(*UnregisterAgentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TwinService_GetAgentPairingStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetAgentPairingStatusRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TwinServiceServer).GetAgentPairingStatus(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TwinService_GetAgentPairingStatus_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TwinServiceServer).GetAgentPairingStatus(ctx, req.(*GetAgentPairingStatusRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _TwinService_CheckBlacklist_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CheckBlacklistRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(TwinServiceServer).CheckBlacklist(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: TwinService_CheckBlacklist_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(TwinServiceServer).CheckBlacklist(ctx, req.(*CheckBlacklistRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // TwinService_ServiceDesc is the grpc.ServiceDesc for TwinService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -1261,6 +1517,34 @@ var TwinService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RejectBacklog",
 			Handler:    _TwinService_RejectBacklog_Handler,
+		},
+		{
+			MethodName: "PairAgentToTwin",
+			Handler:    _TwinService_PairAgentToTwin_Handler,
+		},
+		{
+			MethodName: "UnpairAgent",
+			Handler:    _TwinService_UnpairAgent_Handler,
+		},
+		{
+			MethodName: "RetireAgent",
+			Handler:    _TwinService_RetireAgent_Handler,
+		},
+		{
+			MethodName: "BlacklistAgent",
+			Handler:    _TwinService_BlacklistAgent_Handler,
+		},
+		{
+			MethodName: "UnregisterAgent",
+			Handler:    _TwinService_UnregisterAgent_Handler,
+		},
+		{
+			MethodName: "GetAgentPairingStatus",
+			Handler:    _TwinService_GetAgentPairingStatus_Handler,
+		},
+		{
+			MethodName: "CheckBlacklist",
+			Handler:    _TwinService_CheckBlacklist_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

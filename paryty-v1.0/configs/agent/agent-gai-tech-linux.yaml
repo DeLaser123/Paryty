@@ -3,9 +3,8 @@
 
 agent:
   id: "auto"
-  cluster_endpoint: "192.168.16.1:50052"
-  api_key: "pk_live_27e00f019ed5bdcc74e984a7ad947bf531165ff98acf6acf3d6d956e4d6ee200"
-  tenant_id: "gai-tech"
+  cluster_endpoint: "http://192.168.30.45:50052"
+  api_key: "${PARYTY_API_KEY}"
   self_metrics:
     enabled: true
     port: 9102
@@ -30,9 +29,6 @@ layers:
     db_inspection: false
     exclude_ports: [22, 53, 443]
     exclude_ips: ["127.0.0.1", "::1"]
-    ring_buffer_size_kb: 256
-    poll_interval_ms: 100
-    fallback_to_proc: true
 
   supervisor:
     enabled: false

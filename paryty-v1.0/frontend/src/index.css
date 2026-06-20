@@ -13,8 +13,30 @@
 @import './styles/typography.css';
 @import './styles/globals.css';
 @import './styles/utilities.css';
-/* Design system component styles (sidebar, nav, header, counters, etc.) */
-@import './paryty_design_system/design-system-page.css';
+/* Design system component modules (extracted from paryty_design_system/) */
+@import './styles/ds/button.css';
+@import './styles/ds/counter.css';
+@import './styles/ds/progress.css';
+@import './styles/ds/dot.css';
+@import './styles/ds/table.css';
+@import './styles/ds/badge.css';
+@import './styles/ds/container-card.css';
+@import './styles/ds/viz-well.css';
+@import './styles/ds/stat-module.css';
+@import './styles/ds/catalog-row.css';
+@import './styles/ds/scroll.css';
+@import './styles/ds/icon.css';
+@import './styles/ds/dropdown.css';
+@import './styles/ds/tooltip.css';
+@import './styles/ds/popover.css';
+@import './styles/ds/modal.css';
+@import './styles/ds/toast.css';
+@import './styles/ds/cmd-palette.css';
+@import './styles/ds/context-menu.css';
+@import './styles/ds/animated-nav.css';
+@import './styles/ds/sidebar.css';
+@import './styles/ds/motion.css';
+@import './styles/ds/animations.css';
 
 /* ================================================================
    Transport Mode Visual Degradation

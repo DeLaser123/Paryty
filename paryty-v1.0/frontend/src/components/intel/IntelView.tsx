@@ -7,8 +7,8 @@
  * @module components/intel/IntelView
  */
 
-import { useCallback, useEffect } from 'react';
-import { Brain, RefreshCw } from 'lucide-react';
+import { useCallback, useEffect, useMemo } from 'react';
+import { Brain, RefreshCw, Wifi, WifiOff, Activity } from 'lucide-react';
 import { useIntel } from '../../hooks/useIntel';
 import { useIntelStore } from '../../stores/intelStore';
 import { ForecastCards } from './ForecastCards';
@@ -40,18 +40,32 @@ export default function IntelView() {
   const setSeverityFilter = useIntelStore((s) => s.setSeverityFilter);
   const retrainModels = useIntelStore((s) => s.retrainModels);
 
+  // Dynamic metric list from real data (no hardcoded list)
+  const metricNames = useMemo(() => {
+    if (intel.knownMetrics.length > 0) return intel.knownMetrics;
+    // Fallback: use the metrics we have forecasts for
+    return Array.from(intel.forecasts.keys());
+  }, [intel.knownMetrics, intel.forecasts]);
+
+  // Auto-select first metric when knownMetrics change
+  useEffect(() => {
+    if (metricNames.length > 0 && !metricNames.includes(intel.selectedMetric)) {
+      setSelectedMetric(metricNames[0]);
+    }
+  }, [metricNames, intel.selectedMetric, setSelectedMetric]);
+
   // Re-fetch forecasts when horizon changes
   useEffect(() => {
-    const metricNames = ['cpu_usage_percent', 'memory_usage_percent', 'disk_usage_percent', 'network_io_bytes'];
-    fetchForecasts(metricNames);
-  }, [intel.horizonSeconds, fetchForecasts]);
+    if (metricNames.length > 0) {
+      fetchForecasts(metricNames);
+    }
+  }, [intel.horizonSeconds, fetchForecasts, metricNames]);
 
   const handleRefresh = useCallback(() => {
-    const metricNames = ['cpu_usage_percent', 'memory_usage_percent', 'disk_usage_percent', 'network_io_bytes'];
-    fetchForecasts(metricNames);
+    if (metricNames.length > 0) fetchForecasts(metricNames);
     fetchDetectionStatus();
     fetchModelAccuracy();
-  }, [fetchForecasts, fetchDetectionStatus, fetchModelAccuracy]);
+  }, [fetchForecasts, fetchDetectionStatus, fetchModelAccuracy, metricNames]);
 
   const handleHorizonChange = useCallback(
     (val: string) => {
@@ -114,49 +128,79 @@ export default function IntelView() {
         </div>
       </div>
 
-      {/* ─── Loading / Error States ─────────────────────────────── */}
-      {intel.error && (
-        <div className="intel-view__error" data-testid="intel-error" role="alert">
-          {intel.error}
+      {/* ─── Connection Status + Error ───────────────────────────── */}
+      <div className="intel-view__status-bar">
+        {/* WS connection indicator */}
+        <span
+          className={`intel-view__ws-status ${intel.isWsConnected ? 'intel-view__ws-status--connected' : ''}`}
+          data-testid="intel-ws-status"
+          title={intel.isWsConnected ? 'Real-time updates active' : 'Real-time updates disconnected'}
+        >
+          {intel.isWsConnected ? <Wifi size={12} /> : <WifiOff size={12} />}
+          {intel.isWsConnected ? 'Live' : 'Polling'}
+        </span>
+
+        {intel.error && (
+          <div className="intel-view__error" data-testid="intel-error" role="alert">
+            {intel.error}
+          </div>
+        )}
+      </div>
+
+      {/* ─── Empty State: No data collected yet ──────────────────── */}
+      {!intel.dataReceived && !intel.isLoading && (
+        <div className="intel-view__empty" data-testid="intel-empty">
+          <Activity size={32} className="intel-view__empty-icon" />
+          <h3>No intelligence data yet</h3>
+          <p>
+            The Intelligence Engine is running and waiting for metrics from your agents.
+            Forecasts and anomaly detections will appear here once enough data is collected.
+          </p>
         </div>
       )}
 
       {/* ─── Grid Layout ────────────────────────────────────────── */}
-      <div className="intel-grid">
-        {/* Row 1: Forecast summary cards */}
-        <div className="intel-grid__cards">
-          <ForecastCards forecasts={intel.forecasts} />
-        </div>
+      {intel.dataReceived && (
+        <div className="intel-grid">
+          {/* Row 1: Forecast summary cards */}
+          <div className="intel-grid__cards">
+            <ForecastCards
+              forecasts={intel.forecasts}
+              metricNames={metricNames}
+            />
+          </div>
 
-        {/* Row 2: Detailed forecast chart */}
-        <div className="intel-grid__chart">
-          <ForecastChart
-            series={intel.forecasts.get(intel.selectedMetric)}
-            selectedMetric={intel.selectedMetric}
-            onMetricChange={handleMetricChange}
-          />
-        </div>
+          {/* Row 2: Detailed forecast chart */}
+          <div className="intel-grid__chart">
+            <ForecastChart
+              series={intel.forecasts.get(intel.selectedMetric)}
+              selectedMetric={intel.selectedMetric}
+              metricNames={metricNames}
+              onMetricChange={handleMetricChange}
+            />
+          </div>
 
-        {/* Row 3: Anomaly panel + Model accuracy */}
-        <div className="intel-grid__bottom">
-          <AnomalyPanel
-            anomalies={intel.sortedAnomalies()}
-            severityFilter={intel.severityFilter}
-            onSeverityFilterChange={handleSeverityFilterChange}
-          />
-          <ModelAccuracy
-            modelAccuracy={intel.modelAccuracy}
-            isRetraining={intel.isRetraining}
-            onRetrain={handleRetrain}
-          />
+          {/* Row 3: Anomaly panel + Model accuracy */}
+          <div className="intel-grid__bottom">
+            <AnomalyPanel
+              anomalies={intel.sortedAnomalies()}
+              severityFilter={intel.severityFilter}
+              onSeverityFilterChange={handleSeverityFilterChange}
+            />
+            <ModelAccuracy
+              modelAccuracy={intel.modelAccuracy}
+              isRetraining={intel.isRetraining}
+              onRetrain={handleRetrain}
+            />
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Loading overlay */}
-      {intel.isLoading && intel.forecasts.size === 0 && (
+      {intel.isLoading && !intel.dataReceived && (
         <div className="intel-view__loading" data-testid="intel-loading">
           <RefreshCw size={24} className="spin" />
-          <span>Loading intelligence data…</span>
+          <span>Connecting to Intelligence Engine…</span>
         </div>
       )}
     </div>

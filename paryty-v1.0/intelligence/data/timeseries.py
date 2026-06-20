@@ -41,6 +41,39 @@ def validate_series(
     return True
 
 
+def sanitize_series(
+    timestamps: list[int] | np.ndarray,
+    values: list[float] | np.ndarray,
+) -> tuple[list[int], list[float], int]:
+    """Remove NaN/Inf entries from a time-series.
+
+    Filters out any data point where the value is NaN or Inf,
+    keeping only finite values and their corresponding timestamps.
+
+    Args:
+        timestamps: Unix timestamps.
+        values: Metric values (may contain NaN/Inf).
+
+    Returns:
+        Tuple of (clean_timestamps, clean_values, n_removed).
+    """
+    t = np.asarray(timestamps, dtype=np.int64)
+    v = np.asarray(values, dtype=np.float64)
+
+    if len(t) != len(v):
+        min_len = min(len(t), len(v))
+        t = t[:min_len]
+        v = v[:min_len]
+
+    finite_mask = np.isfinite(v)
+    n_removed = int(np.sum(~finite_mask))
+
+    if n_removed == 0:
+        return list(t.tolist()), list(v.tolist()), 0
+
+    return list(t[finite_mask].tolist()), list(v[finite_mask].tolist()), n_removed
+
+
 def fill_gaps(
     timestamps: list[int] | np.ndarray,
     values: list[float] | np.ndarray,

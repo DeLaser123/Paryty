@@ -33,14 +33,15 @@ export function UnassignedAgentList({ agents, onAssign }: UnassignedAgentListPro
     [onAssign],
   );
 
-  if (agents.length === 0) {
+  // BUGFIX: Guard against undefined/null agents array
+  if (!agents || agents.length === 0) {
     return (
       <div
         style={{
           padding: 'var(--aef-space-4)',
           textAlign: 'center',
           fontFamily: 'var(--aef-font-body)',
-          fontSize: 11,
+          fontSize: 'var(--aef-font-size-xs)',
           color: 'var(--aef-text-secondary)',
         }}
       >
@@ -69,8 +70,8 @@ export function UnassignedAgentList({ agents, onAssign }: UnassignedAgentListPro
             {/* Agent icon */}
             <div
               style={{
-                width: 28,
-                height: 28,
+                width: '28px',
+                height: '28px',
                 borderRadius: 'var(--aef-radius-control)',
                 background: 'var(--aef-surface-low)',
                 border: 'var(--aef-border-width) solid var(--aef-border)',
@@ -80,7 +81,7 @@ export function UnassignedAgentList({ agents, onAssign }: UnassignedAgentListPro
                 flexShrink: 0,
               }}
             >
-              <Server size={14} style={{ color: 'var(--aef-text-secondary)' }} />
+              <Server size={12} style={{ color: 'var(--aef-text-secondary)' }} />
             </div>
 
             {/* Agent info */}
@@ -89,7 +90,7 @@ export function UnassignedAgentList({ agents, onAssign }: UnassignedAgentListPro
                 <span
                   style={{
                     fontFamily: 'var(--aef-font-body)',
-                    fontSize: 12,
+                    fontSize: 'var(--aef-font-size-xs)',
                     fontWeight: 500,
                     color: 'var(--aef-text-primary)',
                   }}
@@ -102,21 +103,21 @@ export function UnassignedAgentList({ agents, onAssign }: UnassignedAgentListPro
                   display: 'flex',
                   alignItems: 'center',
                   gap: 'var(--aef-space-2)',
-                  marginTop: 2,
+                  marginTop: 'var(--aef-space-0-5)',
                 }}
               >
-                <Monitor size={11} style={{ color: 'var(--aef-text-secondary)' }} />
+                <Monitor size={10} style={{ color: 'var(--aef-text-secondary)' }} />
                 <span
                   style={{
                     fontFamily: 'var(--aef-font-body)',
-                    fontSize: 10,
+                    fontSize: 'var(--aef-font-size-2xs)',
                     color: 'var(--aef-text-secondary)',
                   }}
                 >
                   {agent.os} {agent.arch}
                 </span>
                 <Wifi
-                  size={11}
+                  size={10}
                   style={{
                     color: agent.status === 'online' ? 'var(--aef-status-live)' : 'var(--aef-text-secondary)',
                   }}
@@ -124,7 +125,7 @@ export function UnassignedAgentList({ agents, onAssign }: UnassignedAgentListPro
                 <span
                   style={{
                     fontFamily: 'var(--aef-font-body)',
-                    fontSize: 10,
+                    fontSize: 'var(--aef-font-size-2xs)',
                     color: agent.status === 'online' ? 'var(--aef-status-live)' : 'var(--aef-text-secondary)',
                     textTransform: 'capitalize',
                   }}
@@ -141,17 +142,17 @@ export function UnassignedAgentList({ agents, onAssign }: UnassignedAgentListPro
               onClick={() => handleAssign(agent.agentId)}
               disabled={isAssigning}
               style={{
-                padding: '4px 12px',
-                fontSize: 11,
+                padding: 'var(--aef-space-1) var(--aef-space-3)',
+                fontSize: 'var(--aef-font-size-xs)',
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: 4,
+                gap: 'var(--aef-space-1)',
                 flexShrink: 0,
-                opacity: isAssigning ? 0.5 : 1,
+                opacity: isAssigning ? 'var(--aef-disabled-opacity)' : 1,
               }}
               data-testid={`assign-agent-${agent.agentId}`}
             >
-              <ArrowRight size={12} />
+              <ArrowRight size={10} />
               {isAssigning ? 'Assigning…' : 'Assign to this twin'}
             </button>
           </div>

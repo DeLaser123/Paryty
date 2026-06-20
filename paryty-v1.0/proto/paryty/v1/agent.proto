@@ -32,6 +32,12 @@ message AgentRegistration {
   string twin_id = 8;
   // Client/tenant ID the agent reports under.
   string client_id = 9;
+  // Dual Reality: cluster agent ID for auto-pairing on registration.
+  string cluster_agent_id = 10;
+  // Dual Reality: OS of the machine (e.g., "windows", "linux").
+  string os = 11;
+  // Dual Reality: CPU architecture (e.g., "amd64", "arm64").
+  string arch = 12;
 }
 
 // AgentRegistrationResponse is returned by the cluster after registration.
@@ -68,6 +74,10 @@ message AgentConfig {
   string twin_id = 10;
   // Assigned client ID.
   string client_id = 11;
+  // Dual Reality: assigned cluster agent ID.
+  string cluster_agent_id = 12;
+  // Dual Reality: whether this agent is blacklisted.
+  bool is_blacklisted = 13;
 }
 
 // ============================================================================

@@ -1,17 +1,17 @@
 /**
  * TwinDetailPage — per-Digital-Paryty detail dashboard.
  *
- * Shows twin metadata header, configuration summary, assigned agents with
- * backlog management, unassigned agents, and a metrics overview.
- * Uses the twinStore for state management and the existing TwinHeader,
- * AgentList, and UnassignedAgentList components.
+ * Composed from DS DetachableCard primitives (each section can detach into
+ * a full-viewport modal), aef-stat-module for config fields, aef-counter
+ * for metrics, aef-badge for status. Staggered entrance animations via
+ * aef-panel-enter with nth-child delays.
  *
  * @module pages/Twins/TwinDetailPage
  */
 
-import { useEffect, useState, useCallback, memo } from 'react';
+import { useEffect, useState, useCallback, useRef, useMemo, memo } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Settings, Trash2 } from 'lucide-react';
+import { ArrowLeft, Settings, Trash2, Activity, Server, Gauge, Pencil, UserPlus } from 'lucide-react';
 import { useTwinStore } from '../../stores/twinStore';
 import { useToastStore } from '../../stores/toastStore';
 import { TwinHeader } from '../../components/twins/TwinHeader';
@@ -19,16 +19,42 @@ import { AgentList } from '../../components/twins/AgentList';
 import { UnassignedAgentList } from '../../components/twins/UnassignedAgentList';
 import { TwinStatusBadge } from '../../components/Twin/TwinStatusBadge';
 import { TwinDeleteDialog } from './TwinDeleteDialog';
+import { AssignAgentsDialog } from './AssignAgentsDialog';
+import { DetachableCard } from '../../components/common/DetachableCard';
+import type { DetachableCardHandle } from '../../components/common/DetachableCard';
 import { fetchTwinMetrics } from '../../api/twins';
+import { mapTwinStatus } from '../../types/digitalParyty';
+
+// ─── Stagger animation CSS (injected once) ──────────────────────────────────
+
+const STAGGER_STYLE_ID = 'twin-detail-stagger';
+
+function ensureStaggerStyle() {
+  if (typeof document === 'undefined') return;
+  if (document.getElementById(STAGGER_STYLE_ID)) return;
+  const style = document.createElement('style');
+  style.id = STAGGER_STYLE_ID;
+  style.textContent = `
+    .twin-detail-sections > .aef-container-card {
+      animation: aef-panel-enter var(--aef-duration-standard) var(--aef-ease-settle) both;
+    }
+    .twin-detail-sections > .aef-container-card:nth-child(1) { animation-delay: 0ms; }
+    .twin-detail-sections > .aef-container-card:nth-child(2) { animation-delay: 80ms; }
+    .twin-detail-sections > .aef-container-card:nth-child(3) { animation-delay: 160ms; }
+    .twin-detail-sections > .aef-container-card:nth-child(4) { animation-delay: 240ms; }
+    .twin-detail-sections > .aef-container-card:nth-child(5) { animation-delay: 320ms; }
+  `;
+  document.head.appendChild(style);
+}
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 /**
  * Detail page for a single Digital Paryty twin.
  *
- * Fetches twin data, agents, and metrics on mount. Provides navigation
- * to edit and delete actions. Displays assigned/unassigned agent sections
- * and a metrics summary.
+ * Fetches twin data, agents, and metrics on mount. Each content section
+ * is a DetachableCard that can pop into an 80% viewport modal for
+ * expanded detail view. Provides navigation to edit and delete actions.
  */
 export const TwinDetailPage = memo(function TwinDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -49,6 +75,15 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
 
   const [metrics, setMetrics] = useState<Record<string, unknown> | null>(null);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showAssignDialog, setShowAssignDialog] = useState(false);
+
+  // Ref for scrolling to unassigned agents section
+  const unassignedRef = useRef<HTMLDivElement>(null);
+  // Imperative handle to reattach the unassigned card before scrolling
+  const unassignedCardRef = useRef<DetachableCardHandle>(null);
+
+  // Inject stagger animation styles
+  useEffect(() => { ensureStaggerStyle(); }, []);
 
   // ─── Data Fetching ──────────────────────────────────────────────────
 
@@ -131,6 +166,28 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
     navigate('/twins');
   }, [navigate]);
 
+  // ─── Memoized header actions (stable refs for DetachableCard memo) ──
+  // Hooks MUST be before any early returns (Rules of Hooks).
+
+  const configHeaderAction = useMemo(
+    () => selectedTwin ? <TwinStatusBadge status={mapTwinStatus(selectedTwin.status)} /> : null,
+    [selectedTwin?.status],
+  );
+
+  const assignAgentBtn = useMemo(
+    () => (
+      <button
+        type="button"
+        className="aef-btn aef-btn-active dp-assign-btn"
+        onClick={() => setShowAssignDialog(true)}
+        data-testid="twin-assign-btn"
+      >
+        <UserPlus size={10} /> Assign Agent
+      </button>
+    ),
+    [],
+  );
+
   // ─── Loading state ──────────────────────────────────────────────────
 
   if (isLoading && !selectedTwin) {
@@ -138,17 +195,11 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
       <div className="dp-page" data-testid="twin-detail-page">
         <div className="dp-page__inner">
           <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: 'var(--aef-space-12)',
-              fontFamily: 'var(--aef-font-body)',
-              fontSize: 12,
-              color: 'var(--aef-text-secondary)',
-            }}
+            className="aef-viz-well"
+            style={{ height: 'auto', padding: 'var(--aef-space-10)' }}
           >
-            Loading twin…
+            <Activity size={20} className="aef-viz-well__icon" />
+            <span className="aef-viz-well__label">Loading twin…</span>
           </div>
         </div>
       </div>
@@ -169,7 +220,7 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
                 onClick={handleBack}
                 style={{ marginBottom: 'var(--aef-space-2)' }}
               >
-                <ArrowLeft size={14} /> Back to twins
+                <ArrowLeft size={12} /> Back to twins
               </button>
               <h1 className="dp-header__title">Twin Not Found</h1>
               <p className="dp-header__sub">
@@ -185,7 +236,7 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
   // ─── Main layout ────────────────────────────────────────────────────
 
   return (
-    <div className="dp-page" data-testid="twin-detail-page">
+    <div className="dp-page dp-page--scrollable" data-testid="twin-detail-page">
       <div className="dp-page__inner">
         {/* Page header with navigation and actions */}
         <div className="dp-header">
@@ -196,7 +247,7 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
               onClick={handleBack}
               style={{ marginBottom: 'var(--aef-space-2)' }}
             >
-              <ArrowLeft size={14} /> Back to twins
+              <ArrowLeft size={12} /> Back to twins
             </button>
             <h1 className="dp-header__title">Digital Paryty Detail</h1>
           </div>
@@ -207,7 +258,7 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
               onClick={handleEdit}
               data-testid="twin-edit-btn"
             >
-              Edit
+              <Pencil size={12} /> Edit
             </button>
             <button
               type="button"
@@ -215,232 +266,124 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
               onClick={handleSettings}
               data-testid="twin-settings-btn"
             >
-              <Settings size={14} /> Settings
+              <Settings size={12} /> Settings
             </button>
             <button
               type="button"
               className="aef-btn aef-btn-inactive"
               onClick={() => setShowDeleteDialog(true)}
               data-testid="twin-delete-btn"
-              style={{ color: 'var(--aef-error)' }}
+              style={{ color: 'var(--aef-status-error)' }}
             >
-              <Trash2 size={14} /> Delete
+              <Trash2 size={12} /> Delete
             </button>
           </div>
         </div>
 
-        {/* Twin header card (reuses existing component) */}
+        {/* Twin header card (uses DS aef-container-card composition) */}
         <TwinHeader twin={selectedTwin} />
 
-        {/* Configuration summary */}
-        <section
-          className="aef-container-card"
-          style={{ padding: 'var(--aef-space-4) var(--aef-space-5)' }}
-          data-testid="twin-config-section"
-        >
-          <div
-            style={{
-              fontFamily: 'var(--aef-font-heading)',
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--aef-text-primary)',
-              marginBottom: 'var(--aef-space-3)',
-            }}
-          >
-            Configuration
-          </div>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
-              gap: 'var(--aef-space-3)',
-            }}
-          >
-            <div>
-              <span
-                style={{
-                  fontFamily: 'var(--aef-font-body)',
-                  fontSize: 10,
-                  color: 'var(--aef-text-secondary)',
-                  display: 'block',
-                  marginBottom: 2,
-                }}
-              >
-                Status
-              </span>
-              <TwinStatusBadge status={selectedTwin.status as 'healthy' | 'degraded' | 'unhealthy' | 'unknown'} />
-            </div>
-            <div>
-              <span
-                style={{
-                  fontFamily: 'var(--aef-font-body)',
-                  fontSize: 10,
-                  color: 'var(--aef-text-secondary)',
-                  display: 'block',
-                  marginBottom: 2,
-                }}
-              >
-                Agent IDs
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--aef-font-body)',
-                  fontSize: 12,
-                  color: 'var(--aef-text-primary)',
-                }}
-              >
-                {selectedTwin.config.agentIds.length > 0
-                  ? selectedTwin.config.agentIds.join(', ')
-                  : 'Auto-assigned'}
-              </span>
-            </div>
-            <div>
-              <span
-                style={{
-                  fontFamily: 'var(--aef-font-body)',
-                  fontSize: 10,
-                  color: 'var(--aef-text-secondary)',
-                  display: 'block',
-                  marginBottom: 2,
-                }}
-              >
-                Tenant Label
-              </span>
-              <span
-                style={{
-                  fontFamily: 'var(--aef-font-body)',
-                  fontSize: 12,
-                  color: 'var(--aef-text-primary)',
-                }}
-              >
-                {selectedTwin.config.tenantLabel ?? '—'}
-              </span>
-            </div>
-          </div>
-        </section>
+        {/* Content sections — each wrapped in DetachableCard for detach/reattach */}
+        <div className="twin-detail-sections" style={{ display: 'flex', flexDirection: 'column', gap: 'var(--aef-space-4)' }}>
 
-        {/* Metrics overview (if available) */}
-        {metrics && Object.keys(metrics).length > 0 && (
-          <section
-            className="aef-container-card"
-            style={{ padding: 'var(--aef-space-4) var(--aef-space-5)' }}
-            data-testid="twin-metrics-section"
+          {/* Configuration summary */}
+          <DetachableCard
+            title="Configuration"
+            icon={<Settings size={14} />}
+            headerAction={configHeaderAction}
+            testId="twin-config-section"
           >
-            <div
-              style={{
-                fontFamily: 'var(--aef-font-heading)',
-                fontSize: 13,
-                fontWeight: 600,
-                color: 'var(--aef-text-primary)',
-                marginBottom: 'var(--aef-space-3)',
-              }}
-            >
-              Metrics Overview
+            <div className="aef-stat-module">
+              <span className="aef-stat-module__label">Agent Labels</span>
+              <span className="aef-stat-module__value">
+                {selectedTwin.config?.agentLabels
+                  ? Object.entries(selectedTwin.config.agentLabels)
+                      .map(([k, v]) => `${k}=${v}`)
+                      .join(', ')
+                  : 'None configured'}
+              </span>
             </div>
-            <div
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-                gap: 'var(--aef-space-3)',
-              }}
-            >
-              {Object.entries(metrics).slice(0, 6).map(([key, value]) => (
-                <div key={key}>
-                  <span
-                    style={{
-                      fontFamily: 'var(--aef-font-body)',
-                      fontSize: 10,
-                      color: 'var(--aef-text-secondary)',
-                      display: 'block',
-                      marginBottom: 2,
-                      textTransform: 'capitalize',
-                    }}
-                  >
-                    {key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ')}
-                  </span>
-                  <span
-                    style={{
-                      fontFamily: 'var(--aef-font-mono, monospace)',
-                      fontSize: 14,
-                      fontWeight: 600,
-                      color: 'var(--aef-text-primary)',
-                    }}
-                  >
-                    {String(value)}
-                  </span>
-                </div>
-              ))}
+            <div className="aef-stat-module">
+              <span className="aef-stat-module__label">Enabled Collectors</span>
+              <span className="aef-stat-module__value">
+                {selectedTwin.config?.enabledCollectors && selectedTwin.config.enabledCollectors.length > 0
+                  ? selectedTwin.config.enabledCollectors.join(', ')
+                  : 'All default'}
+              </span>
             </div>
-          </section>
-        )}
+            {selectedTwin.config?.collectionIntervalSeconds != null && (
+              <div className="aef-stat-module">
+                <span className="aef-stat-module__label">Collection Interval</span>
+                <span className="aef-stat-module__value">{selectedTwin.config.collectionIntervalSeconds}s</span>
+              </div>
+            )}
+            {selectedTwin.config?.samplingRate != null && (
+              <div className="aef-stat-module">
+                <span className="aef-stat-module__label">Sampling Rate</span>
+                <span className="aef-stat-module__value">{selectedTwin.config.samplingRate}</span>
+              </div>
+            )}
+          </DetachableCard>
 
-        {/* Assigned Agents section */}
-        <section
-          className="aef-container-card"
-          style={{ padding: 'var(--aef-space-4) var(--aef-space-5)' }}
-          data-testid="assigned-agents-section"
-        >
-          <div
-            style={{
-              fontFamily: 'var(--aef-font-heading)',
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--aef-text-primary)',
-              marginBottom: 'var(--aef-space-3)',
-            }}
-          >
-            Assigned Agents
-          </div>
-          {isLoading ? (
-            <div
-              style={{
-                fontFamily: 'var(--aef-font-body)',
-                fontSize: 11,
-                color: 'var(--aef-text-secondary)',
-              }}
+          {/* Metrics overview (if available) */}
+          {metrics && Object.keys(metrics).length > 0 && (
+            <DetachableCard
+              title="Metrics Overview"
+              icon={<Gauge size={14} />}
+              metaLabel={`${Object.keys(metrics).length} metrics`}
+              testId="twin-metrics-section"
             >
-              Loading agents…
-            </div>
-          ) : (
-            <AgentList
-              agents={assignedAgents}
-              onAcceptBacklog={handleAcceptBacklog}
-              onRejectBacklog={handleRejectBacklog}
-            />
+              <div className="dp-metrics-grid">
+                {Object.entries(metrics).slice(0, 6).map(([key, value]) => (
+                  <div key={key} className="aef-counter aef-counter-neutral">
+                    <div className="aef-counter__body">
+                      <span className="aef-counter__label">
+                        {key.replace(/([A-Z])/g, ' $1').replace(/_/g, ' ')}
+                      </span>
+                      <span className="aef-counter__value">{String(value)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </DetachableCard>
           )}
-        </section>
 
-        {/* Unassigned Agents section */}
-        <section
-          className="aef-container-card"
-          style={{ padding: 'var(--aef-space-4) var(--aef-space-5)' }}
-          data-testid="unassigned-agents-section"
-        >
-          <div
-            style={{
-              fontFamily: 'var(--aef-font-heading)',
-              fontSize: 13,
-              fontWeight: 600,
-              color: 'var(--aef-text-primary)',
-              marginBottom: 'var(--aef-space-3)',
-            }}
+          {/* Assigned Agents section */}
+          <DetachableCard
+            title="Assigned Agents"
+            icon={<Server size={14} />}
+            metaLabel={`${assignedAgents.length} agent${assignedAgents.length !== 1 ? 's' : ''}`}
+            headerAction={assignAgentBtn}
+            testId="assigned-agents-section"
           >
-            Unassigned Agents
-          </div>
-          {isLoading ? (
-            <div
-              style={{
-                fontFamily: 'var(--aef-font-body)',
-                fontSize: 11,
-                color: 'var(--aef-text-secondary)',
-              }}
+            {isLoading ? (
+              <span className="dp-loading-label">Loading agents…</span>
+            ) : (
+              <AgentList
+                agents={assignedAgents}
+                onAcceptBacklog={handleAcceptBacklog}
+                onRejectBacklog={handleRejectBacklog}
+              />
+            )}
+          </DetachableCard>
+
+          {/* Unassigned Agents section */}
+          <div ref={unassignedRef}>
+            <DetachableCard
+              ref={unassignedCardRef}
+              title="Unassigned Agents"
+              icon={<Server size={14} />}
+              metaLabel={`${unassignedAgents.length} available`}
+              testId="unassigned-agents-section"
             >
-              Loading agents…
-            </div>
-          ) : (
-            <UnassignedAgentList agents={unassignedAgents} onAssign={handleAssign} />
-          )}
-        </section>
+              {isLoading ? (
+                <span className="dp-loading-label">Loading agents…</span>
+              ) : (
+                <UnassignedAgentList agents={unassignedAgents} onAssign={handleAssign} />
+              )}
+            </DetachableCard>
+          </div>
+        </div>
       </div>
 
       {/* Delete confirmation dialog */}
@@ -450,6 +393,20 @@ export const TwinDetailPage = memo(function TwinDetailPage() {
           twinName={selectedTwin.name}
           onClose={() => setShowDeleteDialog(false)}
           onDeleted={handleDeleteSuccess}
+        />
+      )}
+
+      {/* Assign agents dialog */}
+      {showAssignDialog && id && (
+        <AssignAgentsDialog
+          twinId={id}
+          agents={unassignedAgents}
+          onAssign={handleAssign}
+          onClose={() => setShowAssignDialog(false)}
+          onAssigned={() => {
+            setShowAssignDialog(false);
+            fetchAgents(id);
+          }}
         />
       )}
     </div>

@@ -50,6 +50,9 @@ const CHANNEL_PRIORITIES: Record<string, WsChannelPriority> = {
   'topology.diff': 'critical',
   alerts: 'high',
   'alerts.update': 'high',
+  'intel.anomalies': 'high',
+  'intel.forecasts': 'high',
+  'intel.drift': 'high',
   metrics: 'normal',
   'metrics.batch': 'normal',
   events: 'low',
@@ -71,6 +74,11 @@ interface WsIncomingMessage {
   timestamp?: number;
 }
 
+/** Cap for aggressive (exponential backoff) reconnect phase. */
+const MAX_AGGRESSIVE_RECONNECT = 10;
+/** Interval for silent background reconnect after aggressive phase (ms). */
+const SILENT_RECONNECT_INTERVAL = 60_000;
+
 export class WebSocketClient {
   private ws: WebSocket | null = null;
   private state: WsState = 'disconnected';
@@ -85,7 +93,11 @@ export class WebSocketClient {
   private maxReconnectAttempts: number;
   private heartbeatInterval: number;
   private intentionalClose = false;
-  /** Returns the current auth token, or null if not authenticated. */
+  /** true once the aggressive backoff phase has been exhausted. */
+  private silentReconnect = false;
+  /** Whether a "giving up" warning has been logged (once per session). */
+  private gaveUpLogged = false;
+  /** Returns the current access token for WS auth query parameter. */
   private tokenGetter: (() => string | null) | null = null;
 
   // === Deduplication ===
@@ -129,28 +141,33 @@ export class WebSocketClient {
 
   /**
    * Set a function that returns the current access token.
-   * The token will be appended as a query parameter on connect.
+   * The token is appended as a query parameter to the WebSocket URL because
+   * the browser WebSocket API cannot set custom headers. The backend's
+   * GinJWTAuthFlexible middleware accepts the token from the "token" query
+   * parameter when no Authorization header or httpOnly cookie is present.
    */
   setTokenGetter(fn: (() => string | null) | null): void {
     this.tokenGetter = fn;
   }
 
   /**
-   * Build the WebSocket connection URL with optional auth token.
+   * Build the WebSocket connection URL with auth token.
+   * The browser WebSocket API cannot set custom headers, so the access
+   * token is passed as a query parameter. The backend's GinJWTAuthFlexible
+   * middleware accepts this for streaming endpoints (WebSocket, SSE).
+   *
+   * When no token is available (e.g. before login), connects without one —
+   * the backend will reject with 401, triggering the reconnect backoff.
    */
   private buildUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    let baseUrl = this.url.startsWith('ws') ? this.url : `${protocol}//${window.location.host}${this.url}`;
+    const baseUrl = this.url.startsWith('ws') ? this.url : `${protocol}//${window.location.host}${this.url}`;
 
-    // Append auth token as query parameter
-    if (this.tokenGetter) {
-      const token = this.tokenGetter();
-      if (token) {
-        const separator = baseUrl.includes('?') ? '&' : '?';
-        baseUrl = `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
-      }
+    const token = this.tokenGetter?.();
+    if (token) {
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
     }
-
     return baseUrl;
   }
 
@@ -171,6 +188,8 @@ export class WebSocketClient {
 
     this.ws.onopen = () => {
       this.reconnectAttempts = 0;
+      this.silentReconnect = false;
+      this.gaveUpLogged = false;
       this.quality.connectedAt = Date.now();
       this.setState('connected');
       this.startHeartbeat();
@@ -445,7 +464,19 @@ export class WebSocketClient {
   }
 
   private scheduleReconnect(): void {
+    // Honor explicit max-attempts cap (if configured).
     if (this.maxReconnectAttempts > 0 && this.reconnectAttempts >= this.maxReconnectAttempts) {
+      return;
+    }
+
+    // After exhausting aggressive backoff, switch to silent background
+    // retry at a fixed long interval.  This prevents console spam from
+    // repeated browser-level WebSocket error logs while still recovering
+    // automatically when the backend becomes available.
+    if (this.silentReconnect) {
+      this.reconnectTimer = setTimeout(() => {
+        this.connect();
+      }, SILENT_RECONNECT_INTERVAL);
       return;
     }
 
@@ -454,6 +485,20 @@ export class WebSocketClient {
       30000,
     );
     this.reconnectAttempts++;
+
+    // Transition to silent phase after MAX_AGGRESSIVE_RECONNECT attempts.
+    if (this.reconnectAttempts >= MAX_AGGRESSIVE_RECONNECT) {
+      this.silentReconnect = true;
+      if (!this.gaveUpLogged) {
+        this.gaveUpLogged = true;
+        console.warn(
+          '[ws] Could not reach the real-time server after %d attempts. '
+          + 'Will keep retrying silently every %ds in the background.',
+          this.reconnectAttempts,
+          SILENT_RECONNECT_INTERVAL / 1000,
+        );
+      }
+    }
 
     this.reconnectTimer = setTimeout(() => {
       this.connect();

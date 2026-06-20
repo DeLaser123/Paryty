@@ -1,0 +1,14 @@
+﻿/* Progress - Paryty Design System primitive */
+.aef-progress-track {
+  flex: 1;
+  height: 3px;
+  background: var(--aef-progress-track);
+  border-radius: var(--aef-radius-pill);
+  overflow: hidden;
+}
+
+.aef-progress-fill {
+  height: 100%;
+  background: var(--aef-progress-active);
+  border-radius: var(--aef-radius-pill);
+}

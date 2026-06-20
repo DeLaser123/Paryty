@@ -75,8 +75,8 @@ data:
     host: questdb
     port: 8812
     database: paryty
-    username: admin
-    password: quest
+    username: ${PARYTY_QUESTDB_USERNAME}
+    password: ${PARYTY_QUESTDB_PASSWORD}
     max_connections: 10
   dragonfly:
     host: dragonfly

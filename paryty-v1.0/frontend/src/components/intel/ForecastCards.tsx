@@ -10,7 +10,8 @@
 import { memo, useRef, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Minus, Cpu, HardDrive, Activity, Network } from 'lucide-react';
 import type { ForecastSeries, KeyMetric } from '../../types/intel';
-import { KEY_METRICS, KEY_METRIC_LABELS } from '../../types/intel';
+import { KEY_METRIC_LABELS } from '../../types/intel';
+import { DetachableCard } from '../common/DetachableCard';
 
 // ─── Per-metric icons (lucide-react, design system compliant) ────
 
@@ -128,33 +129,39 @@ function getTrendColor(value: number): string {
 // ─── Single Card ─────────────────────────────────────────────────
 
 interface ForecastCardProps {
-  metricName: KeyMetric;
+  metricName: string;
   series: ForecastSeries | undefined;
+}
+
+/** Derive a human-readable label from a metric name. */
+function metricLabel(name: string): string {
+  const known = KEY_METRIC_LABELS[name as KeyMetric];
+  if (known) return known;
+  // Fallback: snake_case → Title Case
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 const ForecastCard = memo(function ForecastCard({
   metricName,
   series,
 }: ForecastCardProps) {
-  const label = KEY_METRIC_LABELS[metricName];
-  const icon = METRIC_ICONS[metricName];
+  const label = metricLabel(metricName);
+  const icon = METRIC_ICONS[metricName as KeyMetric] ?? <Activity size={16} />;
 
   if (!series || series.points.length === 0) {
     return (
-      <div className="aef-container-card" data-testid={`forecast-card-${metricName}`}>
-        <div className="aef-container-card__header">
-          <div className="aef-container-card__icon">{icon}</div>
-          <h3 className="aef-container-card__title">{label}</h3>
-        </div>
-        <div className="aef-container-card__body">
-          <div className="aef-counter aef-counter-neutral">
-            <div className="aef-counter__body">
-              <span className="aef-counter__label">No data</span>
-              <span className="aef-counter__value">—</span>
-            </div>
+      <DetachableCard
+        title={label}
+        icon={icon}
+        testId={`forecast-card-${metricName}`}
+      >
+        <div className="aef-counter aef-counter-neutral">
+          <div className="aef-counter__body">
+            <span className="aef-counter__label">No data</span>
+            <span className="aef-counter__value">—</span>
           </div>
         </div>
-      </div>
+      </DetachableCard>
     );
   }
 
@@ -182,26 +189,26 @@ const ForecastCard = memo(function ForecastCard({
   const sparkLower = series.points.map((p) => p.lowerBound);
 
   return (
-    <div className="aef-container-card" data-testid={`forecast-card-${metricName}`}>
-      <div className="aef-container-card__header">
-        <div className="aef-container-card__icon">{icon}</div>
-        <h3 className="aef-container-card__title">{label}</h3>
+    <DetachableCard
+      title={label}
+      icon={icon}
+      headerAction={
         <span className="forecast-card__trend" style={{ color: trendColor }}>
           {trendIcon}
         </span>
-      </div>
-      <div className="aef-container-card__body">
-        <div className="aef-counter aef-counter-neutral">
-          <div className="aef-counter__body">
-            <span className="aef-counter__label">Current</span>
-            <span className="aef-counter__value">{Math.round(currentValue)}{unit}</span>
-          </div>
-        </div>
-        <div className="forecast-card__sparkline">
-          <Sparkline points={sparkValues} upper={sparkUpper} lower={sparkLower} />
+      }
+      testId={`forecast-card-${metricName}`}
+    >
+      <div className="aef-counter aef-counter-neutral">
+        <div className="aef-counter__body">
+          <span className="aef-counter__label">Current</span>
+          <span className="aef-counter__value">{Math.round(currentValue)}{unit}</span>
         </div>
       </div>
-    </div>
+      <div className="forecast-card__sparkline">
+        <Sparkline points={sparkValues} upper={sparkUpper} lower={sparkLower} />
+      </div>
+    </DetachableCard>
   );
 });
 
@@ -209,17 +216,19 @@ const ForecastCard = memo(function ForecastCard({
 
 interface ForecastCardsProps {
   forecasts: Map<string, ForecastSeries>;
+  metricNames: string[];
 }
 
 /**
- * Grid of forecast summary cards for all key metrics.
+ * Grid of forecast summary cards for dynamically discovered metrics.
  */
 export const ForecastCards = memo(function ForecastCards({
   forecasts,
+  metricNames,
 }: ForecastCardsProps) {
   return (
     <div className="forecast-cards" data-testid="forecast-cards">
-      {KEY_METRICS.map((metric) => (
+      {metricNames.map((metric) => (
         <ForecastCard
           key={metric}
           metricName={metric}

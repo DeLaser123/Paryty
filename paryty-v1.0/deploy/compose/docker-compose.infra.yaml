@@ -2,7 +2,7 @@
 # Contains only infrastructure services (no Paryty application services)
 # Use this for development when you want to run Paryty services locally (outside containers)
 #
-# Usage: podman-compose -f docker-compose.infra.yaml up -d
+# Usage: podman-compose --env-file ../../.env.dev -f docker-compose.infra.yaml up -d
 # Verify: scripts/check-infra.ps1
 
 version: '3.8'
@@ -12,10 +12,10 @@ services:
     image: docker.io/redpandadata/redpanda:latest
     container_name: paryty-redpanda
     ports:
-      - "9092:9092"     # Kafka API
-      - "9644:9644"     # Admin API
-      - "8081:8081"     # Schema registry
-      - "8082:8082"     # Pandaproxy
+      - "${PARYTY_PORT_REDPANDA_KAFKA}:9092"     # Kafka API
+      - "${PARYTY_PORT_REDPANDA_ADMIN}:9644"     # Admin API
+      - "${PARYTY_PORT_REDPANDA_SCHEMA}:8081"    # Schema registry
+      - "${PARYTY_PORT_REDPANDA_PROXY}:8082"     # Pandaproxy
     cap_add:
       - SYS_NICE
       - IPC_LOCK
@@ -59,7 +59,7 @@ services:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
     container_name: paryty-dragonfly
     ports:
-      - "6379:6379"
+      - "${PARYTY_PORT_DRAGONFLY}:6379"
     volumes:
       - dragonfly-data:/data
     healthcheck:
@@ -72,9 +72,9 @@ services:
     image: questdb/questdb:latest
     container_name: paryty-questdb
     ports:
-      - "9000:9000"     # Web console
-      - "9009:9009"     # InfluxDB line protocol
-      - "8812:8812"     # PostgreSQL wire protocol
+      - "${PARYTY_PORT_QUESTDB_WEB}:9000"     # Web console
+      - "${PARYTY_PORT_QUESTDB_ILP}:9009"     # InfluxDB line protocol
+      - "${PARYTY_PORT_QUESTDB_PG}:8812"      # PostgreSQL wire protocol
     volumes:
       - questdb-data:/var/lib/questdb
     healthcheck:
@@ -88,7 +88,7 @@ services:
     image: chrislusf/seaweedfs:latest
     container_name: paryty-seaweedfs-master
     ports:
-      - "9333:9333"
+      - "${PARYTY_PORT_SWFS_MASTER}:9333"
     command: master -ip=seaweedfs-master -port=9333 -volumePreallocate=false
     volumes:
       - seaweedfs-master-data:/data
@@ -102,8 +102,8 @@ services:
     image: chrislusf/seaweedfs:latest
     container_name: paryty-seaweedfs-volume
     ports:
-      - "8080:8080"
-    command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:8080
+      - "${PARYTY_PORT_SWFS_VOLUME}:8080"
+    command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:${PARYTY_PORT_SWFS_VOLUME}
     volumes:
       - seaweedfs-volume-data:/data
     depends_on:
@@ -114,7 +114,7 @@ services:
     image: chrislusf/seaweedfs:latest
     container_name: paryty-seaweedfs-filer
     ports:
-      - "8888:8888"
+      - "${PARYTY_PORT_SWFS_FILER}:8888"
     command: filer -master=seaweedfs-master:9333 -port=8888
     volumes:
       - seaweedfs-filer-data:/data
@@ -128,7 +128,7 @@ services:
     image: chrislusf/seaweedfs:latest
     container_name: paryty-seaweedfs-s3
     ports:
-      - "8333:8333"
+      - "${PARYTY_PORT_SWFS_S3}:8333"
     command: s3 -filer=seaweedfs-filer:8888 -port=8333
     depends_on:
       seaweedfs-filer:

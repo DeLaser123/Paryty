@@ -54,8 +54,9 @@ export const useTwinStore = create<TwinState>()((set, get) => ({
     set({ isLoading: true, error: null });
     try {
       const client = getRestClient();
-      const twin = await client.get<TwinDetails>(`/api/v1/twins/${encodeURIComponent(twinId)}`);
-      set({ selectedTwin: twin, isLoading: false });
+      // BUGFIX: Backend wraps response in {data: ...} envelope. Extract .data.
+      const resp = await client.get<{ data: TwinDetails }>(`/api/v1/twins/${encodeURIComponent(twinId)}`);
+      set({ selectedTwin: resp.data ?? null, isLoading: false });
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to fetch twin';
       set({ error: message, isLoading: false });

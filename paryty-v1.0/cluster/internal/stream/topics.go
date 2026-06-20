@@ -3,6 +3,7 @@ package stream
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
@@ -36,6 +37,12 @@ func NewTopicManager(cfg Config, logger *zap.Logger) (*TopicManager, error) {
 // Close closes the topic manager.
 func (m *TopicManager) Close() {
 	m.client.Close()
+}
+
+// Client returns the underlying kadm.Client for direct admin operations.
+// Used by twin lifecycle management for topic creation/deletion.
+func (m *TopicManager) Client() *kadm.Client {
+	return m.client
 }
 
 // CreateTopic creates a topic with the given configuration.
@@ -219,4 +226,126 @@ func InitializeTopics(ctx context.Context, admin *kadm.Client, tenant string) er
 	}
 
 	return nil
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Twin-Scoped Topic Naming (Enterprise Tenant Isolation)
+// ═══════════════════════════════════════════════════════════════════════
+
+// TopicForTwin builds a fully qualified twin-scoped topic name:
+// paryty.<tenant>.twins.<twin_id_prefix>.<suffix>
+//
+// The twinID is truncated to 12 characters to keep topic names manageable
+// while maintaining uniqueness (UUIDs are 36 chars, 12-char prefix gives
+// ~2.8e18 unique values — more than sufficient).
+func TopicForTwin(tenant, twinID, suffix string) string {
+	prefix := twinID
+	if len(twinID) > 12 {
+		prefix = twinID[:12]
+	}
+	return fmt.Sprintf("paryty.%s.twins.%s.%s", tenant, prefix, suffix)
+}
+
+// Twin-scoped topic name functions.
+
+func TopicTwinMetricsRaw(tenant, twinID string) string {
+	return TopicForTwin(tenant, twinID, "metrics.raw")
+}
+
+func TopicTwinMetricsAgg(tenant, twinID string) string {
+	return TopicForTwin(tenant, twinID, "metrics.aggregated")
+}
+
+func TopicTwinTraces(tenant, twinID string) string {
+	return TopicForTwin(tenant, twinID, "traces")
+}
+
+func TopicTwinEvents(tenant, twinID string) string {
+	return TopicForTwin(tenant, twinID, "events")
+}
+
+func TopicTwinNetworkEvents(tenant, twinID string) string {
+	return TopicForTwin(tenant, twinID, "network.events")
+}
+
+// TopicOrphan returns the topic name for unassigned agent data.
+// Data written here is accepted but not twin-isolated.
+func TopicOrphan(tenant string) string {
+	return fmt.Sprintf("paryty.%s.unassigned.orphan", tenant)
+}
+
+// twinRequiredTopics returns the topic configurations for a specific twin.
+// Only the 5 core data-producing topics are created per twin.
+// Pipeline-internal topics remain tenant-scoped to avoid topic explosion.
+func twinRequiredTopics(tenant, twinID string) []topicConfig {
+	return []topicConfig{
+		{TopicTwinMetricsRaw(tenant, twinID), 6, 1},
+		{TopicTwinMetricsAgg(tenant, twinID), 3, 1},
+		{TopicTwinTraces(tenant, twinID), 6, 1},
+		{TopicTwinEvents(tenant, twinID), 3, 1},
+		{TopicTwinNetworkEvents(tenant, twinID), 3, 1},
+	}
+}
+
+// InitializeTwinTopics creates all required topics for a specific twin.
+// Idempotent — skips topics that already exist.
+func InitializeTwinTopics(ctx context.Context, admin *kadm.Client, tenant, twinID string) error {
+	topics := twinRequiredTopics(tenant, twinID)
+
+	existing, err := admin.ListTopics(ctx)
+	if err != nil {
+		return fmt.Errorf("list topics: %w", err)
+	}
+
+	for _, tc := range topics {
+		if _, ok := existing[tc.name]; ok {
+			continue
+		}
+		_, err := admin.CreateTopic(ctx, tc.partitions, tc.replication, nil, tc.name)
+		if err != nil {
+			return fmt.Errorf("create twin topic %s: %w", tc.name, err)
+		}
+	}
+
+	return nil
+}
+
+// DeleteTwinTopics deletes all topics associated with a specific twin.
+// Best-effort — logs errors but does not fail if individual deletions fail.
+func DeleteTwinTopics(ctx context.Context, admin *kadm.Client, tenant, twinID string) error {
+	topics := twinRequiredTopics(tenant, twinID)
+	topicNames := make([]string, 0, len(topics))
+	for _, tc := range topics {
+		topicNames = append(topicNames, tc.name)
+	}
+
+	if len(topicNames) == 0 {
+		return nil
+	}
+
+	_, err := admin.DeleteTopics(ctx, topicNames...)
+	if err != nil {
+		if !strings.Contains(err.Error(), "UNKNOWN_TOPIC") {
+			return fmt.Errorf("delete twin topics: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// IsTwinTopic returns true if the given topic name matches the twin-scoped
+// naming pattern: paryty.<tenant>.twins.<twin_prefix>.<suffix>.
+func IsTwinTopic(topic string) bool {
+	parts := strings.Split(topic, ".")
+	return len(parts) >= 4 && parts[2] == "twins"
+}
+
+// ExtractTwinPrefix extracts the 12-char twin ID prefix from a twin-scoped
+// topic name. Returns empty string if the topic is not twin-scoped.
+func ExtractTwinPrefix(topic string) string {
+	parts := strings.Split(topic, ".")
+	if len(parts) >= 4 && parts[2] == "twins" {
+		return parts[3]
+	}
+	return ""
 }

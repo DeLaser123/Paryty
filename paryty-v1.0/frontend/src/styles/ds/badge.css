@@ -1,0 +1,12 @@
+﻿/* Badge - Paryty Design System primitive */
+.aef-badge {
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: var(--aef-radius-full);
+  border: var(--aef-border-width) solid var(--aef-border);
+}
+
+.badge-valid   { color: var(--aef-status-live); border-color: var(--aef-status-live-soft); }
+.badge-warning { color: var(--aef-status-warning); border-color: var(--aef-status-warning-soft); }
+.badge-pending { color: var(--aef-text-secondary); }

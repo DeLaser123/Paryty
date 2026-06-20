@@ -1,0 +1,166 @@
+/* Dropdown */
+.aef-dropdown {
+  display: inline-block;
+  position: relative;
+}
+
+.aef-dropdown-trigger {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  justify-content: space-between;
+  width: 100%;
+  min-width: 160px;
+  padding: 7px var(--aef-space-3);
+  background: var(--aef-surface-card);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-field);
+  color: var(--aef-text-primary);
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  cursor: pointer;
+  transition:
+    border-color var(--aef-duration-fast) var(--aef-ease-exit),
+    background var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.aef-dropdown-trigger:hover {
+  border-color: var(--aef-border-strong);
+  background: var(--aef-surface-hover);
+}
+
+.aef-dropdown-chevron {
+  color: var(--aef-text-secondary);
+  transition: transform var(--aef-duration-fast) var(--aef-ease-exit);
+  flex-shrink: 0;
+}
+
+.aef-dropdown-chevron--open {
+  transform: rotate(180deg);
+}
+
+.aef-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 150px;
+  max-width: 350px;
+  background: var(--aef-surface-card);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-card);
+  padding: var(--aef-space-1);
+  z-index: var(--aef-z-dropdown);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+  transform-origin: top center;
+  animation: aef-dropdown-in var(--aef-duration-fast) var(--aef-ease-settle) both;
+}
+
+.aef-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: 6px var(--aef-space-3);
+  border-radius: var(--aef-radius-control);
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-primary);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.aef-dropdown-item__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.aef-dropdown-item:hover {
+  background: var(--aef-surface-hover);
+}
+
+.aef-dropdown-item--selected {
+  background: var(--aef-surface-hover);
+}
+
+.aef-dropdown-item--disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.aef-dropdown-item--destructive {
+  color: var(--aef-counter-variant-b);
+}
+
+.aef-dropdown-item--destructive:hover {
+  background: rgba(220, 71, 20, 0.1);
+}
+
+.aef-dropdown-item--loading {
+  cursor: default;
+  opacity: 0.6;
+  gap: var(--aef-space-2);
+}
+
+.aef-dropdown-check {
+  margin-left: auto;
+  color: var(--aef-text-secondary);
+}
+
+.aef-dropdown-divider {
+  height: 1px;
+  background: var(--aef-border);
+  margin: var(--aef-space-1) 0;
+}
+
+/* Edge-aware flip: anchors dropdown from the right when near viewport edge */
+.aef-dropdown-menu--flip {
+  left: auto;
+  right: 0;
+  transform-origin: top right;
+}
+
+/* Edge-aware vertical flip: opens dropdown above the trigger */
+.aef-dropdown-menu--flip-up {
+  top: auto;
+  bottom: calc(100% + 4px);
+  transform-origin: bottom center;
+  animation-name: aef-dropdown-in-up;
+}
+
+/* Combined: both horizontal and vertical flip */
+.aef-dropdown-menu--flip.aef-dropdown-menu--flip-up {
+  transform-origin: bottom right;
+}
+
+/* --- Sidebar Profile Dropdown ---
+   Must appear AFTER the base .aef-dropdown-menu rules (line ~1490)
+   so its positioning overrides the default top/left values.
+   Opens ABOVE the profile badge with 10px gap, left-aligned. */
+.aef-dropdown-menu.sidebar-profile-dropdown {
+  left: 0;
+  right: auto;
+  top: auto;
+  bottom: calc(100% + 10px);
+  transform-origin: left bottom;
+}
+
+.aef-dropdown-menu.sidebar-profile-dropdown.aef-dropdown-menu--flip {
+  left: auto;
+  right: 0;
+  transform-origin: right bottom;
+}
+
+.aef-dropdown-menu.sidebar-profile-dropdown.aef-dropdown-menu--flip-up {
+  bottom: auto;
+  top: calc(100% + 4px);
+  transform-origin: left top;
+}
+
+.aef-dropdown-menu.sidebar-profile-dropdown.aef-dropdown-menu--flip.aef-dropdown-menu--flip-up {
+  transform-origin: right top;
+}

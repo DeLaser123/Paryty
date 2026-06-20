@@ -1,0 +1,273 @@
+/* Modal */
+.aef-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+  animation: aef-fade-in var(--aef-duration-fast) var(--aef-ease-exit) both;
+}
+
+.aef-modal {
+  background: var(--aef-surface-card);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-panel);
+  overflow: hidden;
+  width: 480px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 64px);
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.8);
+  animation: aef-modal-enter var(--aef-duration-standard) var(--aef-ease-settle) both;
+}
+
+.aef-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--aef-space-4) var(--aef-space-5);
+  background: var(--aef-surface-mid);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+  flex-shrink: 0;
+}
+
+/* === Detached header title row (icon + title + pill + action) === */
+.aef-detached-header__title-row {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+}
+.aef-detached-header__icon {
+  display: flex;
+  align-items: center;
+  color: var(--aef-text-secondary);
+}
+
+.aef-modal-title {
+  font-family: var(--aef-font-heading);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--aef-text-primary);
+}
+
+.aef-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--aef-radius-control);
+  border: none;
+  background: transparent;
+  color: var(--aef-text-secondary);
+  cursor: pointer;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.aef-modal-close:hover {
+  background: var(--aef-surface-hover);
+  color: var(--aef-text-primary);
+}
+
+.aef-modal-body {
+  flex: 1;
+  padding: var(--aef-space-5);
+  max-height: 320px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-3);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.14) transparent;
+}
+
+.aef-modal-body::-webkit-scrollbar { width: 3px; }
+.aef-modal-body::-webkit-scrollbar-track { background: transparent; }
+.aef-modal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: var(--aef-radius-full);
+}
+.aef-modal-body::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.36); }
+
+.aef-modal-para {
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  color: var(--aef-text-secondary);
+  line-height: 1.6;
+}
+
+.aef-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--aef-space-3);
+  padding: var(--aef-space-4) var(--aef-space-5);
+  background: var(--aef-surface-mid);
+  border-top: var(--aef-border-width) solid var(--aef-border);
+  flex-shrink: 0;
+}
+
+/* === Detached Card Modal — 80% Viewport === */
+.aef-modal--detached {
+  width: 80vw;
+  max-width: 1200px;
+  height: 80vh;
+  max-height: 80vh;
+}
+.aef-modal--detached .aef-modal-body {
+  max-height: none;
+  flex: 1;
+  overflow-y: auto;
+}
+
+/* Responsive: below 640px, go full-viewport */
+@media (max-width: 640px) {
+  .aef-modal--detached {
+    width: 100vw;
+    height: 100vh;
+    max-width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+}
+
+/* === Agent Selection List (used by AssignAgentsDialog) === */
+.aef-agent-select-row {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-3);
+  padding: var(--aef-space-2) var(--aef-space-3);
+  border-radius: var(--aef-radius-control);
+  cursor: pointer;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+}
+.aef-agent-select-row:last-child { border-bottom: none; }
+.aef-agent-select-row:hover { background: var(--aef-surface-hover); }
+.aef-agent-select-row--selected { background: rgba(88, 166, 255, 0.08); }
+
+/* Custom checkbox wrapper for DS consistency */
+.aef-agent-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.aef-agent-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--aef-status-live);
+  cursor: pointer;
+}
+
+/* Select All bar */
+.aef-select-all-row {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: var(--aef-space-2) var(--aef-space-3);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+  margin-bottom: var(--aef-space-1);
+}
+.aef-select-all-row label {
+  font-family: var(--aef-font-body);
+  font-size: var(--aef-font-size-xs);
+  color: var(--aef-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Assignment progress bar */
+.aef-assign-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: var(--aef-space-2) 0;
+}
+.aef-assign-progress__bar {
+  flex: 1;
+  height: 3px;
+  background: var(--aef-surface-low);
+  border-radius: var(--aef-radius-full);
+  overflow: hidden;
+}
+.aef-assign-progress__fill {
+  height: 100%;
+  background: var(--aef-status-live);
+  border-radius: var(--aef-radius-full);
+  transition: width var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+/* === Agent Selection List (used by AssignAgentsDialog) === */
+.aef-agent-select-row {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-3);
+  padding: var(--aef-space-2) var(--aef-space-3);
+  border-radius: var(--aef-radius-control);
+  cursor: pointer;
+  transition: background var(--aef-duration-fast) var(--aef-ease-exit);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+}
+.aef-agent-select-row:last-child { border-bottom: none; }
+.aef-agent-select-row:hover { background: var(--aef-surface-hover); }
+.aef-agent-select-row--selected { background: rgba(88, 166, 255, 0.08); }
+
+/* Custom checkbox wrapper for DS consistency */
+.aef-agent-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.aef-agent-checkbox input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  accent-color: var(--aef-status-live);
+  cursor: pointer;
+}
+
+/* Select All bar */
+.aef-select-all-row {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: var(--aef-space-2) var(--aef-space-3);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+  margin-bottom: var(--aef-space-1);
+}
+.aef-select-all-row label {
+  font-family: var(--aef-font-body);
+  font-size: var(--aef-font-size-xs);
+  color: var(--aef-text-secondary);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* Assignment progress bar */
+.aef-assign-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: var(--aef-space-2) 0;
+}
+.aef-assign-progress__bar {
+  flex: 1;
+  height: 3px;
+  background: var(--aef-surface-low);
+  border-radius: var(--aef-radius-full);
+  overflow: hidden;
+}
+.aef-assign-progress__fill {
+  height: 100%;
+  background: var(--aef-status-live);
+  border-radius: var(--aef-radius-full);
+  transition: width var(--aef-duration-fast) var(--aef-ease-exit);
+}

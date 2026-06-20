@@ -274,33 +274,50 @@ func (c *Client) GetAgentState(ctx context.Context, tenant, agentID string) (*mo
 
 // GetAllAgentStates retrieves all agent states for a tenant using SCAN
 // instead of KEYS to avoid blocking Dragonfly on large key spaces.
+// Uses MGet for batch retrieval to avoid N+1 queries.
 func (c *Client) GetAllAgentStates(ctx context.Context, tenant string) ([]models.AgentInfo, error) {
 	pattern := agentStatePattern(tenant)
-	var agents []models.AgentInfo
+	var allKeys []string
 
+	// Phase 1: Collect all keys via SCAN.
 	var cursor uint64
 	for {
 		keys, nextCursor, err := c.rdb.Scan(ctx, cursor, pattern, scanCount).Result()
 		if err != nil {
 			return nil, fmt.Errorf("scan agents: %w", err)
 		}
-
-		for _, key := range keys {
-			data, err := c.rdb.Get(ctx, key).Bytes()
-			if err != nil {
-				continue
-			}
-			var agent models.AgentInfo
-			if err := json.Unmarshal(data, &agent); err != nil {
-				continue
-			}
-			agents = append(agents, agent)
-		}
-
+		allKeys = append(allKeys, keys...)
 		cursor = nextCursor
 		if cursor == 0 {
 			break
 		}
+	}
+
+	if len(allKeys) == 0 {
+		return []models.AgentInfo{}, nil
+	}
+
+	// Phase 2: Batch retrieve all values via MGet.
+	values, err := c.rdb.MGet(ctx, allKeys...).Result()
+	if err != nil {
+		return nil, fmt.Errorf("mget agents: %w", err)
+	}
+
+	// Phase 3: Unmarshal results.
+	agents := make([]models.AgentInfo, 0, len(values))
+	for _, val := range values {
+		if val == nil {
+			continue // Key expired between SCAN and MGet.
+		}
+		data, ok := val.(string)
+		if !ok {
+			continue
+		}
+		var agent models.AgentInfo
+		if err := json.Unmarshal([]byte(data), &agent); err != nil {
+			continue
+		}
+		agents = append(agents, agent)
 	}
 
 	return agents, nil

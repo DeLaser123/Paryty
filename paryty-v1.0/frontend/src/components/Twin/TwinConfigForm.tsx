@@ -10,6 +10,7 @@
 import { memo, useCallback, useState } from 'react';
 import clsx from 'clsx';
 import type { CreateTwinPayload } from '../../api/twins';
+import type { TwinConfig } from '../../types/digitalParyty';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -51,9 +52,19 @@ export const TwinConfigForm = memo(function TwinConfigForm({
 }: TwinConfigFormProps) {
   const [name, setName] = useState(initialValues?.name ?? '');
   const [description, setDescription] = useState(initialValues?.description ?? '');
-  const [systemLabel, setSystemLabel] = useState(initialValues?.config?.tenantLabel ?? '');
-  const [agentIdsText, setAgentIdsText] = useState(
-    initialValues?.config?.agentIds?.join(', ') ?? '',
+  const [agentLabelsText, setAgentLabelsText] = useState(
+    initialValues?.config?.agentLabels
+      ? Object.entries(initialValues.config.agentLabels).map(([k, v]) => `${k}=${v}`).join(', ')
+      : '',
+  );
+  const [collectorsText, setCollectorsText] = useState(
+    initialValues?.config?.enabledCollectors?.join(', ') ?? '',
+  );
+  const [intervalSeconds, setIntervalSeconds] = useState(
+    initialValues?.config?.collectionIntervalSeconds?.toString() ?? '',
+  );
+  const [samplingRate, setSamplingRate] = useState(
+    initialValues?.config?.samplingRate?.toString() ?? '',
   );
 
   const isValid = name.trim().length > 0;
@@ -63,21 +74,41 @@ export const TwinConfigForm = memo(function TwinConfigForm({
       e.preventDefault();
       if (!isValid || isSubmitting) return;
 
-      const agentIds = agentIdsText
+      // Parse agent labels from "key=value, key2=value2" format
+      const agentLabels: Record<string, string> = {};
+      agentLabelsText
         .split(',')
-        .map((id) => id.trim())
-        .filter((id) => id.length > 0);
+        .map((pair) => pair.trim())
+        .filter((pair) => pair.length > 0)
+        .forEach((pair) => {
+          const [k, ...rest] = pair.split('=');
+          if (k && rest.length > 0) {
+            agentLabels[k.trim()] = rest.join('=').trim();
+          }
+        });
+
+      const collectors = collectorsText
+        .split(',')
+        .map((c) => c.trim())
+        .filter((c) => c.length > 0);
+
+      const parsedInterval = intervalSeconds ? parseInt(intervalSeconds, 10) : undefined;
+      const parsedRate = samplingRate ? parseFloat(samplingRate) : undefined;
+
+      const config: TwinConfig = {
+        ...(Object.keys(agentLabels).length > 0 ? { agentLabels } : {}),
+        ...(collectors.length > 0 ? { enabledCollectors: collectors } : {}),
+        ...(parsedInterval && parsedInterval > 0 ? { collectionIntervalSeconds: parsedInterval } : {}),
+        ...(parsedRate !== undefined && parsedRate >= 0 && parsedRate <= 1 ? { samplingRate: parsedRate } : {}),
+      };
 
       onSubmit({
         name: name.trim(),
         description: description.trim() || undefined,
-        config: {
-          agentIds: agentIds.length > 0 ? agentIds : undefined,
-          tenantLabel: systemLabel.trim() || undefined,
-        },
+        config: Object.keys(config).length > 0 ? config : undefined,
       });
     },
-    [name, description, systemLabel, agentIdsText, isValid, isSubmitting, onSubmit],
+    [name, description, agentLabelsText, collectorsText, intervalSeconds, samplingRate, isValid, isSubmitting, onSubmit],
   );
 
   return (
@@ -89,7 +120,7 @@ export const TwinConfigForm = memo(function TwinConfigForm({
       {/* Twin Name */}
       <div className="dp-field">
         <label className="dp-field__label" htmlFor="tc-name">
-          Digital Paryty name <span style={{ color: 'var(--aef-error)' }}>*</span>
+          Digital Paryty name <span style={{ color: 'var(--aef-status-error)' }}>*</span>
         </label>
         <input
           id="tc-name"
@@ -127,52 +158,102 @@ export const TwinConfigForm = memo(function TwinConfigForm({
         />
       </div>
 
-      {/* System Label */}
+      {/* Agent Labels (key=value comma-separated) */}
       <div className="dp-field">
-        <label className="dp-field__label" htmlFor="tc-system">
-          Software system
+        <label className="dp-field__label" htmlFor="tc-agent-labels">
+          Agent Labels
         </label>
         <input
-          id="tc-system"
+          id="tc-agent-labels"
           className="dp-field__input"
           type="text"
-          placeholder="e.g. Payment Gateway v3"
-          value={systemLabel}
-          onChange={(e) => setSystemLabel(e.target.value)}
+          placeholder="e.g. region=us-east, env=prod (optional)"
+          value={agentLabelsText}
+          onChange={(e) => setAgentLabelsText(e.target.value)}
           readOnly={readOnly}
           disabled={readOnly}
-          maxLength={80}
-          data-testid="tc-system-input"
-        />
-      </div>
-
-      {/* Agent IDs (comma-separated) */}
-      <div className="dp-field">
-        <label className="dp-field__label" htmlFor="tc-agents">
-          Agent IDs
-        </label>
-        <input
-          id="tc-agents"
-          className="dp-field__input"
-          type="text"
-          placeholder="Comma-separated agent IDs (optional)"
-          value={agentIdsText}
-          onChange={(e) => setAgentIdsText(e.target.value)}
-          readOnly={readOnly}
-          disabled={readOnly}
-          data-testid="tc-agents-input"
+          data-testid="tc-agent-labels-input"
         />
         <span
           style={{
             fontFamily: 'var(--aef-font-body)',
-            fontSize: 10,
+            fontSize: 'var(--aef-font-size-2xs)',
             color: 'var(--aef-text-secondary)',
             marginTop: 'var(--aef-space-1)',
             display: 'block',
           }}
         >
-          Leave empty to auto-assign agents when they connect.
+          Key=value pairs, comma-separated. Agents matching these labels will auto-assign.
         </span>
+      </div>
+
+      {/* Enabled Collectors */}
+      <div className="dp-field">
+        <label className="dp-field__label" htmlFor="tc-collectors">
+          Enabled Collectors
+        </label>
+        <input
+          id="tc-collectors"
+          className="dp-field__input"
+          type="text"
+          placeholder="e.g. cpu, memory, disk (optional)"
+          value={collectorsText}
+          onChange={(e) => setCollectorsText(e.target.value)}
+          readOnly={readOnly}
+          disabled={readOnly}
+          data-testid="tc-collectors-input"
+        />
+        <span
+          style={{
+            fontFamily: 'var(--aef-font-body)',
+            fontSize: 'var(--aef-font-size-2xs)',
+            color: 'var(--aef-text-secondary)',
+            marginTop: 'var(--aef-space-1)',
+            display: 'block',
+          }}
+        >
+          Leave empty to use all default collectors.
+        </span>
+      </div>
+
+      {/* Collection Interval */}
+      <div className="dp-field">
+        <label className="dp-field__label" htmlFor="tc-interval">
+          Collection Interval (seconds)
+        </label>
+        <input
+          id="tc-interval"
+          className="dp-field__input"
+          type="number"
+          placeholder="e.g. 30"
+          value={intervalSeconds}
+          onChange={(e) => setIntervalSeconds(e.target.value)}
+          readOnly={readOnly}
+          disabled={readOnly}
+          min={1}
+          data-testid="tc-interval-input"
+        />
+      </div>
+
+      {/* Sampling Rate */}
+      <div className="dp-field">
+        <label className="dp-field__label" htmlFor="tc-sampling">
+          Sampling Rate (0.0–1.0)
+        </label>
+        <input
+          id="tc-sampling"
+          className="dp-field__input"
+          type="number"
+          placeholder="e.g. 0.5"
+          value={samplingRate}
+          onChange={(e) => setSamplingRate(e.target.value)}
+          readOnly={readOnly}
+          disabled={readOnly}
+          min={0}
+          max={1}
+          step={0.1}
+          data-testid="tc-sampling-input"
+        />
       </div>
 
       {/* Submit button */}
@@ -181,7 +262,7 @@ export const TwinConfigForm = memo(function TwinConfigForm({
           type="submit"
           className="aef-btn aef-btn-active"
           disabled={!isValid || isSubmitting}
-          style={{ opacity: isValid && !isSubmitting ? 1 : 0.4 }}
+          style={{ opacity: isValid && !isSubmitting ? 1 : 'var(--aef-disabled-opacity)' }}
           data-testid="tc-submit"
         >
           {isSubmitting ? 'Saving…' : submitLabel}

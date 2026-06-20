@@ -1,0 +1,52 @@
+/* - Table card - */
+.aef-table-card {
+  border: var(--aef-border-width) solid var(--aef-table-border);
+  border-radius: var(--aef-radius-card);
+  overflow: hidden;
+}
+
+.aef-table-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: var(--aef-space-3) var(--aef-space-4);
+  background: var(--aef-table-title-bg);
+  color: var(--aef-table-title-text);
+  font-family: var(--aef-font-heading);
+  font-size: 12px;
+  font-weight: 500;
+  border-bottom: var(--aef-border-width) solid var(--aef-table-border);
+}
+
+.aef-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.aef-table thead tr {
+  background: var(--aef-table-header-bg);
+}
+
+.aef-table th {
+  padding: 7px var(--aef-space-4);
+  font-family: var(--aef-font-heading);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--aef-table-header-text);
+  text-align: left;
+  border-bottom: var(--aef-border-width) solid var(--aef-table-border);
+}
+
+.aef-table tbody tr {
+  background: var(--aef-table-row-bg);
+  border-bottom: var(--aef-border-width) solid var(--aef-table-border);
+}
+
+.aef-table tbody tr:last-child { border-bottom: none; }
+
+.aef-table td {
+  padding: 7px var(--aef-space-4);
+  font-family: var(--aef-font-body);
+  font-size: 12px;
+  color: var(--aef-table-row-text);
+}

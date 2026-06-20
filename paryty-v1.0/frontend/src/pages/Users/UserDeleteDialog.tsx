@@ -104,9 +104,6 @@ export const UserDeleteDialog = memo(function UserDeleteDialog({
         backdropFilter: 'blur(2px)',
       }}
       onClick={handleBackdropClick}
-      role="dialog"
-      aria-modal="true"
-      aria-label="Confirm user deletion"
       data-testid="user-delete-dialog"
     >
       <div
@@ -118,6 +115,9 @@ export const UserDeleteDialog = memo(function UserDeleteDialog({
           padding: 0,
           overflow: 'hidden',
         }}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Confirm user deletion"
       >
         {/* Header */}
         <div

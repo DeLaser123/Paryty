@@ -2541,6 +2541,729 @@ func (x *RejectBacklogResponse) GetDeleted() bool {
 	return false
 }
 
+type PairAgentToTwinRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Edge agent ID to pair.
+	AgentId string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// Cluster agent (twin) ID to pair with.
+	TwinId        string `protobuf:"bytes,2,opt,name=twin_id,json=twinId,proto3" json:"twin_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PairAgentToTwinRequest) Reset() {
+	*x = PairAgentToTwinRequest{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[42]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PairAgentToTwinRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PairAgentToTwinRequest) ProtoMessage() {}
+
+func (x *PairAgentToTwinRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[42]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PairAgentToTwinRequest.ProtoReflect.Descriptor instead.
+func (*PairAgentToTwinRequest) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{42}
+}
+
+func (x *PairAgentToTwinRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *PairAgentToTwinRequest) GetTwinId() string {
+	if x != nil {
+		return x.TwinId
+	}
+	return ""
+}
+
+type PairAgentToTwinResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Error         string                 `protobuf:"bytes,2,opt,name=error,proto3" json:"error,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PairAgentToTwinResponse) Reset() {
+	*x = PairAgentToTwinResponse{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[43]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PairAgentToTwinResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PairAgentToTwinResponse) ProtoMessage() {}
+
+func (x *PairAgentToTwinResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[43]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PairAgentToTwinResponse.ProtoReflect.Descriptor instead.
+func (*PairAgentToTwinResponse) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{43}
+}
+
+func (x *PairAgentToTwinResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *PairAgentToTwinResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+type UnpairAgentRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Edge agent ID to unpair.
+	AgentId       string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnpairAgentRequest) Reset() {
+	*x = UnpairAgentRequest{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[44]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnpairAgentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnpairAgentRequest) ProtoMessage() {}
+
+func (x *UnpairAgentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[44]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnpairAgentRequest.ProtoReflect.Descriptor instead.
+func (*UnpairAgentRequest) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{44}
+}
+
+func (x *UnpairAgentRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+type UnpairAgentResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnpairAgentResponse) Reset() {
+	*x = UnpairAgentResponse{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[45]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnpairAgentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnpairAgentResponse) ProtoMessage() {}
+
+func (x *UnpairAgentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[45]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnpairAgentResponse.ProtoReflect.Descriptor instead.
+func (*UnpairAgentResponse) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{45}
+}
+
+func (x *UnpairAgentResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type RetireAgentRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Edge agent ID to retire.
+	AgentId       string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RetireAgentRequest) Reset() {
+	*x = RetireAgentRequest{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[46]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RetireAgentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RetireAgentRequest) ProtoMessage() {}
+
+func (x *RetireAgentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[46]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RetireAgentRequest.ProtoReflect.Descriptor instead.
+func (*RetireAgentRequest) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{46}
+}
+
+func (x *RetireAgentRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+type RetireAgentResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RetireAgentResponse) Reset() {
+	*x = RetireAgentResponse{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[47]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RetireAgentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RetireAgentResponse) ProtoMessage() {}
+
+func (x *RetireAgentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[47]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RetireAgentResponse.ProtoReflect.Descriptor instead.
+func (*RetireAgentResponse) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{47}
+}
+
+func (x *RetireAgentResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type BlacklistAgentRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Edge agent ID to blacklist.
+	AgentId string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// Reason for blacklisting.
+	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlacklistAgentRequest) Reset() {
+	*x = BlacklistAgentRequest{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[48]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlacklistAgentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlacklistAgentRequest) ProtoMessage() {}
+
+func (x *BlacklistAgentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[48]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlacklistAgentRequest.ProtoReflect.Descriptor instead.
+func (*BlacklistAgentRequest) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{48}
+}
+
+func (x *BlacklistAgentRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *BlacklistAgentRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type BlacklistAgentResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *BlacklistAgentResponse) Reset() {
+	*x = BlacklistAgentResponse{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[49]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *BlacklistAgentResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*BlacklistAgentResponse) ProtoMessage() {}
+
+func (x *BlacklistAgentResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[49]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use BlacklistAgentResponse.ProtoReflect.Descriptor instead.
+func (*BlacklistAgentResponse) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{49}
+}
+
+func (x *BlacklistAgentResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+type UnregisterAgentRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Edge agent ID to unregister.
+	AgentId       string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UnregisterAgentRequest) Reset() {
+	*x = UnregisterAgentRequest{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[50]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UnregisterAgentRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UnregisterAgentRequest) ProtoMessage() {}
+
+func (x *UnregisterAgentRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[50]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UnregisterAgentRequest.ProtoReflect.Descriptor instead.
+func (*UnregisterAgentRequest) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{50}
+}
+
+func (x *UnregisterAgentRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+type GetAgentPairingStatusRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Edge agent ID to query.
+	AgentId       string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetAgentPairingStatusRequest) Reset() {
+	*x = GetAgentPairingStatusRequest{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[51]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetAgentPairingStatusRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetAgentPairingStatusRequest) ProtoMessage() {}
+
+func (x *GetAgentPairingStatusRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[51]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetAgentPairingStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetAgentPairingStatusRequest) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{51}
+}
+
+func (x *GetAgentPairingStatusRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+type AgentPairingStatusResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	AgentId string                 `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	// Edge agent lifecycle status.
+	EdgeStatus string `protobuf:"bytes,2,opt,name=edge_status,json=edgeStatus,proto3" json:"edge_status,omitempty"`
+	// Cluster agent (twin) ID if paired.
+	ClusterAgentId string `protobuf:"bytes,3,opt,name=cluster_agent_id,json=clusterAgentId,proto3" json:"cluster_agent_id,omitempty"`
+	// Cluster agent display name.
+	ClusterAgentName string `protobuf:"bytes,4,opt,name=cluster_agent_name,json=clusterAgentName,proto3" json:"cluster_agent_name,omitempty"`
+	// Cluster agent status.
+	ClusterAgentStatus string `protobuf:"bytes,5,opt,name=cluster_agent_status,json=clusterAgentStatus,proto3" json:"cluster_agent_status,omitempty"`
+	// Whether the edge agent is currently paired.
+	IsPaired bool `protobuf:"varint,6,opt,name=is_paired,json=isPaired,proto3" json:"is_paired,omitempty"`
+	// When the pairing was established.
+	PairedAt *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=paired_at,json=pairedAt,proto3" json:"paired_at,omitempty"`
+	// Edge agent operating system.
+	Os string `protobuf:"bytes,8,opt,name=os,proto3" json:"os,omitempty"`
+	// Edge agent CPU architecture.
+	Arch string `protobuf:"bytes,9,opt,name=arch,proto3" json:"arch,omitempty"`
+	// Edge agent hostname.
+	Hostname string `protobuf:"bytes,10,opt,name=hostname,proto3" json:"hostname,omitempty"`
+	// When the agent was retired (if applicable).
+	RetiredAt *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=retired_at,json=retiredAt,proto3" json:"retired_at,omitempty"`
+	// When the agent was blacklisted (if applicable).
+	BlacklistedAt *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=blacklisted_at,json=blacklistedAt,proto3" json:"blacklisted_at,omitempty"`
+	// Reason for blacklisting (if applicable).
+	BlacklistReason string `protobuf:"bytes,13,opt,name=blacklist_reason,json=blacklistReason,proto3" json:"blacklist_reason,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *AgentPairingStatusResponse) Reset() {
+	*x = AgentPairingStatusResponse{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[52]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentPairingStatusResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentPairingStatusResponse) ProtoMessage() {}
+
+func (x *AgentPairingStatusResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[52]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentPairingStatusResponse.ProtoReflect.Descriptor instead.
+func (*AgentPairingStatusResponse) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{52}
+}
+
+func (x *AgentPairingStatusResponse) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+func (x *AgentPairingStatusResponse) GetEdgeStatus() string {
+	if x != nil {
+		return x.EdgeStatus
+	}
+	return ""
+}
+
+func (x *AgentPairingStatusResponse) GetClusterAgentId() string {
+	if x != nil {
+		return x.ClusterAgentId
+	}
+	return ""
+}
+
+func (x *AgentPairingStatusResponse) GetClusterAgentName() string {
+	if x != nil {
+		return x.ClusterAgentName
+	}
+	return ""
+}
+
+func (x *AgentPairingStatusResponse) GetClusterAgentStatus() string {
+	if x != nil {
+		return x.ClusterAgentStatus
+	}
+	return ""
+}
+
+func (x *AgentPairingStatusResponse) GetIsPaired() bool {
+	if x != nil {
+		return x.IsPaired
+	}
+	return false
+}
+
+func (x *AgentPairingStatusResponse) GetPairedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.PairedAt
+	}
+	return nil
+}
+
+func (x *AgentPairingStatusResponse) GetOs() string {
+	if x != nil {
+		return x.Os
+	}
+	return ""
+}
+
+func (x *AgentPairingStatusResponse) GetArch() string {
+	if x != nil {
+		return x.Arch
+	}
+	return ""
+}
+
+func (x *AgentPairingStatusResponse) GetHostname() string {
+	if x != nil {
+		return x.Hostname
+	}
+	return ""
+}
+
+func (x *AgentPairingStatusResponse) GetRetiredAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.RetiredAt
+	}
+	return nil
+}
+
+func (x *AgentPairingStatusResponse) GetBlacklistedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.BlacklistedAt
+	}
+	return nil
+}
+
+func (x *AgentPairingStatusResponse) GetBlacklistReason() string {
+	if x != nil {
+		return x.BlacklistReason
+	}
+	return ""
+}
+
+type CheckBlacklistRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Edge agent ID to check.
+	AgentId       string `protobuf:"bytes,1,opt,name=agent_id,json=agentId,proto3" json:"agent_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckBlacklistRequest) Reset() {
+	*x = CheckBlacklistRequest{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[53]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckBlacklistRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckBlacklistRequest) ProtoMessage() {}
+
+func (x *CheckBlacklistRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[53]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckBlacklistRequest.ProtoReflect.Descriptor instead.
+func (*CheckBlacklistRequest) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{53}
+}
+
+func (x *CheckBlacklistRequest) GetAgentId() string {
+	if x != nil {
+		return x.AgentId
+	}
+	return ""
+}
+
+type CheckBlacklistResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Whether the agent is blacklisted.
+	Blacklisted bool `protobuf:"varint,1,opt,name=blacklisted,proto3" json:"blacklisted,omitempty"`
+	// Reason for blacklisting (if applicable).
+	Reason        string `protobuf:"bytes,2,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CheckBlacklistResponse) Reset() {
+	*x = CheckBlacklistResponse{}
+	mi := &file_paryty_v1_auth_proto_msgTypes[54]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CheckBlacklistResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CheckBlacklistResponse) ProtoMessage() {}
+
+func (x *CheckBlacklistResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_paryty_v1_auth_proto_msgTypes[54]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CheckBlacklistResponse.ProtoReflect.Descriptor instead.
+func (*CheckBlacklistResponse) Descriptor() ([]byte, []int) {
+	return file_paryty_v1_auth_proto_rawDescGZIP(), []int{54}
+}
+
+func (x *CheckBlacklistResponse) GetBlacklisted() bool {
+	if x != nil {
+		return x.Blacklisted
+	}
+	return false
+}
+
+func (x *CheckBlacklistResponse) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
 var File_paryty_v1_auth_proto protoreflect.FileDescriptor
 
 const file_paryty_v1_auth_proto_rawDesc = "" +
@@ -2750,7 +3473,52 @@ const file_paryty_v1_auth_proto_rawDesc = "" +
 	"\atwin_id\x18\x01 \x01(\tR\x06twinId\x12\x19\n" +
 	"\bagent_id\x18\x02 \x01(\tR\aagentId\"1\n" +
 	"\x15RejectBacklogResponse\x12\x18\n" +
-	"\adeleted\x18\x01 \x01(\bR\adeleted2\xe8\x02\n" +
+	"\adeleted\x18\x01 \x01(\bR\adeleted\"L\n" +
+	"\x16PairAgentToTwinRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x17\n" +
+	"\atwin_id\x18\x02 \x01(\tR\x06twinId\"I\n" +
+	"\x17PairAgentToTwinResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x14\n" +
+	"\x05error\x18\x02 \x01(\tR\x05error\"/\n" +
+	"\x12UnpairAgentRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\"/\n" +
+	"\x13UnpairAgentResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"/\n" +
+	"\x12RetireAgentRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\"/\n" +
+	"\x13RetireAgentResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"J\n" +
+	"\x15BlacklistAgentRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason\"2\n" +
+	"\x16BlacklistAgentResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\"3\n" +
+	"\x16UnregisterAgentRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\"9\n" +
+	"\x1cGetAgentPairingStatusRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\"\xa1\x04\n" +
+	"\x1aAgentPairingStatusResponse\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\x12\x1f\n" +
+	"\vedge_status\x18\x02 \x01(\tR\n" +
+	"edgeStatus\x12(\n" +
+	"\x10cluster_agent_id\x18\x03 \x01(\tR\x0eclusterAgentId\x12,\n" +
+	"\x12cluster_agent_name\x18\x04 \x01(\tR\x10clusterAgentName\x120\n" +
+	"\x14cluster_agent_status\x18\x05 \x01(\tR\x12clusterAgentStatus\x12\x1b\n" +
+	"\tis_paired\x18\x06 \x01(\bR\bisPaired\x127\n" +
+	"\tpaired_at\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\bpairedAt\x12\x0e\n" +
+	"\x02os\x18\b \x01(\tR\x02os\x12\x12\n" +
+	"\x04arch\x18\t \x01(\tR\x04arch\x12\x1a\n" +
+	"\bhostname\x18\n" +
+	" \x01(\tR\bhostname\x129\n" +
+	"\n" +
+	"retired_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tretiredAt\x12A\n" +
+	"\x0eblacklisted_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\rblacklistedAt\x12)\n" +
+	"\x10blacklist_reason\x18\r \x01(\tR\x0fblacklistReason\"2\n" +
+	"\x15CheckBlacklistRequest\x12\x19\n" +
+	"\bagent_id\x18\x01 \x01(\tR\aagentId\"R\n" +
+	"\x16CheckBlacklistResponse\x12 \n" +
+	"\vblacklisted\x18\x01 \x01(\bR\vblacklisted\x12\x16\n" +
+	"\x06reason\x18\x02 \x01(\tR\x06reason2\xe8\x02\n" +
 	"\vAuthService\x12C\n" +
 	"\bRegister\x12\x1a.paryty.v1.RegisterRequest\x1a\x1b.paryty.v1.RegisterResponse\x12:\n" +
 	"\x05Login\x12\x17.paryty.v1.LoginRequest\x1a\x18.paryty.v1.LoginResponse\x12H\n" +
@@ -2769,7 +3537,7 @@ const file_paryty_v1_auth_proto_rawDesc = "" +
 	"\vPlanService\x12A\n" +
 	"\tListPlans\x12\x16.google.protobuf.Empty\x1a\x1c.paryty.v1.ListPlansResponse\x12=\n" +
 	"\x0eGetCurrentPlan\x12\x16.google.protobuf.Empty\x1a\x13.paryty.v1.PlanInfo\x12J\n" +
-	"\x0fGetPlanFeatures\x12\x16.google.protobuf.Empty\x1a\x1f.paryty.v1.PlanFeaturesResponse2\xd8\x06\n" +
+	"\x0fGetPlanFeatures\x12\x16.google.protobuf.Empty\x1a\x1f.paryty.v1.PlanFeaturesResponse2\xb3\v\n" +
 	"\vTwinService\x12?\n" +
 	"\n" +
 	"CreateTwin\x12\x1c.paryty.v1.CreateTwinRequest\x1a\x13.paryty.v1.TwinInfo\x12F\n" +
@@ -2784,7 +3552,14 @@ const file_paryty_v1_auth_proto_rawDesc = "" +
 	"\x11AssignAgentToTwin\x12#.paryty.v1.AssignAgentToTwinRequest\x1a$.paryty.v1.AssignAgentToTwinResponse\x12U\n" +
 	"\x0eListTwinAgents\x12 .paryty.v1.ListTwinAgentsRequest\x1a!.paryty.v1.ListTwinAgentsResponse\x12R\n" +
 	"\rAcceptBacklog\x12\x1f.paryty.v1.AcceptBacklogRequest\x1a .paryty.v1.AcceptBacklogResponse\x12R\n" +
-	"\rRejectBacklog\x12\x1f.paryty.v1.RejectBacklogRequest\x1a .paryty.v1.RejectBacklogResponseB?Z=github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1b\x06proto3"
+	"\rRejectBacklog\x12\x1f.paryty.v1.RejectBacklogRequest\x1a .paryty.v1.RejectBacklogResponse\x12X\n" +
+	"\x0fPairAgentToTwin\x12!.paryty.v1.PairAgentToTwinRequest\x1a\".paryty.v1.PairAgentToTwinResponse\x12L\n" +
+	"\vUnpairAgent\x12\x1d.paryty.v1.UnpairAgentRequest\x1a\x1e.paryty.v1.UnpairAgentResponse\x12L\n" +
+	"\vRetireAgent\x12\x1d.paryty.v1.RetireAgentRequest\x1a\x1e.paryty.v1.RetireAgentResponse\x12U\n" +
+	"\x0eBlacklistAgent\x12 .paryty.v1.BlacklistAgentRequest\x1a!.paryty.v1.BlacklistAgentResponse\x12L\n" +
+	"\x0fUnregisterAgent\x12!.paryty.v1.UnregisterAgentRequest\x1a\x16.google.protobuf.Empty\x12g\n" +
+	"\x15GetAgentPairingStatus\x12'.paryty.v1.GetAgentPairingStatusRequest\x1a%.paryty.v1.AgentPairingStatusResponse\x12U\n" +
+	"\x0eCheckBlacklist\x12 .paryty.v1.CheckBlacklistRequest\x1a!.paryty.v1.CheckBlacklistResponseB?Z=github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1b\x06proto3"
 
 var (
 	file_paryty_v1_auth_proto_rawDescOnce sync.Once
@@ -2798,143 +3573,173 @@ func file_paryty_v1_auth_proto_rawDescGZIP() []byte {
 	return file_paryty_v1_auth_proto_rawDescData
 }
 
-var file_paryty_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 48)
+var file_paryty_v1_auth_proto_msgTypes = make([]protoimpl.MessageInfo, 61)
 var file_paryty_v1_auth_proto_goTypes = []any{
-	(*RegisterRequest)(nil),           // 0: paryty.v1.RegisterRequest
-	(*RegisterResponse)(nil),          // 1: paryty.v1.RegisterResponse
-	(*LoginRequest)(nil),              // 2: paryty.v1.LoginRequest
-	(*LoginResponse)(nil),             // 3: paryty.v1.LoginResponse
-	(*RefreshTokenRequest)(nil),       // 4: paryty.v1.RefreshTokenRequest
-	(*LogoutRequest)(nil),             // 5: paryty.v1.LogoutRequest
-	(*ValidateTokenRequest)(nil),      // 6: paryty.v1.ValidateTokenRequest
-	(*ValidateTokenResponse)(nil),     // 7: paryty.v1.ValidateTokenResponse
-	(*UserInfo)(nil),                  // 8: paryty.v1.UserInfo
-	(*CreateSubUserRequest)(nil),      // 9: paryty.v1.CreateSubUserRequest
-	(*ListUsersRequest)(nil),          // 10: paryty.v1.ListUsersRequest
-	(*ListUsersResponse)(nil),         // 11: paryty.v1.ListUsersResponse
-	(*GetUserRequest)(nil),            // 12: paryty.v1.GetUserRequest
-	(*UpdateUserRequest)(nil),         // 13: paryty.v1.UpdateUserRequest
-	(*DeleteUserRequest)(nil),         // 14: paryty.v1.DeleteUserRequest
-	(*UpdatePermissionsRequest)(nil),  // 15: paryty.v1.UpdatePermissionsRequest
-	(*ListPlansResponse)(nil),         // 16: paryty.v1.ListPlansResponse
-	(*PlanInfo)(nil),                  // 17: paryty.v1.PlanInfo
-	(*PlanLimits)(nil),                // 18: paryty.v1.PlanLimits
-	(*PlanQuotas)(nil),                // 19: paryty.v1.PlanQuotas
-	(*PlanUsage)(nil),                 // 20: paryty.v1.PlanUsage
-	(*PlanFeaturesResponse)(nil),      // 21: paryty.v1.PlanFeaturesResponse
-	(*CreateTwinRequest)(nil),         // 22: paryty.v1.CreateTwinRequest
-	(*TwinInfo)(nil),                  // 23: paryty.v1.TwinInfo
-	(*TwinConfig)(nil),                // 24: paryty.v1.TwinConfig
-	(*ListTwinsRequest)(nil),          // 25: paryty.v1.ListTwinsRequest
-	(*ListTwinsResponse)(nil),         // 26: paryty.v1.ListTwinsResponse
-	(*GetTwinRequest)(nil),            // 27: paryty.v1.GetTwinRequest
-	(*UpdateTwinRequest)(nil),         // 28: paryty.v1.UpdateTwinRequest
-	(*DeleteTwinRequest)(nil),         // 29: paryty.v1.DeleteTwinRequest
-	(*GetTwinConfigRequest)(nil),      // 30: paryty.v1.GetTwinConfigRequest
-	(*ResolveIdentityRequest)(nil),    // 31: paryty.v1.ResolveIdentityRequest
-	(*ResolveIdentityResponse)(nil),   // 32: paryty.v1.ResolveIdentityResponse
-	(*AssignAgentToTwinRequest)(nil),  // 33: paryty.v1.AssignAgentToTwinRequest
-	(*AssignAgentToTwinResponse)(nil), // 34: paryty.v1.AssignAgentToTwinResponse
-	(*ListTwinAgentsRequest)(nil),     // 35: paryty.v1.ListTwinAgentsRequest
-	(*ListTwinAgentsResponse)(nil),    // 36: paryty.v1.ListTwinAgentsResponse
-	(*TwinAgentInfo)(nil),             // 37: paryty.v1.TwinAgentInfo
-	(*AcceptBacklogRequest)(nil),      // 38: paryty.v1.AcceptBacklogRequest
-	(*AcceptBacklogResponse)(nil),     // 39: paryty.v1.AcceptBacklogResponse
-	(*RejectBacklogRequest)(nil),      // 40: paryty.v1.RejectBacklogRequest
-	(*RejectBacklogResponse)(nil),     // 41: paryty.v1.RejectBacklogResponse
-	nil,                               // 42: paryty.v1.UserInfo.PermissionsEntry
-	nil,                               // 43: paryty.v1.CreateSubUserRequest.PermissionsEntry
-	nil,                               // 44: paryty.v1.UpdatePermissionsRequest.PermissionsEntry
-	nil,                               // 45: paryty.v1.PlanInfo.FeaturesEntry
-	nil,                               // 46: paryty.v1.PlanFeaturesResponse.FeaturesEntry
-	nil,                               // 47: paryty.v1.TwinConfig.AgentLabelsEntry
-	(*timestamppb.Timestamp)(nil),     // 48: google.protobuf.Timestamp
-	(*PaginationRequest)(nil),         // 49: paryty.v1.PaginationRequest
-	(*PaginationResponse)(nil),        // 50: paryty.v1.PaginationResponse
-	(*emptypb.Empty)(nil),             // 51: google.protobuf.Empty
+	(*RegisterRequest)(nil),              // 0: paryty.v1.RegisterRequest
+	(*RegisterResponse)(nil),             // 1: paryty.v1.RegisterResponse
+	(*LoginRequest)(nil),                 // 2: paryty.v1.LoginRequest
+	(*LoginResponse)(nil),                // 3: paryty.v1.LoginResponse
+	(*RefreshTokenRequest)(nil),          // 4: paryty.v1.RefreshTokenRequest
+	(*LogoutRequest)(nil),                // 5: paryty.v1.LogoutRequest
+	(*ValidateTokenRequest)(nil),         // 6: paryty.v1.ValidateTokenRequest
+	(*ValidateTokenResponse)(nil),        // 7: paryty.v1.ValidateTokenResponse
+	(*UserInfo)(nil),                     // 8: paryty.v1.UserInfo
+	(*CreateSubUserRequest)(nil),         // 9: paryty.v1.CreateSubUserRequest
+	(*ListUsersRequest)(nil),             // 10: paryty.v1.ListUsersRequest
+	(*ListUsersResponse)(nil),            // 11: paryty.v1.ListUsersResponse
+	(*GetUserRequest)(nil),               // 12: paryty.v1.GetUserRequest
+	(*UpdateUserRequest)(nil),            // 13: paryty.v1.UpdateUserRequest
+	(*DeleteUserRequest)(nil),            // 14: paryty.v1.DeleteUserRequest
+	(*UpdatePermissionsRequest)(nil),     // 15: paryty.v1.UpdatePermissionsRequest
+	(*ListPlansResponse)(nil),            // 16: paryty.v1.ListPlansResponse
+	(*PlanInfo)(nil),                     // 17: paryty.v1.PlanInfo
+	(*PlanLimits)(nil),                   // 18: paryty.v1.PlanLimits
+	(*PlanQuotas)(nil),                   // 19: paryty.v1.PlanQuotas
+	(*PlanUsage)(nil),                    // 20: paryty.v1.PlanUsage
+	(*PlanFeaturesResponse)(nil),         // 21: paryty.v1.PlanFeaturesResponse
+	(*CreateTwinRequest)(nil),            // 22: paryty.v1.CreateTwinRequest
+	(*TwinInfo)(nil),                     // 23: paryty.v1.TwinInfo
+	(*TwinConfig)(nil),                   // 24: paryty.v1.TwinConfig
+	(*ListTwinsRequest)(nil),             // 25: paryty.v1.ListTwinsRequest
+	(*ListTwinsResponse)(nil),            // 26: paryty.v1.ListTwinsResponse
+	(*GetTwinRequest)(nil),               // 27: paryty.v1.GetTwinRequest
+	(*UpdateTwinRequest)(nil),            // 28: paryty.v1.UpdateTwinRequest
+	(*DeleteTwinRequest)(nil),            // 29: paryty.v1.DeleteTwinRequest
+	(*GetTwinConfigRequest)(nil),         // 30: paryty.v1.GetTwinConfigRequest
+	(*ResolveIdentityRequest)(nil),       // 31: paryty.v1.ResolveIdentityRequest
+	(*ResolveIdentityResponse)(nil),      // 32: paryty.v1.ResolveIdentityResponse
+	(*AssignAgentToTwinRequest)(nil),     // 33: paryty.v1.AssignAgentToTwinRequest
+	(*AssignAgentToTwinResponse)(nil),    // 34: paryty.v1.AssignAgentToTwinResponse
+	(*ListTwinAgentsRequest)(nil),        // 35: paryty.v1.ListTwinAgentsRequest
+	(*ListTwinAgentsResponse)(nil),       // 36: paryty.v1.ListTwinAgentsResponse
+	(*TwinAgentInfo)(nil),                // 37: paryty.v1.TwinAgentInfo
+	(*AcceptBacklogRequest)(nil),         // 38: paryty.v1.AcceptBacklogRequest
+	(*AcceptBacklogResponse)(nil),        // 39: paryty.v1.AcceptBacklogResponse
+	(*RejectBacklogRequest)(nil),         // 40: paryty.v1.RejectBacklogRequest
+	(*RejectBacklogResponse)(nil),        // 41: paryty.v1.RejectBacklogResponse
+	(*PairAgentToTwinRequest)(nil),       // 42: paryty.v1.PairAgentToTwinRequest
+	(*PairAgentToTwinResponse)(nil),      // 43: paryty.v1.PairAgentToTwinResponse
+	(*UnpairAgentRequest)(nil),           // 44: paryty.v1.UnpairAgentRequest
+	(*UnpairAgentResponse)(nil),          // 45: paryty.v1.UnpairAgentResponse
+	(*RetireAgentRequest)(nil),           // 46: paryty.v1.RetireAgentRequest
+	(*RetireAgentResponse)(nil),          // 47: paryty.v1.RetireAgentResponse
+	(*BlacklistAgentRequest)(nil),        // 48: paryty.v1.BlacklistAgentRequest
+	(*BlacklistAgentResponse)(nil),       // 49: paryty.v1.BlacklistAgentResponse
+	(*UnregisterAgentRequest)(nil),       // 50: paryty.v1.UnregisterAgentRequest
+	(*GetAgentPairingStatusRequest)(nil), // 51: paryty.v1.GetAgentPairingStatusRequest
+	(*AgentPairingStatusResponse)(nil),   // 52: paryty.v1.AgentPairingStatusResponse
+	(*CheckBlacklistRequest)(nil),        // 53: paryty.v1.CheckBlacklistRequest
+	(*CheckBlacklistResponse)(nil),       // 54: paryty.v1.CheckBlacklistResponse
+	nil,                                  // 55: paryty.v1.UserInfo.PermissionsEntry
+	nil,                                  // 56: paryty.v1.CreateSubUserRequest.PermissionsEntry
+	nil,                                  // 57: paryty.v1.UpdatePermissionsRequest.PermissionsEntry
+	nil,                                  // 58: paryty.v1.PlanInfo.FeaturesEntry
+	nil,                                  // 59: paryty.v1.PlanFeaturesResponse.FeaturesEntry
+	nil,                                  // 60: paryty.v1.TwinConfig.AgentLabelsEntry
+	(*timestamppb.Timestamp)(nil),        // 61: google.protobuf.Timestamp
+	(*PaginationRequest)(nil),            // 62: paryty.v1.PaginationRequest
+	(*PaginationResponse)(nil),           // 63: paryty.v1.PaginationResponse
+	(*emptypb.Empty)(nil),                // 64: google.protobuf.Empty
 }
 var file_paryty_v1_auth_proto_depIdxs = []int32{
 	8,  // 0: paryty.v1.LoginResponse.user:type_name -> paryty.v1.UserInfo
-	48, // 1: paryty.v1.ValidateTokenResponse.expires_at:type_name -> google.protobuf.Timestamp
-	42, // 2: paryty.v1.UserInfo.permissions:type_name -> paryty.v1.UserInfo.PermissionsEntry
-	48, // 3: paryty.v1.UserInfo.created_at:type_name -> google.protobuf.Timestamp
-	43, // 4: paryty.v1.CreateSubUserRequest.permissions:type_name -> paryty.v1.CreateSubUserRequest.PermissionsEntry
-	49, // 5: paryty.v1.ListUsersRequest.pagination:type_name -> paryty.v1.PaginationRequest
+	61, // 1: paryty.v1.ValidateTokenResponse.expires_at:type_name -> google.protobuf.Timestamp
+	55, // 2: paryty.v1.UserInfo.permissions:type_name -> paryty.v1.UserInfo.PermissionsEntry
+	61, // 3: paryty.v1.UserInfo.created_at:type_name -> google.protobuf.Timestamp
+	56, // 4: paryty.v1.CreateSubUserRequest.permissions:type_name -> paryty.v1.CreateSubUserRequest.PermissionsEntry
+	62, // 5: paryty.v1.ListUsersRequest.pagination:type_name -> paryty.v1.PaginationRequest
 	8,  // 6: paryty.v1.ListUsersResponse.users:type_name -> paryty.v1.UserInfo
-	50, // 7: paryty.v1.ListUsersResponse.pagination:type_name -> paryty.v1.PaginationResponse
-	44, // 8: paryty.v1.UpdatePermissionsRequest.permissions:type_name -> paryty.v1.UpdatePermissionsRequest.PermissionsEntry
+	63, // 7: paryty.v1.ListUsersResponse.pagination:type_name -> paryty.v1.PaginationResponse
+	57, // 8: paryty.v1.UpdatePermissionsRequest.permissions:type_name -> paryty.v1.UpdatePermissionsRequest.PermissionsEntry
 	17, // 9: paryty.v1.ListPlansResponse.plans:type_name -> paryty.v1.PlanInfo
-	45, // 10: paryty.v1.PlanInfo.features:type_name -> paryty.v1.PlanInfo.FeaturesEntry
+	58, // 10: paryty.v1.PlanInfo.features:type_name -> paryty.v1.PlanInfo.FeaturesEntry
 	18, // 11: paryty.v1.PlanInfo.limits:type_name -> paryty.v1.PlanLimits
 	19, // 12: paryty.v1.PlanInfo.quotas:type_name -> paryty.v1.PlanQuotas
 	20, // 13: paryty.v1.PlanInfo.usage:type_name -> paryty.v1.PlanUsage
-	46, // 14: paryty.v1.PlanFeaturesResponse.features:type_name -> paryty.v1.PlanFeaturesResponse.FeaturesEntry
+	59, // 14: paryty.v1.PlanFeaturesResponse.features:type_name -> paryty.v1.PlanFeaturesResponse.FeaturesEntry
 	24, // 15: paryty.v1.CreateTwinRequest.config:type_name -> paryty.v1.TwinConfig
 	24, // 16: paryty.v1.TwinInfo.config:type_name -> paryty.v1.TwinConfig
-	48, // 17: paryty.v1.TwinInfo.created_at:type_name -> google.protobuf.Timestamp
-	48, // 18: paryty.v1.TwinInfo.updated_at:type_name -> google.protobuf.Timestamp
-	47, // 19: paryty.v1.TwinConfig.agent_labels:type_name -> paryty.v1.TwinConfig.AgentLabelsEntry
-	49, // 20: paryty.v1.ListTwinsRequest.pagination:type_name -> paryty.v1.PaginationRequest
+	61, // 17: paryty.v1.TwinInfo.created_at:type_name -> google.protobuf.Timestamp
+	61, // 18: paryty.v1.TwinInfo.updated_at:type_name -> google.protobuf.Timestamp
+	60, // 19: paryty.v1.TwinConfig.agent_labels:type_name -> paryty.v1.TwinConfig.AgentLabelsEntry
+	62, // 20: paryty.v1.ListTwinsRequest.pagination:type_name -> paryty.v1.PaginationRequest
 	23, // 21: paryty.v1.ListTwinsResponse.twins:type_name -> paryty.v1.TwinInfo
-	50, // 22: paryty.v1.ListTwinsResponse.pagination:type_name -> paryty.v1.PaginationResponse
+	63, // 22: paryty.v1.ListTwinsResponse.pagination:type_name -> paryty.v1.PaginationResponse
 	24, // 23: paryty.v1.UpdateTwinRequest.config:type_name -> paryty.v1.TwinConfig
 	37, // 24: paryty.v1.ListTwinAgentsResponse.agents:type_name -> paryty.v1.TwinAgentInfo
-	48, // 25: paryty.v1.TwinAgentInfo.last_heartbeat:type_name -> google.protobuf.Timestamp
-	0,  // 26: paryty.v1.AuthService.Register:input_type -> paryty.v1.RegisterRequest
-	2,  // 27: paryty.v1.AuthService.Login:input_type -> paryty.v1.LoginRequest
-	4,  // 28: paryty.v1.AuthService.RefreshToken:input_type -> paryty.v1.RefreshTokenRequest
-	5,  // 29: paryty.v1.AuthService.Logout:input_type -> paryty.v1.LogoutRequest
-	6,  // 30: paryty.v1.AuthService.ValidateToken:input_type -> paryty.v1.ValidateTokenRequest
-	9,  // 31: paryty.v1.UserService.CreateSubUser:input_type -> paryty.v1.CreateSubUserRequest
-	10, // 32: paryty.v1.UserService.ListUsers:input_type -> paryty.v1.ListUsersRequest
-	12, // 33: paryty.v1.UserService.GetUser:input_type -> paryty.v1.GetUserRequest
-	13, // 34: paryty.v1.UserService.UpdateUser:input_type -> paryty.v1.UpdateUserRequest
-	14, // 35: paryty.v1.UserService.DeleteUser:input_type -> paryty.v1.DeleteUserRequest
-	15, // 36: paryty.v1.UserService.UpdatePermissions:input_type -> paryty.v1.UpdatePermissionsRequest
-	51, // 37: paryty.v1.PlanService.ListPlans:input_type -> google.protobuf.Empty
-	51, // 38: paryty.v1.PlanService.GetCurrentPlan:input_type -> google.protobuf.Empty
-	51, // 39: paryty.v1.PlanService.GetPlanFeatures:input_type -> google.protobuf.Empty
-	22, // 40: paryty.v1.TwinService.CreateTwin:input_type -> paryty.v1.CreateTwinRequest
-	25, // 41: paryty.v1.TwinService.ListTwins:input_type -> paryty.v1.ListTwinsRequest
-	27, // 42: paryty.v1.TwinService.GetTwin:input_type -> paryty.v1.GetTwinRequest
-	28, // 43: paryty.v1.TwinService.UpdateTwin:input_type -> paryty.v1.UpdateTwinRequest
-	29, // 44: paryty.v1.TwinService.DeleteTwin:input_type -> paryty.v1.DeleteTwinRequest
-	30, // 45: paryty.v1.TwinService.GetTwinConfig:input_type -> paryty.v1.GetTwinConfigRequest
-	31, // 46: paryty.v1.TwinService.ResolveIdentity:input_type -> paryty.v1.ResolveIdentityRequest
-	33, // 47: paryty.v1.TwinService.AssignAgentToTwin:input_type -> paryty.v1.AssignAgentToTwinRequest
-	35, // 48: paryty.v1.TwinService.ListTwinAgents:input_type -> paryty.v1.ListTwinAgentsRequest
-	38, // 49: paryty.v1.TwinService.AcceptBacklog:input_type -> paryty.v1.AcceptBacklogRequest
-	40, // 50: paryty.v1.TwinService.RejectBacklog:input_type -> paryty.v1.RejectBacklogRequest
-	1,  // 51: paryty.v1.AuthService.Register:output_type -> paryty.v1.RegisterResponse
-	3,  // 52: paryty.v1.AuthService.Login:output_type -> paryty.v1.LoginResponse
-	3,  // 53: paryty.v1.AuthService.RefreshToken:output_type -> paryty.v1.LoginResponse
-	51, // 54: paryty.v1.AuthService.Logout:output_type -> google.protobuf.Empty
-	7,  // 55: paryty.v1.AuthService.ValidateToken:output_type -> paryty.v1.ValidateTokenResponse
-	8,  // 56: paryty.v1.UserService.CreateSubUser:output_type -> paryty.v1.UserInfo
-	11, // 57: paryty.v1.UserService.ListUsers:output_type -> paryty.v1.ListUsersResponse
-	8,  // 58: paryty.v1.UserService.GetUser:output_type -> paryty.v1.UserInfo
-	8,  // 59: paryty.v1.UserService.UpdateUser:output_type -> paryty.v1.UserInfo
-	51, // 60: paryty.v1.UserService.DeleteUser:output_type -> google.protobuf.Empty
-	8,  // 61: paryty.v1.UserService.UpdatePermissions:output_type -> paryty.v1.UserInfo
-	16, // 62: paryty.v1.PlanService.ListPlans:output_type -> paryty.v1.ListPlansResponse
-	17, // 63: paryty.v1.PlanService.GetCurrentPlan:output_type -> paryty.v1.PlanInfo
-	21, // 64: paryty.v1.PlanService.GetPlanFeatures:output_type -> paryty.v1.PlanFeaturesResponse
-	23, // 65: paryty.v1.TwinService.CreateTwin:output_type -> paryty.v1.TwinInfo
-	26, // 66: paryty.v1.TwinService.ListTwins:output_type -> paryty.v1.ListTwinsResponse
-	23, // 67: paryty.v1.TwinService.GetTwin:output_type -> paryty.v1.TwinInfo
-	23, // 68: paryty.v1.TwinService.UpdateTwin:output_type -> paryty.v1.TwinInfo
-	51, // 69: paryty.v1.TwinService.DeleteTwin:output_type -> google.protobuf.Empty
-	24, // 70: paryty.v1.TwinService.GetTwinConfig:output_type -> paryty.v1.TwinConfig
-	32, // 71: paryty.v1.TwinService.ResolveIdentity:output_type -> paryty.v1.ResolveIdentityResponse
-	34, // 72: paryty.v1.TwinService.AssignAgentToTwin:output_type -> paryty.v1.AssignAgentToTwinResponse
-	36, // 73: paryty.v1.TwinService.ListTwinAgents:output_type -> paryty.v1.ListTwinAgentsResponse
-	39, // 74: paryty.v1.TwinService.AcceptBacklog:output_type -> paryty.v1.AcceptBacklogResponse
-	41, // 75: paryty.v1.TwinService.RejectBacklog:output_type -> paryty.v1.RejectBacklogResponse
-	51, // [51:76] is the sub-list for method output_type
-	26, // [26:51] is the sub-list for method input_type
-	26, // [26:26] is the sub-list for extension type_name
-	26, // [26:26] is the sub-list for extension extendee
-	0,  // [0:26] is the sub-list for field type_name
+	61, // 25: paryty.v1.TwinAgentInfo.last_heartbeat:type_name -> google.protobuf.Timestamp
+	61, // 26: paryty.v1.AgentPairingStatusResponse.paired_at:type_name -> google.protobuf.Timestamp
+	61, // 27: paryty.v1.AgentPairingStatusResponse.retired_at:type_name -> google.protobuf.Timestamp
+	61, // 28: paryty.v1.AgentPairingStatusResponse.blacklisted_at:type_name -> google.protobuf.Timestamp
+	0,  // 29: paryty.v1.AuthService.Register:input_type -> paryty.v1.RegisterRequest
+	2,  // 30: paryty.v1.AuthService.Login:input_type -> paryty.v1.LoginRequest
+	4,  // 31: paryty.v1.AuthService.RefreshToken:input_type -> paryty.v1.RefreshTokenRequest
+	5,  // 32: paryty.v1.AuthService.Logout:input_type -> paryty.v1.LogoutRequest
+	6,  // 33: paryty.v1.AuthService.ValidateToken:input_type -> paryty.v1.ValidateTokenRequest
+	9,  // 34: paryty.v1.UserService.CreateSubUser:input_type -> paryty.v1.CreateSubUserRequest
+	10, // 35: paryty.v1.UserService.ListUsers:input_type -> paryty.v1.ListUsersRequest
+	12, // 36: paryty.v1.UserService.GetUser:input_type -> paryty.v1.GetUserRequest
+	13, // 37: paryty.v1.UserService.UpdateUser:input_type -> paryty.v1.UpdateUserRequest
+	14, // 38: paryty.v1.UserService.DeleteUser:input_type -> paryty.v1.DeleteUserRequest
+	15, // 39: paryty.v1.UserService.UpdatePermissions:input_type -> paryty.v1.UpdatePermissionsRequest
+	64, // 40: paryty.v1.PlanService.ListPlans:input_type -> google.protobuf.Empty
+	64, // 41: paryty.v1.PlanService.GetCurrentPlan:input_type -> google.protobuf.Empty
+	64, // 42: paryty.v1.PlanService.GetPlanFeatures:input_type -> google.protobuf.Empty
+	22, // 43: paryty.v1.TwinService.CreateTwin:input_type -> paryty.v1.CreateTwinRequest
+	25, // 44: paryty.v1.TwinService.ListTwins:input_type -> paryty.v1.ListTwinsRequest
+	27, // 45: paryty.v1.TwinService.GetTwin:input_type -> paryty.v1.GetTwinRequest
+	28, // 46: paryty.v1.TwinService.UpdateTwin:input_type -> paryty.v1.UpdateTwinRequest
+	29, // 47: paryty.v1.TwinService.DeleteTwin:input_type -> paryty.v1.DeleteTwinRequest
+	30, // 48: paryty.v1.TwinService.GetTwinConfig:input_type -> paryty.v1.GetTwinConfigRequest
+	31, // 49: paryty.v1.TwinService.ResolveIdentity:input_type -> paryty.v1.ResolveIdentityRequest
+	33, // 50: paryty.v1.TwinService.AssignAgentToTwin:input_type -> paryty.v1.AssignAgentToTwinRequest
+	35, // 51: paryty.v1.TwinService.ListTwinAgents:input_type -> paryty.v1.ListTwinAgentsRequest
+	38, // 52: paryty.v1.TwinService.AcceptBacklog:input_type -> paryty.v1.AcceptBacklogRequest
+	40, // 53: paryty.v1.TwinService.RejectBacklog:input_type -> paryty.v1.RejectBacklogRequest
+	42, // 54: paryty.v1.TwinService.PairAgentToTwin:input_type -> paryty.v1.PairAgentToTwinRequest
+	44, // 55: paryty.v1.TwinService.UnpairAgent:input_type -> paryty.v1.UnpairAgentRequest
+	46, // 56: paryty.v1.TwinService.RetireAgent:input_type -> paryty.v1.RetireAgentRequest
+	48, // 57: paryty.v1.TwinService.BlacklistAgent:input_type -> paryty.v1.BlacklistAgentRequest
+	50, // 58: paryty.v1.TwinService.UnregisterAgent:input_type -> paryty.v1.UnregisterAgentRequest
+	51, // 59: paryty.v1.TwinService.GetAgentPairingStatus:input_type -> paryty.v1.GetAgentPairingStatusRequest
+	53, // 60: paryty.v1.TwinService.CheckBlacklist:input_type -> paryty.v1.CheckBlacklistRequest
+	1,  // 61: paryty.v1.AuthService.Register:output_type -> paryty.v1.RegisterResponse
+	3,  // 62: paryty.v1.AuthService.Login:output_type -> paryty.v1.LoginResponse
+	3,  // 63: paryty.v1.AuthService.RefreshToken:output_type -> paryty.v1.LoginResponse
+	64, // 64: paryty.v1.AuthService.Logout:output_type -> google.protobuf.Empty
+	7,  // 65: paryty.v1.AuthService.ValidateToken:output_type -> paryty.v1.ValidateTokenResponse
+	8,  // 66: paryty.v1.UserService.CreateSubUser:output_type -> paryty.v1.UserInfo
+	11, // 67: paryty.v1.UserService.ListUsers:output_type -> paryty.v1.ListUsersResponse
+	8,  // 68: paryty.v1.UserService.GetUser:output_type -> paryty.v1.UserInfo
+	8,  // 69: paryty.v1.UserService.UpdateUser:output_type -> paryty.v1.UserInfo
+	64, // 70: paryty.v1.UserService.DeleteUser:output_type -> google.protobuf.Empty
+	8,  // 71: paryty.v1.UserService.UpdatePermissions:output_type -> paryty.v1.UserInfo
+	16, // 72: paryty.v1.PlanService.ListPlans:output_type -> paryty.v1.ListPlansResponse
+	17, // 73: paryty.v1.PlanService.GetCurrentPlan:output_type -> paryty.v1.PlanInfo
+	21, // 74: paryty.v1.PlanService.GetPlanFeatures:output_type -> paryty.v1.PlanFeaturesResponse
+	23, // 75: paryty.v1.TwinService.CreateTwin:output_type -> paryty.v1.TwinInfo
+	26, // 76: paryty.v1.TwinService.ListTwins:output_type -> paryty.v1.ListTwinsResponse
+	23, // 77: paryty.v1.TwinService.GetTwin:output_type -> paryty.v1.TwinInfo
+	23, // 78: paryty.v1.TwinService.UpdateTwin:output_type -> paryty.v1.TwinInfo
+	64, // 79: paryty.v1.TwinService.DeleteTwin:output_type -> google.protobuf.Empty
+	24, // 80: paryty.v1.TwinService.GetTwinConfig:output_type -> paryty.v1.TwinConfig
+	32, // 81: paryty.v1.TwinService.ResolveIdentity:output_type -> paryty.v1.ResolveIdentityResponse
+	34, // 82: paryty.v1.TwinService.AssignAgentToTwin:output_type -> paryty.v1.AssignAgentToTwinResponse
+	36, // 83: paryty.v1.TwinService.ListTwinAgents:output_type -> paryty.v1.ListTwinAgentsResponse
+	39, // 84: paryty.v1.TwinService.AcceptBacklog:output_type -> paryty.v1.AcceptBacklogResponse
+	41, // 85: paryty.v1.TwinService.RejectBacklog:output_type -> paryty.v1.RejectBacklogResponse
+	43, // 86: paryty.v1.TwinService.PairAgentToTwin:output_type -> paryty.v1.PairAgentToTwinResponse
+	45, // 87: paryty.v1.TwinService.UnpairAgent:output_type -> paryty.v1.UnpairAgentResponse
+	47, // 88: paryty.v1.TwinService.RetireAgent:output_type -> paryty.v1.RetireAgentResponse
+	49, // 89: paryty.v1.TwinService.BlacklistAgent:output_type -> paryty.v1.BlacklistAgentResponse
+	64, // 90: paryty.v1.TwinService.UnregisterAgent:output_type -> google.protobuf.Empty
+	52, // 91: paryty.v1.TwinService.GetAgentPairingStatus:output_type -> paryty.v1.AgentPairingStatusResponse
+	54, // 92: paryty.v1.TwinService.CheckBlacklist:output_type -> paryty.v1.CheckBlacklistResponse
+	61, // [61:93] is the sub-list for method output_type
+	29, // [29:61] is the sub-list for method input_type
+	29, // [29:29] is the sub-list for extension type_name
+	29, // [29:29] is the sub-list for extension extendee
+	0,  // [0:29] is the sub-list for field type_name
 }
 
 func init() { file_paryty_v1_auth_proto_init() }
@@ -2949,7 +3754,7 @@ func file_paryty_v1_auth_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_paryty_v1_auth_proto_rawDesc), len(file_paryty_v1_auth_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   48,
+			NumMessages:   61,
 			NumExtensions: 0,
 			NumServices:   4,
 		},

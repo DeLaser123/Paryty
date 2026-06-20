@@ -82,21 +82,85 @@
   flex-shrink: 0;
 }
 
-/* Scroll-driven header fade — collapses to zero height in the grid row */
-.dp-page__header--fading {
-  max-height: 0;
-  opacity: 0;
-  transform: translateY(-8px);
-  pointer-events: none;
+/* Scroll-driven header fade — --scroll-progress (0→1) set via RAF on dp-page__inner.
+   Overrides the base .dp-page__header max-height above.
+   transition: none is critical — the base rule's transition would fight the RAF-driven values. */
+.dp-page__header {
+  max-height: calc(120px * (1 - var(--scroll-progress, 0)));
+  opacity: calc(1 - var(--scroll-progress, 0));
+  transform: translateY(calc(-8px * var(--scroll-progress, 0)));
+  transition: none;
 }
 
-/* Floating "New Digital Paryty" button */
-.dp-page__header-actions--floating {
+/* Floating "New Digital Paryty" button — toggled at scroll midpoint */
+.dp-page__inner[data-scrolled] .dp-page__header-actions {
   position: fixed;
   top: var(--aef-space-3);
   right: var(--aef-space-6);
   z-index: 80;
   animation: aef-fade-in var(--aef-duration-standard) var(--aef-ease-settle) both;
+}
+
+/* Detail page header — back nav + title + action buttons */
+.dp-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--aef-space-4);
+  flex-shrink: 0;
+}
+
+.dp-header__title-block {
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-1);
+  min-width: 0;
+}
+
+.dp-header__title {
+  font-family: var(--aef-font-heading);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--aef-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dp-header__sub {
+  font-family: var(--aef-font-body);
+  font-size: var(--aef-font-size-xs);
+  color: var(--aef-text-secondary);
+}
+
+.dp-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  flex-shrink: 0;
+}
+
+/* Scrollable detail page — overrides overflow:hidden on .dp-page */
+.dp-page--scrollable {
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.dp-page--scrollable::-webkit-scrollbar {
+  display: none;
+}
+
+.dp-page--scrollable .dp-page__inner {
+  overflow: visible;
+  height: auto;
+  min-height: 100%;
+  /* Use minmax(min-content, auto) for content rows so they always
+     expand to their full intrinsic height.
+     "auto" in a min-height grid collapses rows to their minimum
+     content size (not their actual content size). min-content
+     forces the row to size to the content's full natural height. */
+  grid-template-rows: auto minmax(min-content, auto) minmax(min-content, 1fr);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -106,24 +170,22 @@
 .dp-counter-strip {
   flex-shrink: 0;
   display: flex;
-  gap: var(--aef-space-3);
+  gap: calc(12px - 4px * var(--scroll-progress, 0));
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
   -ms-overflow-style: none;
-  padding: var(--aef-space-1) 0;
+  padding: calc(5px) 0;
+  margin-top: calc(0px - 6px * var(--scroll-progress, 0));
   -webkit-overflow-scrolling: touch;
   scroll-behavior: smooth;
-  position: sticky;
-  top: 0;
   z-index: 10;
   background: var(--aef-bg);
   border-bottom: var(--aef-border-width) solid transparent;
-  transition: border-color var(--aef-duration-standard) var(--aef-ease-exit),
-              box-shadow var(--aef-duration-standard) var(--aef-ease-exit);
 }
 
-.dp-counter-strip--stuck {
+/* Stuck visual cues — toggled at scroll midpoint via data-scrolled on dp-page__inner */
+.dp-page__inner[data-scrolled] .dp-counter-strip {
   border-bottom-color: var(--aef-border);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
 }
@@ -135,8 +197,34 @@
 .dp-counter-strip .aef-counter {
   flex-shrink: 0;
   cursor: pointer;
+  gap: calc(12px - 8px * var(--scroll-progress, 0));
+  padding: calc(10px - 5px * var(--scroll-progress, 0))
+           calc(16px - 8px * var(--scroll-progress, 0));
   transition: transform var(--aef-duration-fast) var(--aef-ease-settle),
               box-shadow var(--aef-duration-fast) var(--aef-ease-exit);
+}
+
+.dp-counter-strip .aef-counter__body {
+  gap: calc(1px + 3px * var(--scroll-progress, 0));
+}
+
+/* Compact layout — toggled at scroll midpoint (data-scrolled on dp-page__inner) */
+.dp-page__inner[data-scrolled] .dp-counter-strip .aef-counter {
+  min-width: auto;
+}
+
+.dp-page__inner[data-scrolled] .dp-counter-strip .aef-counter__body {
+  flex-direction: row;
+  align-items: baseline;
+}
+
+/* Font-size lerps with scroll */
+.dp-counter-strip .aef-counter__label {
+  font-size: calc(10px - 1px * var(--scroll-progress, 0));
+}
+
+.dp-counter-strip .aef-counter__value {
+  font-size: calc(12px - 2px * var(--scroll-progress, 0));
 }
 
 .dp-counter-strip .aef-counter:focus-visible {
@@ -149,13 +237,16 @@
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* Icon scale lerps with scroll — no transition to avoid fighting RAF */
 .dp-counter-strip .aef-counter__icon {
-  transition: transform var(--aef-duration-fast) var(--aef-spring-subtle),
-              color var(--aef-duration-fast) var(--aef-ease-exit);
+  transform: scale(calc(1 - 0.2 * var(--scroll-progress, 0)));
+  transition: color var(--aef-duration-fast) var(--aef-ease-exit);
 }
 
 .dp-counter-strip .aef-counter:hover .aef-counter__icon {
   transform: scale(1.3);
+  transition: transform var(--aef-duration-fast) var(--aef-spring-subtle),
+              color var(--aef-duration-fast) var(--aef-ease-exit);
 }
 
 /* Extended counter variants for status indicators */
@@ -230,7 +321,7 @@
 
 .dp-accordion-section {
   border-radius: var(--aef-radius-card);
-  overflow: visible;
+  overflow: hidden;
 }
 
 .dp-accordion-header {
@@ -302,9 +393,10 @@
 }
 
 .dp-accordion-body {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows var(--aef-duration-standard) var(--aef-ease-emphasized);
+  overflow: hidden;
+  height: 0;
+  transition: height var(--aef-duration-standard) var(--aef-ease-emphasized);
+  interpolate-size: allow-keywords;
   border: var(--aef-border-width) solid var(--aef-border);
   border-top: none;
   border-radius: 0 0 var(--aef-radius-card) var(--aef-radius-card);
@@ -312,7 +404,7 @@
 }
 
 .dp-accordion-section--open .dp-accordion-body {
-  grid-template-rows: 1fr;
+  height: auto;
 }
 
 .dp-accordion-body__inner {
@@ -776,35 +868,34 @@
   flex-shrink: 0;
 }
 
-/* Body: natural flow, grows with content */
-.dp-info-card__body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--aef-space-3);
-  padding: var(--aef-space-3);
-  min-width: 0;
-}
-
-.dp-info-card__grid {
+/* Body: grid layout only — no flex competition.
+   Scoped under .dp-info-card for higher specificity — overrides base .aef-container-card__body */
+.dp-info-card .aef-container-card__body {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--aef-space-3);
+  padding: var(--aef-space-3);
+  background: transparent;
   min-width: 0;
+  overflow: hidden;
+}
+
+/* Grid wrapper passes children through to body grid */
+.dp-info-card__grid {
+  display: contents;
 }
 
 /* 1 → 2 columns */
 @container dp-info-card (min-width: 280px) {
-  .dp-info-card__grid {
+  .dp-info-card .aef-container-card__body {
     grid-template-columns: repeat(2, 1fr);
-    gap: var(--aef-space-3);
   }
 }
 
 /* 2 → 3 columns when pane is wide */
 @container dp-info-card (min-width: 400px) {
-  .dp-info-card__grid {
+  .dp-info-card .aef-container-card__body {
     grid-template-columns: repeat(3, 1fr);
-    gap: var(--aef-space-3);
   }
 }
 
@@ -881,10 +972,11 @@
   border-radius: var(--aef-radius-control);
   cursor: pointer;
   text-align: left;
-  width: 100%;
   font: inherit;
   color: inherit;
   outline: none;
+  min-width: 0;
+  overflow: hidden;
   transition: border-color var(--aef-duration-fast) var(--aef-ease-exit),
               background var(--aef-duration-fast) var(--aef-ease-exit),
               transform var(--aef-duration-fast) var(--aef-ease-settle);
@@ -1226,6 +1318,27 @@
 
 .dp-twin-detail__grid > *:first-child {
   grid-column: 1 / -1;
+}
+
+/* Twin detail — loading label (replaces inline font styles) */
+.dp-loading-label {
+  font-family: var(--aef-font-body);
+  font-size: var(--aef-font-size-xs);
+  color: var(--aef-text-secondary);
+}
+
+/* Twin detail — metrics counter grid */
+.dp-metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  gap: var(--aef-space-3);
+}
+
+/* Twin detail — assign agent button in card header */
+.dp-assign-btn {
+  margin-left: auto;
+  padding: var(--aef-space-1) var(--aef-space-3);
+  font-size: var(--aef-font-size-xs);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

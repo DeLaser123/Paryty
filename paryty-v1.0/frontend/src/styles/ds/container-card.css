@@ -1,0 +1,78 @@
+/* - Container card - */
+.aef-container-card {
+  background: var(--aef-surface-card);
+  border: var(--aef-border-width) solid var(--aef-border);
+  border-radius: var(--aef-radius-card);
+  overflow: hidden;
+}
+
+.aef-container-card__header {
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-2);
+  padding: 0 var(--aef-space-4);
+  height: 56px;
+  background: var(--aef-surface-card);
+  border-bottom: var(--aef-border-width) solid var(--aef-border);
+  color: var(--aef-text-primary);
+}
+
+.aef-container-card__icon { display: flex; align-items: center; }
+.aef-container-card__title {
+  font-family: var(--aef-font-heading);
+  font-size: 12px;
+  font-weight: 500;
+  flex: 1;
+}
+
+.aef-meta-pill {
+  font-family: var(--aef-font-body);
+  font-size: 10px;
+  padding: 2px 8px;
+  border-radius: var(--aef-radius-pill);
+  background: var(--aef-surface-low);
+  border: var(--aef-border-width) solid var(--aef-border);
+  color: var(--aef-text-secondary);
+}
+
+.aef-container-card__body {
+  padding: var(--aef-space-4);
+  background: var(--aef-surface-low);
+  display: flex;
+  flex-direction: column;
+  gap: var(--aef-space-3);
+}
+
+.aef-container-card__footer {
+  border-top: var(--aef-border-width) solid var(--aef-border);
+  padding: var(--aef-space-2) var(--aef-space-4);
+  display: flex;
+  align-items: center;
+  gap: var(--aef-space-3);
+  background: var(--aef-surface-card);
+}
+
+/* === Detach Icon Button === */
+.aef-container-card__detach-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--aef-radius-control);
+  border: none;
+  background: transparent;
+  color: var(--aef-text-secondary);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color var(--aef-duration-fast) var(--aef-ease-exit),
+              background var(--aef-duration-fast) var(--aef-ease-exit);
+}
+.aef-container-card__detach-btn:hover {
+  color: var(--aef-text-primary);
+  background: var(--aef-surface-hover);
+}
+.aef-container-card__detach-btn:focus-visible {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}

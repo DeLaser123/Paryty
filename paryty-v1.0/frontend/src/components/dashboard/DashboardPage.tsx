@@ -35,11 +35,16 @@ import { usePlanStore } from '../../stores/planStore';
 import { useAlertsStore } from '../../stores/alertsStore';
 import { useIntelStore } from '../../stores/intelStore';
 import { useTwinStore } from '../../stores/twinStore';
-import { ABILITY_CATALOGUE } from '../../types/ability';
 import { getRestClient } from '../../api/rest';
+import { useToastStore } from '../../stores/toastStore';
+import { ABILITY_CATALOGUE } from '../../types/ability';
 import { ParytySelect } from '../common/ParytySelect';
+import { useIntel } from '../../hooks/useIntel';
+import { useDashboardPolling } from '../../hooks/useDashboardPolling';
 import type { DigitalParyty } from '../../types/digitalParyty';
 import type { AbilityMeta } from '../../types/ability';
+import { AgentDetailModal } from '../agent/AgentDetailModal';
+import { DetachableCard } from '../common/DetachableCard';
 import type { HealthStatus, AgentManagementInfo } from '../../types/agent';
 import type { Alert, AlertSeverity } from '../../types/alert';
 import './dashboard.css';
@@ -271,7 +276,7 @@ function DigitalParytyCard({
 
 // ─── Agent row ────────────────────────────────────────────────────────────
 
-function AgentRow({ agent }: { agent: AgentManagementInfo }) {
+function AgentRow({ agent, onClick }: { agent: AgentManagementInfo; onClick: () => void }) {
   const timeAgo = (() => {
     if (!agent.last_seen) return 'Never';
     const diff = Date.now() - new Date(agent.last_seen).getTime();
@@ -284,7 +289,15 @@ function AgentRow({ agent }: { agent: AgentManagementInfo }) {
   })();
 
   return (
-    <div className="dp-agent-row" data-testid={`agent-row-${agent.agent_id}`}>
+    <div
+      className="dp-agent-row"
+      data-testid={`agent-row-${agent.agent_id}`}
+      onClick={onClick}
+      style={{ cursor: 'pointer' }}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } }}
+    >
       <span className="dp-agent-row__icon"><Server size={14} /></span>
       <div className="dp-agent-row__info">
         <div className="dp-agent-row__name">{agent.name || agent.hostname || 'Unnamed Agent'}</div>
@@ -458,10 +471,11 @@ function InfoPane({
   return (
     <>
       {/* ── Live Forecasts ─────────────────────────────────────────── */}
-      <div className="aef-container-card dp-info-card">
-        <div className="aef-container-card__header">
-          <span className="aef-container-card__icon"><TrendingUp size={14} /></span>
-          <span className="aef-container-card__title">Live Forecasts</span>
+      <DetachableCard
+        title="Live Forecasts"
+        icon={<TrendingUp size={14} />}
+        metaLabel={String(filteredForecasts.length)}
+        headerAction={
           <div className="dp-info-card__header-select">
             <ParytySelect
               options={nodeOptions}
@@ -471,9 +485,31 @@ function InfoPane({
               testId="forecast-node-select"
             />
           </div>
-          <span className="aef-meta-pill">{filteredForecasts.length}</span>
-        </div>
-        <div className="aef-container-card__body dp-info-card__body">
+        }
+        className="dp-info-card"
+        testId="forecast-info-card"
+        footer={
+          <>
+            {filteredForecasts.length > PREVIEW_COUNT && (
+              <button
+                className={clsx('dp-info-card__footer-btn', viewFullForecasts && 'dp-info-card__footer-btn--active')}
+                onClick={() => setViewFullForecasts((v) => !v)}
+                data-testid="view-full-forecasts"
+                type="button"
+              >
+                <Eye size={12} />
+                {viewFullForecasts ? 'Show less' : `Show all (${filteredForecasts.length})`}
+                <ChevronDown size={12} className="dp-info-card__footer-chevron" />
+              </button>
+            )}
+            <div className="dp-section-footer">
+              <button className="dp-drill-link" onClick={() => navigate('/intel')} data-testid="drill-forecasts" type="button">
+                View All Forecasts <ExternalLink size={10} />
+              </button>
+            </div>
+          </>
+        }
+      >
           {visibleForecasts.length > 0 ? (
             <div className="dp-info-card__grid">
               {visibleForecasts.map((f) => {
@@ -525,36 +561,14 @@ function InfoPane({
               <span className="aef-viz-well__label">No forecasts available</span>
             </div>
           )}
-
-        </div>
-
-        {/* Footer */}
-        <div className="aef-container-card__footer">
-          {filteredForecasts.length > PREVIEW_COUNT && (
-            <button
-              className={clsx('dp-info-card__footer-btn', viewFullForecasts && 'dp-info-card__footer-btn--active')}
-              onClick={() => setViewFullForecasts((v) => !v)}
-              data-testid="view-full-forecasts"
-              type="button"
-            >
-              <Eye size={12} />
-              {viewFullForecasts ? 'Show less' : `Show all (${filteredForecasts.length})`}
-              <ChevronDown size={12} className="dp-info-card__footer-chevron" />
-            </button>
-          )}
-          <div className="dp-section-footer">
-            <button className="dp-drill-link" onClick={() => navigate('/intel')} data-testid="drill-forecasts" type="button">
-              View All Forecasts <ExternalLink size={10} />
-            </button>
-          </div>
-        </div>
-      </div>
+      </DetachableCard>
 
       {/* ── Key Insights ──────────────────────────────────────────── */}
-      <div className="aef-container-card dp-info-card">
-        <div className="aef-container-card__header">
-          <span className="aef-container-card__icon"><Shield size={14} /></span>
-          <span className="aef-container-card__title">Key Insights</span>
+      <DetachableCard
+        title="Key Insights"
+        icon={<Shield size={14} />}
+        metaLabel={String(filteredInsights.length)}
+        headerAction={
           <div className="dp-info-card__header-select">
             <ParytySelect
               options={severityOptions}
@@ -564,9 +578,31 @@ function InfoPane({
               testId="insight-severity-select"
             />
           </div>
-          <span className="aef-meta-pill">{filteredInsights.length}</span>
-        </div>
-        <div className="aef-container-card__body dp-info-card__body">
+        }
+        className="dp-info-card"
+        testId="insight-info-card"
+        footer={
+          <>
+            {filteredInsights.length > PREVIEW_COUNT && (
+              <button
+                className={clsx('dp-info-card__footer-btn', viewFullInsights && 'dp-info-card__footer-btn--active')}
+                onClick={() => setViewFullInsights((v) => !v)}
+                data-testid="view-full-insights"
+                type="button"
+              >
+                <Eye size={12} />
+                {viewFullInsights ? 'Show less' : `Show all (${filteredInsights.length})`}
+                <ChevronDown size={12} className="dp-info-card__footer-chevron" />
+              </button>
+            )}
+            <div className="dp-section-footer">
+              <button className="dp-drill-link" onClick={() => navigate('/intel')} data-testid="drill-insights" type="button">
+                View Intel <ExternalLink size={10} />
+              </button>
+            </div>
+          </>
+        }
+      >
           {visibleInsights.length > 0 ? (
             <div className="dp-info-card__grid">
               {visibleInsights.map((a) => {
@@ -616,41 +652,16 @@ function InfoPane({
               <span className="aef-viz-well__label">No anomalies detected</span>
             </div>
           )}
-
-        </div>
-
-        {/* Footer */}
-        <div className="aef-container-card__footer">
-          {filteredInsights.length > PREVIEW_COUNT && (
-            <button
-              className={clsx('dp-info-card__footer-btn', viewFullInsights && 'dp-info-card__footer-btn--active')}
-              onClick={() => setViewFullInsights((v) => !v)}
-              data-testid="view-full-insights"
-              type="button"
-            >
-              <Eye size={12} />
-              {viewFullInsights ? 'Show less' : `Show all (${filteredInsights.length})`}
-              <ChevronDown size={12} className="dp-info-card__footer-chevron" />
-            </button>
-          )}
-          <div className="dp-section-footer">
-            <button className="dp-drill-link" onClick={() => navigate('/intel')} data-testid="drill-insights" type="button">
-              View Intel <ExternalLink size={10} />
-            </button>
-          </div>
-        </div>
-      </div>
+      </DetachableCard>
 
       {/* ── Forecast Detail Modal ────────────────────────────────── */}
       {detailForecast && (
         <div
           className="aef-modal-overlay"
           onClick={() => setDetailForecast(null)}
-          role="dialog"
-          aria-modal="true"
           data-testid="forecast-detail-modal"
         >
-          <div className="aef-modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+          <div className="aef-modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Forecast Detail">
             <div className="aef-modal-header">
               <span className="aef-modal-title">Forecast Detail</span>
               <button className="aef-modal-close" onClick={() => setDetailForecast(null)} aria-label="Close" type="button">
@@ -723,11 +734,9 @@ function InfoPane({
         <div
           className="aef-modal-overlay"
           onClick={() => setDetailAnomaly(null)}
-          role="dialog"
-          aria-modal="true"
           data-testid="anomaly-detail-modal"
         >
-          <div className="aef-modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()}>
+          <div className="aef-modal" style={{ maxWidth: 440 }} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-label="Anomaly Detail">
             <div className="aef-modal-header">
               <span className="aef-modal-title">Anomaly Detail</span>
               <button className="aef-modal-close" onClick={() => setDetailAnomaly(null)} aria-label="Close" type="button">
@@ -891,25 +900,22 @@ function TwinDetailSubView({
 
           {/* Twin metadata */}
           <div className="dp-twin-detail__grid">
-            <div className="aef-container-card">
-              <div className="aef-container-card__header">
-                <span className="aef-container-card__icon"><Box size={14} /></span>
-                <span className="aef-container-card__title">
-                  {twin?.name || 'Twin Metadata'}
-                </span>
-                <span className="aef-meta-pill">{twin?.systemLabel || ''}</span>
+            <DetachableCard
+              title={twin?.name || 'Twin Metadata'}
+              icon={<Box size={14} />}
+              metaLabel={twin?.systemLabel || ''}
+              testId="twin-metadata-section"
+            >
+              <div className="aef-stat-module">
+                <span className="aef-stat-module__label">System</span>
+                <span className="aef-stat-module__value">{twin?.systemLabel || '—'}</span>
               </div>
-              <div className="aef-container-card__body">
-                <div className="aef-stat-module">
-                  <span className="aef-stat-module__label">System</span>
-                  <span className="aef-stat-module__value">{twin?.systemLabel || '—'}</span>
-                </div>
-                <div className="aef-stat-module">
-                  <span className="aef-stat-module__label">Health</span>
-                  <span className={clsx('aef-badge', healthBadgeClass(twin?.health || 'unknown'))}>
-                    {twin?.health || 'unknown'}
-                  </span>
-                </div>
+              <div className="aef-stat-module">
+                <span className="aef-stat-module__label">Health</span>
+                <span className={clsx('aef-badge', healthBadgeClass(twin?.health || 'unknown'))}>
+                  {twin?.health || 'unknown'}
+                </span>
+              </div>
                 <div className="aef-stat-module">
                   <span className="aef-stat-module__label">Nodes</span>
                   <span className="aef-stat-module__value">{twin?.summary.nodeCount ?? '—'}</span>
@@ -926,17 +932,15 @@ function TwinDetailSubView({
                     }) : '—'}
                   </span>
                 </div>
-              </div>
-            </div>
+            </DetachableCard>
 
             {/* Assigned agents */}
-            <div className="aef-container-card">
-              <div className="aef-container-card__header">
-                <span className="aef-container-card__icon"><Server size={14} /></span>
-                <span className="aef-container-card__title">Assigned Agents</span>
-                <span className="aef-meta-pill">{assignedAgents.length}</span>
-              </div>
-              <div className="aef-container-card__body">
+            <DetachableCard
+              title="Assigned Agents"
+              icon={<Server size={14} />}
+              metaLabel={String(assignedAgents.length)}
+              testId="twin-assigned-agents"
+            >
                 {assignedAgents.length > 0 ? (
                   <div className="aef-table-card">
                     <div style={{ overflowX: 'auto' }}>
@@ -972,17 +976,15 @@ function TwinDetailSubView({
                     <span className="aef-viz-well__label">No agents assigned</span>
                   </div>
                 )}
-              </div>
-            </div>
+            </DetachableCard>
 
             {/* Alerts for this twin */}
-            <div className="aef-container-card">
-              <div className="aef-container-card__header">
-                <span className="aef-container-card__icon"><Bell size={14} /></span>
-                <span className="aef-container-card__title">Alerts</span>
-                <span className="aef-meta-pill">{twinAlerts.length}</span>
-              </div>
-              <div className="aef-container-card__body">
+            <DetachableCard
+              title="Alerts"
+              icon={<Bell size={14} />}
+              metaLabel={String(twinAlerts.length)}
+              testId="twin-alerts-section"
+            >
                 {twinAlerts.length > 0 ? (
                   <div className="dp-alerts-list">
                     {twinAlerts.map((alert) => <AlertRow key={alert.id} alert={alert} />)}
@@ -993,8 +995,7 @@ function TwinDetailSubView({
                     <span className="aef-viz-well__label">No active alerts</span>
                   </div>
                 )}
-              </div>
-            </div>
+            </DetachableCard>
           </div>
         </div>
       </div>
@@ -1004,11 +1005,8 @@ function TwinDetailSubView({
         <div
           className="aef-modal-overlay"
           onClick={(e) => { if (e.target === e.currentTarget) setConfirmActivate(false); }}
-          role="dialog"
-          aria-modal="true"
-          aria-label="Confirm active twin change"
         >
-          <div className="aef-modal" style={{ maxWidth: 420 }}>
+          <div className="aef-modal" style={{ maxWidth: 420 }} role="dialog" aria-modal="true" aria-label="Confirm active twin change">
             <div className="aef-modal-header">
               <span className="aef-modal-title">Set Active Twin</span>
               <button className="aef-modal-close" onClick={() => setConfirmActivate(false)} aria-label="Close">
@@ -1254,10 +1252,8 @@ function CreateParytyWizard() {
       className="aef-modal-overlay"
       ref={backdropRef}
       onClick={(e) => { if (e.target === backdropRef.current) close(); }}
-      role="dialog" aria-modal="true"
-      aria-label={`Create Digital Paryty — ${WIZARD_STEPS[step]}`}
     >
-      <div className="aef-modal" style={{ maxWidth: 560 }}>
+      <div className="aef-modal" style={{ maxWidth: 560 }} role="dialog" aria-modal="true" aria-label={`Create Digital Paryty — ${WIZARD_STEPS[step]}`}>
         <div className="aef-modal-header">
           <span className="aef-modal-title">New Digital Paryty — {WIZARD_STEPS[step]}</span>
           <button className="aef-modal-close" onClick={close} aria-label="Close wizard">
@@ -1315,11 +1311,11 @@ export function DashboardPage() {
 
   const [expandedSection, setExpandedSection] = useState(0);
   const [selectedTwinId, setSelectedTwinId] = useState<string | null>(null);
-  const [agents, setAgents] = useState<AgentManagementInfo[]>([]);
-  const [agentsLoading, setAgentsLoading] = useState(false);
   const [activeCounterModal, setActiveCounterModal] = useState<string | null>(null);
-  const [isScrolled, setIsScrolled] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [selectedAgent, setSelectedAgent] = useState<AgentManagementInfo | null>(null);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const mainPaneRef = useRef<HTMLDivElement>(null);
+  const counterStripRef = useRef<HTMLDivElement>(null);
 
   // ─── Store hooks ────────────────────────────────────────────────────────
 
@@ -1332,51 +1328,71 @@ export function DashboardPage() {
   const alerts        = useAlertsStore((s) => s.alerts);
   const forecasts     = useIntelStore((s) => s.forecasts);
   const anomalies     = useIntelStore((s) => s.anomalies);
-  const fetchForecasts = useIntelStore((s) => s.fetchForecasts);
-  const fetchAnomalies = useIntelStore((s) => s.fetchAnomalies);
+  const agents        = useDashboardStore((s) => s.agents);
+  const agentsLoading = useDashboardStore((s) => s.agentsLoading);
   const navigate      = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  // ─── Data fetching ──────────────────────────────────────────────────────
+  // ─── Live polling hooks ─────────────────────────────────────────────────
 
-  useEffect(() => { fetchTwins(); }, [fetchTwins]);
+  useIntel();              // 60s polling for forecasts + anomalies
+  useDashboardPolling();   // 30s twins + 15s agents/alerts
 
+  // Scroll-driven CSS custom properties for smooth header & counter-strip transitions.
+  // Uses requestAnimationFrame to stay in sync with the browser paint cycle — zero
+  // React re-renders. --scroll-progress lerps 0→1 over 0–60px on the main pane.
   useEffect(() => {
-    let cancelled = false;
-    setAgentsLoading(true);
-    const client = getRestClient();
-    // BUGFIX: /api/v1/agents/all returns {data: [...]} (envelope), not a raw array.
-    // Type the response correctly and extract .data to avoid "is not iterable" crash.
-    client.get<{ data: AgentManagementInfo[] }>('/api/v1/agents/all')
-      .then((resp) => { if (!cancelled) { setAgents(resp.data ?? []); setAgentsLoading(false); } })
-      .catch(() => { if (!cancelled) setAgentsLoading(false); });
-    return () => { cancelled = true; };
-  }, []);
+    const scrollEl = mainPaneRef.current;
+    const targetEl = pageRef.current;
+    if (!scrollEl || !targetEl) return;
 
-  useEffect(() => {
-    let cancelled = false;
-    const client = getRestClient();
-    client.getAlerts()
-      .then((data) => { if (!cancelled) useAlertsStore.getState().setAlerts(data ?? []); })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+    let rafId: number;
+    const RANGE = 60; // full transition over 60px of scroll
 
-  useEffect(() => {
-    fetchForecasts(['cpu_usage_percent', 'memory_usage_percent', 'net_bytes_recv']).catch(() => {});
-    fetchAnomalies().catch(() => {});
-  }, [fetchForecasts, fetchAnomalies]);
+    const onScroll = () => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => {
+        const raw = Math.min(Math.max(scrollEl.scrollTop / RANGE, 0), 1);
+        const p = Number(raw.toFixed(4));
+        targetEl.style.setProperty('--scroll-progress', String(p));
 
-  // Scroll listener for sticky counter strip + header fade
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const handleScroll = () => {
-      setIsScrolled(el.scrollTop > 60);
+        // Hysteresis on data-scrolled prevents a layout feedback loop:
+        // toggling compact mode changes the counter strip height → grid reflows
+        // → scroll position shifts → progress crosses threshold again → oscillates.
+        // Dead zone: enter compact at 0.6, exit at 0.3 (0.3-wide gap absorbs jitter).
+        const currentlyCompact = targetEl.hasAttribute('data-scrolled');
+        if (!currentlyCompact && p > 0.6) {
+          targetEl.setAttribute('data-scrolled', '');
+        } else if (currentlyCompact && p < 0.3) {
+          targetEl.removeAttribute('data-scrolled');
+        }
+      });
     };
-    el.addEventListener('scroll', handleScroll, { passive: true });
-    return () => el.removeEventListener('scroll', handleScroll);
-  }, []);
+
+    scrollEl.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      scrollEl.removeEventListener('scroll', onScroll);
+      cancelAnimationFrame(rafId);
+    };
+  }, [selectedTwinId]);
+
+  // ─── Agent delete handler ─────────────────────────────────────────────
+
+  const handleDeleteAgent = useCallback(async (agentId: string) => {
+    try {
+      const client = getRestClient();
+      await client.delete(`/api/v1/agents/${encodeURIComponent(agentId)}`);
+      useToastStore.getState().addToast({ type: 'success', message: 'Agent deleted.' });
+      fetchTwins(); // refresh catalogue including agents
+    } catch {
+      useToastStore.getState().addToast({ type: 'error', message: 'Failed to delete agent.' });
+    }
+  }, [fetchTwins]);
+
+  const handleAgentUpdated = useCallback((_agent: AgentManagementInfo) => {
+    setSelectedAgent(null);
+    fetchTwins(); // refresh catalogue including agents
+  }, [fetchTwins]);
 
   // Auto-open wizard when ?new=true
   useEffect(() => {
@@ -1404,12 +1420,21 @@ export function DashboardPage() {
 
   // ─── Handlers ───────────────────────────────────────────────────────────
 
-  const handleCounterStripWheel = useCallback((e: React.WheelEvent) => {
-    const el = e.currentTarget;
-    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-      e.preventDefault();
-      el.scrollLeft += e.deltaY;
-    }
+  // Attach a native (non-passive) wheel listener to the counter strip so
+  // vertical wheel deltas can be redirected to horizontal scroll.
+  // React's onWheel is passive by default — calling preventDefault() inside
+  // it triggers "Unable to preventDefault inside passive event listener".
+  useEffect(() => {
+    const el = counterStripRef.current;
+    if (!el) return;
+    const handler = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault();
+        el.scrollLeft += e.deltaY;
+      }
+    };
+    el.addEventListener('wheel', handler, { passive: false });
+    return () => el.removeEventListener('wheel', handler);
   }, []);
 
   const toggleSection = useCallback((index: number) => {
@@ -1435,17 +1460,17 @@ export function DashboardPage() {
 
   return (
     <div className="dp-page">
-      <div className="dp-page__inner" ref={scrollRef}>
+      <div className="dp-page__inner" ref={pageRef}>
 
         {/* Page header — fades on scroll */}
-        <div className={clsx('dp-page__header', isScrolled && 'dp-page__header--fading')}>
+        <div className="dp-page__header">
           <div>
             <h1 className="dp-page__header-title">Dashboard</h1>
             <p className="dp-page__header-sub">
               Your operational overview — {totalTwins} Digital {totalTwins === 1 ? 'Paryty' : 'Parytys'}
             </p>
           </div>
-          <div className={clsx('dp-page__header-actions', isScrolled && 'dp-page__header-actions--floating')}>
+          <div className="dp-page__header-actions">
             <button
               className="aef-btn aef-btn-active"
               onClick={openWizard}
@@ -1480,8 +1505,8 @@ export function DashboardPage() {
 
         {/* Counter strip */}
         <div
-          className={clsx('dp-counter-strip', isScrolled && 'dp-counter-strip--stuck')}
-          onWheel={handleCounterStripWheel}
+          className="dp-counter-strip"
+          ref={counterStripRef}
           data-testid="counter-strip"
         >
           <CounterCard icon={<Server size={14} />} label="Total Twins" value={totalTwins} onClick={() => setActiveCounterModal('twins')} />
@@ -1511,7 +1536,7 @@ export function DashboardPage() {
         {/* Two-pane layout */}
         <div className="dp-two-pane">
           {/* Main pane (left) */}
-          <div className="dp-main-pane">
+          <div className="dp-main-pane" ref={mainPaneRef}>
             {!isLoading && catalogue.length === 0 ? (
               <EmptyState onNew={openWizard} />
             ) : (
@@ -1579,7 +1604,7 @@ export function DashboardPage() {
                     </div>
                   ) : topAgents.length > 0 ? (
                     <div className="dp-agents-list">
-                      {topAgents.map((agent) => <AgentRow key={agent.agent_id} agent={agent} />)}
+                      {topAgents.map((agent) => <AgentRow key={agent.agent_id} agent={agent} onClick={() => setSelectedAgent(agent)} />)}
                     </div>
                   ) : (
                     <div className="aef-viz-well">
@@ -1702,11 +1727,8 @@ export function DashboardPage() {
           <div
             className="aef-modal-overlay"
             onClick={(e) => { if (e.target === e.currentTarget) setActiveCounterModal(null); }}
-            role="dialog"
-            aria-modal="true"
-            aria-label={config.title}
           >
-            <div className={clsx('aef-modal', config.accent)} style={{ maxWidth: 480 }}>
+            <div className={clsx('aef-modal', config.accent)} style={{ maxWidth: 480 }} role="dialog" aria-modal="true" aria-label={config.title}>
               <div className="aef-modal-header">
                 <span className="aef-modal-title">{config.title}</span>
                 <button className="aef-modal-close" onClick={() => setActiveCounterModal(null)} aria-label="Close">
@@ -1748,6 +1770,16 @@ export function DashboardPage() {
           </div>
         );
       })()}
+
+      {/* Agent Detail Modal */}
+      {selectedAgent && (
+        <AgentDetailModal
+          agent={selectedAgent}
+          onClose={() => setSelectedAgent(null)}
+          onDelete={handleDeleteAgent}
+          onUpdated={handleAgentUpdated}
+        />
+      )}
     </div>
   );
 }

@@ -58,6 +58,10 @@ type SelfMonitoringMetrics struct {
 	ActiveAgents      int
 	ErrorRate         float64
 	LastUpdated       time.Time
+	// Audit log metrics
+	FailedAuthRate    float64 // failed auth attempts per minute
+	AuditWriteErrors  int64   // number of audit log write failures
+	AdminActionRate   float64 // admin actions per minute (unusual if >50)
 }
 
 // AlertManager manages alert rules and active alerts
@@ -253,6 +257,43 @@ func DefaultAlertRules() []AlertRule {
 			},
 			Threshold: 0.01,
 			Duration:  2 * time.Minute,
+		},
+		// Audit log security alerts
+		{
+			Name:     "high_failed_auth_rate",
+			Severity: AlertSeverityCritical,
+			Condition: func(m *SelfMonitoringMetrics) bool {
+				return m.FailedAuthRate > 10 // More than 10 failed auths per minute
+			},
+			Message: func(m *SelfMonitoringMetrics) string {
+				return fmt.Sprintf("Failed authentication rate is %.0f/min (threshold: 10). Possible brute-force attack.", m.FailedAuthRate)
+			},
+			Threshold: 10,
+			Duration:  30 * time.Second,
+		},
+		{
+			Name:     "audit_write_failures",
+			Severity: AlertSeverityCritical,
+			Condition: func(m *SelfMonitoringMetrics) bool {
+				return m.AuditWriteErrors > 0
+			},
+			Message: func(m *SelfMonitoringMetrics) string {
+				return fmt.Sprintf("Audit log write failures detected: %d events lost. SOC2 compliance at risk.", m.AuditWriteErrors)
+			},
+			Threshold: 1,
+			Duration:  0, // Immediate
+		},
+		{
+			Name:     "unusual_admin_activity",
+			Severity: AlertSeverityWarning,
+			Condition: func(m *SelfMonitoringMetrics) bool {
+				return m.AdminActionRate > 50 // More than 50 admin actions per minute is unusual
+			},
+			Message: func(m *SelfMonitoringMetrics) string {
+				return fmt.Sprintf("Unusual admin activity rate: %.0f actions/min (threshold: 50). Possible credential compromise.", m.AdminActionRate)
+			},
+			Threshold: 50,
+			Duration:  1 * time.Minute,
 		},
 	}
 }

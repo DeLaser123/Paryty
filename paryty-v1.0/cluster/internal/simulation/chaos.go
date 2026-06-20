@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/rand"
 	"net/http"
+	"net/url"
 	"os/exec"
 	"strings"
 	"time"
@@ -78,6 +79,26 @@ func (cr *ChaosRunner) generateK6Script(config LoadTestConfig) (string, error) {
 		return config.ScriptTemplate, nil
 	}
 
+	// Validate and sanitize TargetURL to prevent JavaScript injection.
+	// The URL is interpolated into a JS string literal, so it must not
+	// contain unescaped single quotes, backticks, or backslashes.
+	parsedURL, err := url.Parse(config.TargetURL)
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") {
+		return "", fmt.Errorf("invalid target URL: must be http or https")
+	}
+	if parsedURL.Host == "" {
+		return "", fmt.Errorf("invalid target URL: missing host")
+	}
+
+	// Escape characters that could break out of a JS single-quoted string.
+	safeURL := strings.NewReplacer(
+		`\\`, `\\\\`,
+		`'`, `\\'`,
+		`"`, `\\"`,
+		"\n", `\\n`,
+		"\r", `\\r`,
+	).Replace(config.TargetURL)
+
 	var sb strings.Builder
 	sb.WriteString("import http from 'k6/http';\n")
 	sb.WriteString("import { check, sleep } from 'k6';\n")
@@ -116,7 +137,7 @@ func (cr *ChaosRunner) generateK6Script(config LoadTestConfig) (string, error) {
 	sb.WriteString("};\n")
 	sb.WriteString("\n")
 	sb.WriteString("export default function () {\n")
-	sb.WriteString(fmt.Sprintf("  const res = http.get('%s');\n", config.TargetURL))
+	sb.WriteString(fmt.Sprintf("  const res = http.get('%s');\n", safeURL))
 	sb.WriteString("  check(res, {\n")
 	sb.WriteString("    'status is 200': (r) => r.status === 200,\n")
 	sb.WriteString("    'response time < 500ms': (r) => r.timings.duration < 500,\n")

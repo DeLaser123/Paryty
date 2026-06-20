@@ -24,17 +24,22 @@ mod supervisor;
 struct CliArgs {
     config_path: Option<String>,
     set_key: Option<String>,
+    cluster_agent_id: Option<String>,
 }
 
 /// Parse CLI arguments from argv. Hand-rolled to avoid pulling in clap.
 fn parse_cli() -> CliArgs {
     let args: Vec<String> = std::env::args().collect();
-    let mut result = CliArgs { config_path: None, set_key: None };
+    let mut result = CliArgs { config_path: None, set_key: None, cluster_agent_id: None };
     let mut i = 1;
     while i < args.len() {
         match args[i].as_str() {
             "-c" | "--config" if i + 1 < args.len() => {
                 result.config_path = Some(args[i + 1].clone());
+                i += 2;
+            }
+            "--cluster-agent-id" if i + 1 < args.len() => {
+                result.cluster_agent_id = Some(args[i + 1].clone());
                 i += 2;
             }
             "--key" if i + 1 < args.len() => {
@@ -46,13 +51,17 @@ fn parse_cli() -> CliArgs {
                 eprintln!();
                 eprintln!("Options:");
                 eprintln!("  -c, --config <PATH>  Path to YAML configuration file");
-                eprintln!("  --key <API_KEY>      Set or update the API key and persist to config file");
+                eprintln!("  --cluster-agent-id <ID>  Cluster agent ID for auto-pairing");
+                eprintln!(
+                    "  --key <API_KEY>      Set or update the API key and persist to config file"
+                );
                 eprintln!("  -h, --help           Print help");
                 eprintln!();
                 eprintln!("Environment variables:");
                 eprintln!("  PARYTY_API_KEY            API key (overrides config file)");
                 eprintln!("  PARYTY_CLUSTER_ENDPOINT   Cluster endpoint (overrides config file)");
                 eprintln!("  PARYTY_AGENT_CONFIG       Config file path (default: configs/agent/agent.yaml)");
+                eprintln!("  PARYTY_CLUSTER_AGENT_ID   Cluster agent ID for auto-pairing");
                 std::process::exit(0);
             }
             _ => {
@@ -92,7 +101,9 @@ async fn main() -> Result<()> {
         info!(path = %config_path, "API key persisted to config file");
         eprintln!("✓ API key updated in {}", config_path);
         eprintln!("  Restart the agent for the new key to take effect.");
-        eprintln!("  Or set PARYTY_API_KEY environment variable for immediate use without restart.");
+        eprintln!(
+            "  Or set PARYTY_API_KEY environment variable for immediate use without restart."
+        );
         return Ok(());
     }
 
@@ -114,7 +125,8 @@ async fn main() -> Result<()> {
     comm.set_config_path(cli.config_path.clone().unwrap_or_else(|| {
         std::env::var("PARYTY_AGENT_CONFIG")
             .unwrap_or_else(|_| "configs/agent/agent.yaml".to_string())
-    })).await;
+    }))
+    .await;
     info!("Communication layer initialized");
 
     // ── Wire communication lifecycle ─────────────────────────────────

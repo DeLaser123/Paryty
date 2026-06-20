@@ -9,8 +9,8 @@
 
 import { memo, useRef, useEffect, useCallback, useState } from 'react';
 import { TrendingUp, Clock } from 'lucide-react';
-import type { ForecastSeries } from '../../types/intel';
-import { KEY_METRICS, KEY_METRIC_LABELS } from '../../types/intel';
+import type { ForecastSeries, KeyMetric } from '../../types/intel';
+import { KEY_METRIC_LABELS } from '../../types/intel';
 import { ParytySelect } from '../common/ParytySelect';
 
 // ─── Chart Constants ─────────────────────────────────────────────
@@ -55,7 +55,16 @@ interface TooltipData {
 interface ForecastChartProps {
   series: ForecastSeries | undefined;
   selectedMetric: string;
+  metricNames: string[];
   onMetricChange: (metric: string) => void;
+}
+
+/** Derive a human-readable label from a metric name. */
+function metricLabel(name: string): string {
+  const known = KEY_METRIC_LABELS[name as KeyMetric];
+  if (known) return known;
+  // Fallback: snake_case → Title Case
+  return name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /**
@@ -65,6 +74,7 @@ interface ForecastChartProps {
 export const ForecastChart = memo(function ForecastChart({
   series,
   selectedMetric,
+  metricNames,
   onMetricChange,
 }: ForecastChartProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -383,7 +393,7 @@ export const ForecastChart = memo(function ForecastChart({
         <div className="aef-container-card__icon"><TrendingUp size={16} /></div>
         <h3 className="aef-container-card__title">Forecast Detail</h3>
         <ParytySelect
-          options={KEY_METRICS.map((m) => ({ label: KEY_METRIC_LABELS[m], value: m }))}
+          options={metricNames.map((m) => ({ label: metricLabel(m), value: m }))}
           value={selectedMetric}
           onChange={onMetricChange}
           placeholder="Select metric"

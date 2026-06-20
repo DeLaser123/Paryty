@@ -56,18 +56,18 @@ export function BacklogAlert({ agentId, backlogBytes, onAccept, onReject }: Back
         alignItems: 'center',
         gap: 'var(--aef-space-3)',
         padding: 'var(--aef-space-2) var(--aef-space-3)',
-        background: 'rgba(245, 158, 11, 0.08)',
-        border: '1px solid rgba(245, 158, 11, 0.3)',
+        background: 'var(--aef-status-warning-bg)',
+        border: '1px solid var(--aef-status-warning-border)',
         borderRadius: 'var(--aef-radius-control)',
         marginTop: 'var(--aef-space-2)',
       }}
       data-testid={`backlog-alert-${agentId}`}
     >
-      <AlertTriangle size={14} style={{ color: 'var(--aef-warning)', flexShrink: 0 }} />
+      <AlertTriangle size={12} style={{ color: 'var(--aef-status-warning)', flexShrink: 0 }} />
       <span
         style={{
           fontFamily: 'var(--aef-font-body)',
-          fontSize: 11,
+          fontSize: 'var(--aef-font-size-xs)',
           color: 'var(--aef-text-primary)',
           flex: 1,
         }}
@@ -79,10 +79,10 @@ export function BacklogAlert({ agentId, backlogBytes, onAccept, onReject }: Back
         className="aef-btn aef-btn-active"
         onClick={handleAccept}
         disabled={isAccepting || isRejecting}
-        style={{ padding: '2px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+        style={{ padding: 'var(--aef-space-0-5) var(--aef-space-2)', fontSize: 'var(--aef-font-size-xs)', display: 'inline-flex', alignItems: 'center', gap: 'var(--aef-space-1)' }}
         data-testid={`backlog-accept-${agentId}`}
       >
-        <Check size={12} />
+        <Check size={10} />
         {isAccepting ? '…' : 'Accept'}
       </button>
       <button
@@ -90,10 +90,10 @@ export function BacklogAlert({ agentId, backlogBytes, onAccept, onReject }: Back
         className="aef-btn aef-btn-inactive"
         onClick={handleReject}
         disabled={isAccepting || isRejecting}
-        style={{ padding: '2px 10px', fontSize: 11, display: 'inline-flex', alignItems: 'center', gap: 4 }}
+        style={{ padding: 'var(--aef-space-0-5) var(--aef-space-2)', fontSize: 'var(--aef-font-size-xs)', display: 'inline-flex', alignItems: 'center', gap: 'var(--aef-space-1)' }}
         data-testid={`backlog-reject-${agentId}`}
       >
-        <X size={12} />
+        <X size={10} />
         {isRejecting ? '…' : 'Reject'}
       </button>
     </div>
