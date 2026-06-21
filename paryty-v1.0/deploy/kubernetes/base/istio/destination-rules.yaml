@@ -1,0 +1,153 @@
+# Paryty DestinationRules — mTLS for all Paryty services
+#
+# Each DestinationRule enforces ISTIO_MUTUAL TLS mode for its
+# corresponding Kubernetes Service. This ensures that every pod
+# communicates with every other pod over mutually authenticated TLS.
+#
+# The default rule (host: "*.paryty.svc.cluster.local") is a catch-all
+# for any services not explicitly listed below. Per-service rules
+# override the default for traffic policy tuning (connection pool
+# sizes, outlier detection, load balancing).
+#
+# References:
+#   - Istio DestinationRule TLS mode
+#   - Architecture rule: "TLS for all network communication"
+
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: paryty-default-mtls
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  # Default for all services in the paryty namespace
+  host: "*.paryty.svc.cluster.local"
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: paryty-ingestion
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  host: paryty-ingestion.paryty.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 10000
+      http:
+        http1MaxPendingRequests: 1000
+        http2MaxRequests: 1000
+        maxRequestsPerConnection: 1
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 50
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: paryty-pipeline
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  host: paryty-pipeline.paryty.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 10000
+      http:
+        http1MaxPendingRequests: 1000
+        http2MaxRequests: 1000
+        maxRequestsPerConnection: 1
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: paryty-query
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  host: paryty-query.paryty.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 10000
+      http:
+        http1MaxPendingRequests: 500
+        http2MaxRequests: 500
+        maxRequestsPerConnection: 1
+    outlierDetection:
+      consecutive5xxErrors: 5
+      interval: 30s
+      baseEjectionTime: 30s
+      maxEjectionPercent: 50
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: paryty-intelligence
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  host: paryty-intelligence.paryty.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 100
+      http:
+        http2MaxRequests: 100
+        maxRequestsPerConnection: 1
+    outlierDetection:
+      consecutive5xxErrors: 3
+      interval: 30s
+      baseEjectionTime: 60s
+      maxEjectionPercent: 50
+---
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: paryty-frontend
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  host: paryty-frontend.paryty.svc.cluster.local
+  trafficPolicy:
+    tls:
+      mode: ISTIO_MUTUAL
+    connectionPool:
+      tcp:
+        maxConnections: 1000
+      http:
+        http1MaxPendingRequests: 500
+        http2MaxRequests: 500

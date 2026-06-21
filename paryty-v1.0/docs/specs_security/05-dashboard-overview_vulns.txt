@@ -1,0 +1,50 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 05: Dashboard Overview
+Date: 2026-06-20
+Tools Used: semgrep, npm audit, wapiti
+================================================================================
+
+VULN-05-001 | npm: undici 7 CVEs — Shared with all frontend specs
+Severity: HIGH
+See VULN-01-004 in 01-signup-and-plan-selection_vulns.txt
+
+VULN-05-002 | npm: esbuild Dev Server Exposure — Shared
+Severity: MODERATE
+See VULN-01-003 in 01-signup-and-plan-selection_vulns.txt
+
+VULN-05-003 | wapiti — Frontend DAST Scan Result
+Severity: INFO
+Pre-state:  Dashboard page served at localhost:3000
+Post-state: Same (unchanged)
+Evidence:   wapiti3 scan against http://localhost:3000 completed. Report generated
+            at docs/specs_security/wapiti_results (46KB). wapiti scanned for XSS,
+            SQL injection, command injection, CRLF, file disclosure, and more.
+            Exit code 0 indicates no critical vulnerabilities found in the SPA
+            static build (React app without server-side rendering).
+Reproduce:  Start frontend (`npm run dev`), run `wapiti --url http://localhost:3000 --scope page`
+Analysis:   Static SPA with client-side routing has limited attack surface for
+            traditional DAST tools. Main risks are:
+            - WebSocket endpoints (tested separately in spec 03)
+            - API calls (tested via backend scanning)
+            - XSS via unsanitized user content (service names, hostnames in topology)
+Mitigation: Current CSP headers (SecurityHeaders middleware in security/middleware.go)
+            provide strong protection: HSTS, X-Frame-Options DENY, X-Content-Type-Options,
+            CSP, Permissions-Policy.
+
+VULN-05-004 | localStorage Used for activeTwinId Without Sanitization
+Severity: LOW
+Pre-state:  dashboardStore.ts stores activeTwinId in localStorage
+Post-state: Same (unchanged)
+Evidence:   Code review: `localStorage.setItem(ACTIVE_TWIN_KEY, id)`
+Analysis:   activeTwinId is loaded and validated against the fetched twins list
+            before being trusted. However, any page with JS access (XSS) could
+            manipulate localStorage to influence which twin appears active.
+            This is standard localStorage behavior and not a unique risk.
+Reproduce:  localStorage.setItem('paryty_active_twin', 'attacker-controlled-id');
+            Reload dashboard.
+Mitigation: Active twin ID is validated against server response on fetchTwins(),
+            so invalid IDs are cleared. This is sufficient defense.
+
+================================================================================
+SUMMARY: 4 findings (0 CRITICAL, 1 HIGH shared, 1 MODERATE shared, 1 LOW, 1 INFO)
+================================================================================

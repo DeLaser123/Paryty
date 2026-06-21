@@ -23,6 +23,9 @@ import type {
 // Note: Refresh tokens are now stored in httpOnly cookies by the backend.
 // No localStorage storage is needed for security.
 
+// Module-level timer for proactive refresh scheduling.
+let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+
 // ─── Store Shape ─────────────────────────────────────────────────────
 
 interface AuthState {
@@ -38,16 +41,22 @@ interface AuthState {
   isAuthenticated: boolean;
   /** Whether auth is initializing (checking stored refresh token). */
   isLoading: boolean;
+  /** Access token expiry as ISO string. */
+  expiresAt: string | null;
 
   // Actions
   login: (params: LoginParams) => Promise<void>;
   register: (params: RegisterParams) => Promise<void>;
   logout: () => Promise<void>;
   refreshAuth: () => Promise<boolean>;
-  setAuth: (data: { accessToken: string; refreshToken: string; user: User; tenant: Tenant }) => void;
+  setAuth: (data: { accessToken: string; refreshToken: string; user: User; tenant: Tenant; expiresAt?: string }) => void;
   clearAuth: () => void;
   /** Call on app mount to attempt silent token refresh. */
   initAuth: () => Promise<void>;
+  /** Schedule proactive refresh before token expiry. */
+  scheduleRefresh: () => void;
+  /** Cancel any pending proactive refresh. */
+  cancelScheduledRefresh: () => void;
 }
 
 // ─── Store ───────────────────────────────────────────────────────────
@@ -59,6 +68,37 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   tenant: null,
   isAuthenticated: false,
   isLoading: true,
+  expiresAt: null,
+
+  scheduleRefresh: () => {
+    const { expiresAt, isAuthenticated } = get();
+    if (!isAuthenticated || !expiresAt) return;
+
+    // Cancel any existing timer.
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+
+    const expiryMs = new Date(expiresAt).getTime();
+    const refreshAtMs = expiryMs - 120_000; // 2 minutes before expiry
+    const delay = Math.max(0, refreshAtMs - Date.now());
+
+    refreshTimer = setTimeout(async () => {
+      const success = await get().refreshAuth();
+      if (success) {
+        // Schedule the next refresh.
+        get().scheduleRefresh();
+      }
+    }, delay);
+  },
+
+  cancelScheduledRefresh: () => {
+    if (refreshTimer) {
+      clearTimeout(refreshTimer);
+      refreshTimer = null;
+    }
+  },
 
   initAuth: async () => {
     // With httpOnly cookies, we attempt silent refresh directly.
@@ -87,6 +127,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       tenant: response.tenant,
       isAuthenticated: true,
       isLoading: false,
+      expiresAt: response.expiresAt ?? null,
     });
 
     // Populate plan store synchronously from the auth response (BFF pattern).
@@ -94,6 +135,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (response.plan) {
       usePlanStore.setState({ currentPlan: response.plan });
     }
+
+    // Schedule proactive token refresh.
+    get().scheduleRefresh();
   },
 
   register: async (params: RegisterParams) => {
@@ -110,16 +154,22 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       tenant: response.tenant,
       isAuthenticated: true,
       isLoading: false,
+      expiresAt: response.expiresAt ?? null,
     });
 
     // Populate plan store synchronously from the auth response (BFF pattern).
     if (response.plan) {
       usePlanStore.setState({ currentPlan: response.plan });
     }
+
+    // Schedule proactive token refresh.
+    get().scheduleRefresh();
   },
 
   logout: async () => {
     const { accessToken } = get();
+    // Cancel any pending proactive refresh.
+    get().cancelScheduledRefresh();
     try {
       if (accessToken) {
         // Refresh token will be sent automatically via httpOnly cookie.
@@ -135,6 +185,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       tenant: null,
       isAuthenticated: false,
       isLoading: false,
+      expiresAt: null,
     });
   },
 
@@ -154,10 +205,14 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         tenant: response.tenant,
         isAuthenticated: true,
         isLoading: false,
+        expiresAt: response.expiresAt ?? null,
       });
 
       // Fetch plan info after silent refresh.
       usePlanStore.getState().fetchCurrentPlan();
+
+      // Reschedule proactive refresh with new expiry.
+      get().scheduleRefresh();
       return true;
     } catch {
       set({
@@ -167,6 +222,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         tenant: null,
         isAuthenticated: false,
         isLoading: false,
+        expiresAt: null,
       });
       return false;
     }
@@ -182,10 +238,15 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       tenant: data.tenant,
       isAuthenticated: true,
       isLoading: false,
+      expiresAt: data.expiresAt ?? null,
     });
+    // Schedule proactive refresh.
+    get().scheduleRefresh();
   },
 
   clearAuth: () => {
+    // Cancel any pending proactive refresh.
+    get().cancelScheduledRefresh();
     // Refresh token is in httpOnly cookie — backend will clear it on logout.
     // Clear plan state as well — nobody is authenticated.
     usePlanStore.setState({
@@ -201,6 +262,25 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       tenant: null,
       isAuthenticated: false,
       isLoading: false,
+      expiresAt: null,
     });
   },
 }));
+
+// Background tab recovery: browsers throttle setTimeout in background tabs,
+// which can cause the proactive refresh timer to fire late. When the user
+// returns to the tab, check if a refresh is needed immediately.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState !== 'visible') return;
+    const { isAuthenticated, expiresAt } = useAuthStore.getState();
+    if (!isAuthenticated || !expiresAt) return;
+    const remaining = new Date(expiresAt).getTime() - Date.now();
+    // If token expires within 60 seconds, trigger immediate refresh.
+    // This is more aggressive than the 2-minute scheduleRefresh window
+    // to compensate for background-tab timer throttling.
+    if (remaining < 60_000) {
+      useAuthStore.getState().refreshAuth();
+    }
+  });
+}

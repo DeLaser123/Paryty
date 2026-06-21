@@ -7,10 +7,11 @@
  * @module pages/AgentsPage
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react';
+import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import {
   Plus, Trash2, Copy, Check, Server, Clock, Link2,
   Monitor, Terminal, Loader2, ChevronRight, ChevronLeft,
+  ArrowUp, ArrowDown,
 } from 'lucide-react';
 import { useToastStore } from '../stores/toastStore';
 import { getRestClient } from '../api/rest';
@@ -18,6 +19,9 @@ import { AgentDetailModal } from '../components/agent/AgentDetailModal';
 import type { AgentManagementInfo, CreateAgentResponse, AgentPairingStatus } from '../types/agent';
 
 // ─── Agent Table ─────────────────────────────────────────────────────
+
+type SortKey = 'name' | 'status' | 'os' | 'location' | 'last_seen';
+type SortDir = 'asc' | 'desc';
 
 function AgentTable({
   agents,
@@ -28,6 +32,48 @@ function AgentTable({
   onDelete: (id: string) => void;
   onSelect: (agent: AgentManagementInfo) => void;
 }) {
+  const [sortKey, setSortKey] = useState<SortKey>('name');
+  const [sortDir, setSortDir] = useState<SortDir>('asc');
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortKey(key);
+      setSortDir('asc');
+    }
+  };
+
+  const sortedAgents = useMemo(() => {
+    const sorted = [...agents].sort((a, b) => {
+      let cmp = 0;
+      switch (sortKey) {
+        case 'name':
+          cmp = (a.name || '').localeCompare(b.name || '');
+          break;
+        case 'status':
+          cmp = (a.status || '').localeCompare(b.status || '');
+          break;
+        case 'os':
+          cmp = `${a.os}/${a.arch}`.localeCompare(`${b.os}/${b.arch}`);
+          break;
+        case 'location':
+          cmp = (a.location || a.cloud_provider || '').localeCompare(b.location || b.cloud_provider || '');
+          break;
+        case 'last_seen':
+          cmp = new Date(a.last_seen).getTime() - new Date(b.last_seen).getTime();
+          break;
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return sorted;
+  }, [agents, sortKey, sortDir]);
+
+  const SortIcon = ({ columnKey }: { columnKey: SortKey }) => {
+    if (sortKey !== columnKey) return null;
+    return sortDir === 'asc' ? <ArrowUp size={10} /> : <ArrowDown size={10} />;
+  };
+
   if (agents.length === 0) {
     return (
       <div style={{
@@ -55,18 +101,18 @@ function AgentTable({
         <table className="aef-table">
           <thead>
             <tr>
-              <th>Name</th>
+              <th onClick={() => handleSort('name')} style={{ cursor: 'pointer' }}>Name <SortIcon columnKey="name" /></th>
               <th>Agent ID</th>
-              <th>Status</th>
+              <th onClick={() => handleSort('status')} style={{ cursor: 'pointer' }}>Status <SortIcon columnKey="status" /></th>
               <th>Paired Cluster Agent</th>
-              <th>OS</th>
-              <th>Location</th>
-              <th>Last Seen</th>
+              <th onClick={() => handleSort('os')} style={{ cursor: 'pointer' }}>OS <SortIcon columnKey="os" /></th>
+              <th onClick={() => handleSort('location')} style={{ cursor: 'pointer' }}>Location <SortIcon columnKey="location" /></th>
+              <th onClick={() => handleSort('last_seen')} style={{ cursor: 'pointer' }}>Last Seen <SortIcon columnKey="last_seen" /></th>
               <th style={{ textAlign: 'right' }}>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {agents.map((agent) => (
+            {sortedAgents.map((agent) => (
               <tr
                 key={agent.agent_id}
                 onClick={() => onSelect(agent)}
@@ -289,19 +335,21 @@ function SetupCommandModal({
   }, [agentId, client, addToast]);
 
   const buildLinuxCommand = (): string => {
+    const baseUrl = window.location.origin;
     const parts = [`--key ${apiKey}`];
     if (clusterAgentId.trim()) {
       parts.push(`--cluster-agent-id ${clusterAgentId.trim()}`);
     }
-    return `curl -fsSL https://get.paryty.io/agent.sh | sudo sh -s -- ${parts.join(' ')}`;
+    return `curl -fsSL "${baseUrl}/api/v1/agents/download/linux?key=${apiKey}" -o paryty-agent && chmod +x paryty-agent && ./paryty-agent ${parts.join(' ')}`;
   };
 
   const buildWindowsCommand = (): string => {
+    const baseUrl = window.location.origin;
     const parts = [`-Key "${apiKey}"`];
     if (clusterAgentId.trim()) {
       parts.push(`-ClusterAgentId "${clusterAgentId.trim()}"`);
     }
-    return `Invoke-WebRequest -Uri "https://get.paryty.io/agent.ps1" -OutFile "install-agent.ps1"; .\\install-agent.ps1 ${parts.join(' ')}`;
+    return `Invoke-WebRequest -Uri "${baseUrl}/api/v1/agents/download/windows?key=${apiKey}" -OutFile "paryty-agent.exe"; .\\paryty-agent.exe ${parts.join(' ')}`;
   };
 
   // ── Step indicators ────────────────────────────────────────────

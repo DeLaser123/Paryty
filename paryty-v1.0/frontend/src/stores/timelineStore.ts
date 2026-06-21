@@ -58,6 +58,38 @@ const DEFAULT_CONFIG = {
   stepMs: 1000,
 };
 
+// ─── Bookmark localStorage persistence ──────────────────────────
+
+const BOOKMARKS_STORAGE_KEY = 'paryty:timeline:bookmarks';
+
+function loadPersistedBookmarks(): TimelineBookmark[] {
+  try {
+    const raw = localStorage.getItem(BOOKMARKS_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    // Validate each entry has the required shape
+    return parsed.filter(
+      (b): b is TimelineBookmark =>
+        typeof b === 'object' &&
+        b !== null &&
+        typeof b.id === 'string' &&
+        typeof b.timestamp === 'string' &&
+        typeof b.label === 'string',
+    );
+  } catch {
+    return [];
+  }
+}
+
+function persistBookmarks(bookmarks: TimelineBookmark[]): void {
+  try {
+    localStorage.setItem(BOOKMARKS_STORAGE_KEY, JSON.stringify(bookmarks));
+  } catch {
+    // localStorage quota exceeded or unavailable — silently ignore
+  }
+}
+
 export const useTimelineStore = create<TimelineStore>()((set, get) => ({
   snapshots: [],
   position: {
@@ -89,8 +121,8 @@ export const useTimelineStore = create<TimelineStore>()((set, get) => ({
   disableDiff: () =>
     set({ diffMode: false, diffFrom: null, diffTo: null }),
 
-  // Bookmarks defaults
-  bookmarks: [],
+  // Bookmarks defaults (loaded from localStorage)
+  bookmarks: loadPersistedBookmarks(),
 
   /**
    * Add a bookmark at the current playback position.
@@ -230,6 +262,16 @@ export const useTimelineStore = create<TimelineStore>()((set, get) => ({
     URL.revokeObjectURL(url);
   },
 }));
+
+// ─── Persist bookmarks to localStorage on change ───────────────
+
+let prevBookmarks = useTimelineStore.getState().bookmarks;
+useTimelineStore.subscribe((state) => {
+  if (state.bookmarks !== prevBookmarks) {
+    prevBookmarks = state.bookmarks;
+    persistBookmarks(state.bookmarks);
+  }
+});
 
 // ─── Helpers ───────────────────────────────────────────────────
 

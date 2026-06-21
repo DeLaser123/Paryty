@@ -45,9 +45,10 @@ func (h *TimelineHandler) HandleCreateSnapshot(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	tenant := r.URL.Query().Get("tenant_id")
-	if tenant == "" {
-		tenant = "default"
+	tenant, err := tenantFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "missing tenant context")
+		return
 	}
 
 	snapshot, err := h.snapshots.CreateSnapshot(r.Context(), tenant)
@@ -74,9 +75,10 @@ func (h *TimelineHandler) HandleListSnapshots(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	tenant := r.URL.Query().Get("tenant_id")
-	if tenant == "" {
-		tenant = "default"
+	tenant, err := tenantFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "missing tenant context")
+		return
 	}
 
 	// Get the nearest snapshot to now to verify the store is working.
@@ -116,9 +118,10 @@ func (h *TimelineHandler) HandleDiffSnapshots(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	tenant := r.URL.Query().Get("tenant_id")
-	if tenant == "" {
-		tenant = "default"
+	tenant, err := tenantFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "missing tenant context")
+		return
 	}
 
 	fromStr := r.URL.Query().Get("from")
@@ -165,9 +168,10 @@ func (h *TimelineHandler) HandleStartReplay(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	tenant := r.URL.Query().Get("tenant_id")
-	if tenant == "" {
-		tenant = "default"
+	tenant, err := tenantFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "missing tenant context")
+		return
 	}
 
 	startStr := r.URL.Query().Get("start")
@@ -249,9 +253,10 @@ func (h *TimelineHandler) HandleExportReport(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	tenant := r.URL.Query().Get("tenant_id")
-	if tenant == "" {
-		tenant = "default"
+	tenant, err := tenantFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "missing tenant context")
+		return
 	}
 
 	format := r.URL.Query().Get("format")

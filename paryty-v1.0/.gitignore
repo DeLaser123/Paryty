@@ -52,3 +52,4 @@ temp/
 tmp_*.json
 tmp_*.py
 *_keys.py
+*.pem

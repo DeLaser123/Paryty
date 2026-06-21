@@ -35,6 +35,7 @@ type TwinConfig struct {
 	EnabledCollectors        []string          `json:"enabled_collectors"`
 	CollectionIntervalSeconds int32            `json:"collection_interval_seconds"`
 	SamplingRate             float32           `json:"sampling_rate"`
+	Abilities                []string          `json:"abilities,omitempty"`
 }
 
 // TwinManager handles CRUD operations for Paryty Twins.
@@ -48,14 +49,37 @@ func NewTwinManager(db *pgxpool.Pool) *TwinManager {
 }
 
 // CreateTwin creates a new Paryty Twin for a tenant.
-func (m *TwinManager) CreateTwin(ctx context.Context, tenantID, name, description string, config TwinConfig) (*Twin, error) {
+func (m *TwinManager) CreateTwin(ctx context.Context, tenantID, name, description string, config TwinConfig, abilities []string) (*Twin, error) {
 	if name == "" {
 		return nil, fmt.Errorf("twin name is required")
+	}
+
+	// Check name uniqueness within tenant.
+	var existingCount int
+	err := m.db.QueryRow(ctx, `
+		SELECT COUNT(*) FROM paryty_twins
+		WHERE tenant_id = $1 AND name = $2 AND deleted_at IS NULL
+	`, tenantID, name).Scan(&existingCount)
+	if err != nil {
+		return nil, fmt.Errorf("check twin name uniqueness: %w", err)
+	}
+	if existingCount > 0 {
+		return nil, fmt.Errorf("twin with name %q already exists", name)
+	}
+
+	// Store abilities in both config (for backward compat) and dedicated column.
+	if len(abilities) > 0 {
+		config.Abilities = abilities
 	}
 
 	configJSON, err := json.Marshal(config)
 	if err != nil {
 		return nil, fmt.Errorf("marshal twin config: %w", err)
+	}
+
+	abilitiesJSON, _ := json.Marshal(abilities)
+	if abilitiesJSON == nil {
+		abilitiesJSON = []byte("[]")
 	}
 
 	twin := &Twin{
@@ -70,9 +94,9 @@ func (m *TwinManager) CreateTwin(ctx context.Context, tenantID, name, descriptio
 	}
 
 	_, err = m.db.Exec(ctx, `
-		INSERT INTO paryty_twins (id, tenant_id, name, description, status, twin_config)
-		VALUES ($1, $2, $3, $4, 'pending', $5)
-	`, twin.ID, tenantID, name, description, configJSON)
+		INSERT INTO paryty_twins (id, tenant_id, name, description, status, twin_config, abilities)
+		VALUES ($1, $2, $3, $4, 'pending', $5, $6)
+	`, twin.ID, tenantID, name, description, configJSON, abilitiesJSON)
 	if err != nil {
 		return nil, fmt.Errorf("insert twin: %w", err)
 	}
@@ -266,4 +290,24 @@ func (m *TwinManager) GetTwinConfigForAgent(ctx context.Context, twinID, agentID
 	}
 
 	return &cfg, nil
+}
+
+// GetTwinAbilities returns the abilities for a twin from the dedicated abilities column.
+func (m *TwinManager) GetTwinAbilities(ctx context.Context, twinID string) ([]string, error) {
+	var abilitiesJSON []byte
+	err := m.db.QueryRow(ctx, `
+		SELECT COALESCE(abilities, '[]') FROM paryty_twins
+		WHERE id = $1 AND deleted_at IS NULL
+	`, twinID).Scan(&abilitiesJSON)
+	if err != nil {
+		if err == pgx.ErrNoRows {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("get twin abilities: %w", err)
+	}
+	var abilities []string
+	if err := json.Unmarshal(abilitiesJSON, &abilities); err != nil {
+		return []string{}, nil
+	}
+	return abilities, nil
 }

@@ -1,0 +1,38 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 07: Metrics Monitoring
+Date: 2026-06-20
+Tools Used: semgrep, npm audit, Go vet
+================================================================================
+
+VULN-07-001 | Metric Data Exposure via WebSocket (Shared)
+Severity: MEDIUM
+Pre-state:  websocket.go with no origin check
+Post-state: Same (unchanged)
+Evidence:   See VULN-03-002. The metrics WebSocket channel streams live metric
+            data to connected clients.
+Analysis:   Without origin validation on the WebSocket upgrader, any website can
+            open a connection and receive live telemetry data if the user has a
+            valid session cookie. Metrics data may contain sensitive infrastructure
+            information (hostnames, IPs, process lists, network topology).
+Reproduce:  Same as VULN-03-002.
+Mitigation: Add CheckOrigin function to WebSocket upgrader.
+
+VULN-07-002 | Time Range Selector Uses Client-Side Input Without Server Validation
+Severity: LOW
+Pre-state:  MetricsView uses datetime-local inputs for time range
+Post-state: TimeRangeSelector with preset buttons (1h/6h/24h/7d/30d)
+Evidence:   Code review of MetricsView.tsx + TimeRangeSelector.tsx
+Analysis:   Time range values are passed to the metrics API. If the backend doesn't
+            validate/limit the time range, an attacker could request extremely
+            large time windows (e.g., 10 years) causing excessive database load.
+Reproduce:  POST /api/v1/metrics/query with absurd from/to timestamps
+Mitigation: Backend should enforce maximum time window (e.g., 90 days) and
+            reject requests exceeding the limit.
+
+VULN-07-003 | npm Shared Vulnerabilities
+Severity: HIGH
+See VULN-01-004 (undici) and VULN-01-003 (esbuild)
+
+================================================================================
+SUMMARY: 3 findings (0 CRITICAL, 1 HIGH shared, 1 MEDIUM, 1 LOW)
+================================================================================

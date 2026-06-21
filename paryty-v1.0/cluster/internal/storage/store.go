@@ -725,6 +725,31 @@ func (s *Store) StoreNetworkEvents(ctx context.Context, tenant string, batch *pb
 
 // ---- Aggregation Operations (Warm Tier) ----
 
+// StoreAnomaly stores an anomaly detection result in warm storage (QuestDB).
+// Protected by the warm-tier circuit breaker. The tenant parameter overwrites
+// anomaly.TenantID to enforce tenant isolation at the storage boundary.
+func (s *Store) StoreAnomaly(ctx context.Context, tenant string, anomaly *warm.AnomalyRecord) error {
+	if !s.warmBreaker.Allow() {
+		return fmt.Errorf("warm store circuit breaker open")
+	}
+
+	// Enforce tenant isolation: the authenticated tenant overrides the record.
+	anomaly.TenantID = tenant
+
+	if err := s.warm.StoreAnomaly(ctx, anomaly); err != nil {
+		s.warmBreaker.RecordFailure()
+		slog.Error("warm store anomaly write failed",
+			"error", err,
+			"tenant", tenant,
+			"anomaly_id", anomaly.ID,
+		)
+		return err
+	}
+
+	s.warmBreaker.RecordSuccess()
+	return nil
+}
+
 // StoreAggregatedMetric writes an aggregated metric to warm storage (QuestDB).
 // Protected by the warm-tier circuit breaker.
 func (s *Store) StoreAggregatedMetric(ctx context.Context, tenant string, m *models.AggregatedMetric) error {

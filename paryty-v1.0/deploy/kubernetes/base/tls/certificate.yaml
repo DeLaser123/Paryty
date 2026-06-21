@@ -1,0 +1,13 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: paryty-tls
+  namespace: paryty
+spec:
+  secretName: paryty-tls-certs
+  issuerRef:
+    name: paryty-letsencrypt-prod
+    kind: ClusterIssuer
+  dnsNames:
+  - "*.paryty.io"
+  - paryty.io

@@ -1,0 +1,83 @@
+# Paryty gitleaks Configuration
+#
+# This configuration:
+#  - Whitelists test JWT tokens in test files
+#  - Whitelists the pk_live_ prefix constant in controlplane/apikey.go
+#  - Sets allowlist.stopwords for known dev-only values
+#
+# Usage: gitleaks protect --config .gitleaks.toml --staged --verbose
+
+title = "Paryty gitleaks config"
+
+# =============================================================================
+# Allowlist: known-safe patterns that should never trigger a leak alert.
+# =============================================================================
+[allowlist]
+  description = "Paryty allowlist — test credentials, dev constants, and stopwords"
+
+  # ----- Path allowlisting -----
+  # Files matching these regexes are entirely skipped.
+  # Test files may contain dummy JWTs and test API keys.
+  [[allowlist.paths]]
+    description = "Test JWT tokens in Go test files"
+    regex = '''_test\.go$'''
+
+  [[allowlist.paths]]
+    description = "Test JWT tokens in TypeScript test files"
+    regex = '''\.test\.ts$'''
+
+  [[allowlist.paths]]
+    description = "Test credentials in Python test files"
+    regex = '''test_.*\.py$'''
+
+  # ----- Regex allowlisting -----
+  # Secrets matching these regexes are allowed even outside test files.
+  [[allowlist.regexes]]
+    description = "pk_live_ prefix constant in API key manager"
+    regex = '''const rawKeyPrefix = "pk_live_"'''
+
+  # ----- Stopwords -----
+  # If any of these strings appear on the same line as a detected secret,
+  # gitleaks suppresses the finding.
+  [[allowlist.stopwords]]
+    description = "Dev-only / example / placeholder values"
+    strings = [
+      "EXAMPLE",
+      "example",
+      "dev-only",
+      "devonly",
+      "PLACEHOLDER",
+      "placeholder",
+      "changeit",
+      "change-me",
+      "your-secret-here",
+      "unused",
+      "fake",
+      "dummy",
+      "test-only",
+      "NOOP",
+      "noop",
+      "gitleaks:allow",
+    ]
+
+# =============================================================================
+# Custom rules — tighten detection beyond gitleaks built-in defaults.
+# =============================================================================
+
+# Prevent credentials in yaml config files that are not .example patterns.
+[[rules]]
+  id = "paryty-yaml-secret"
+  description = "Secrets in non-example YAML config files"
+  regex = '''(?i)(?:password|secret|token|apikey|api.key|key\s*[:=])\s*["']\S+["']'''
+  path = '''(?i)(config|settings|\.yaml|\.yml)$'''
+  [[rules.allowlist]]
+    paths = ['''(?i)example\.ya?ml$''', '''(?i)\.example\.ya?ml$''']
+
+# Prevent generic high-entropy strings in non-test Go files containing common key patterns.
+[[rules]]
+  id = "paryty-go-credentials"
+  description = "Hardcoded credentials in Go source files"
+  regex = '''(?i)(?:password|secret|token|apikey|access_key)\s*[:=]\s*["'][^"']{8,}["']'''
+  path = '''\.go$'''
+  [[rules.allowlist]]
+    paths = ['''(?i)_test\.go$''']

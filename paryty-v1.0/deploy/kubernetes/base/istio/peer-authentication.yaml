@@ -1,0 +1,38 @@
+# Paryty PeerAuthentication — Enforce strict mTLS
+#
+# Policy: Namespace-wide STRICT mTLS for all workloads in the paryty
+# namespace. No plaintext mesh traffic is permitted — every pod-to-pod
+# connection must be mutually authenticated via Istio-provisioned
+# certificates.
+#
+# Excluded ports:
+#   - 8080 (HTTP health checks on /healthz, /readyz)
+#   - 9090 (metrics scraping)
+# Both are excluded because Kubernetes probes and the Paryty agent
+# scraper (Rust, non-Istio) must reach these without mTLS. All other
+# application ports (gRPC, REST, WebSocket) are covered by STRICT.
+#
+# References:
+#   - Istio auto-mTLS with security.istio.io/v1beta1
+#   - Architecture rule: "mTLS for cluster-to-cluster and
+#     cluster-to-intelligence communication" (architecture.md)
+
+apiVersion: security.istio.io/v1beta1
+kind: PeerAuthentication
+metadata:
+  name: paryty-mtls-strict
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  mtls:
+    mode: STRICT
+  portLevelMtls:
+    # Health checks — must be reachable by kubelet without mTLS
+    "8080":
+      mode: PERMISSIVE
+    # Metrics scraping — agent SDK collects from outside the mesh
+    "9090":
+      mode: PERMISSIVE

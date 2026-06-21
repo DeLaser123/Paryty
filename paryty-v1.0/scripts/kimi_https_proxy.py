@@ -13,7 +13,7 @@ import datetime
 
 LISTEN_PORT = 443
 NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
-NVIDIA_KEY = "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"
+NVIDIA_KEY = os.environ.get("NVIDIA_API_KEY", "YOUR_NVIDIA_API_KEY")
 CERT_DIR = os.path.dirname(os.path.abspath(__file__))
 CERT_FILE = os.path.join(CERT_DIR, "moonshot_cert.pem")
 KEY_FILE = os.path.join(CERT_DIR, "moonshot_key.pem")

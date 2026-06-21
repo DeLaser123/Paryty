@@ -400,7 +400,7 @@ func TestNewIngestionGRPCAdapter_NilRateLimiter(t *testing.T) {
 	}
 
 	// isRateLimited should return nil when rate limiter is nil
-	if err := adapter.isRateLimited("any-agent"); err != nil {
+	if err := adapter.isRateLimited(context.Background()); err != nil {
 		t.Errorf("expected nil error with nil rate limiter, got %v", err)
 	}
 }

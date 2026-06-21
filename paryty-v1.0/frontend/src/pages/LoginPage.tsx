@@ -263,6 +263,18 @@ export function LoginPage() {
               <LogIn size={14} />
               {isSubmitting ? 'Signing in…' : 'Sign in'}
             </button>
+
+            {/* Forgot password link */}
+            <div style={{ textAlign: 'center', marginTop: 'var(--aef-space-1)' }}>
+              <Link
+                to="/forgot-password"
+                className="auth-link"
+                style={{ fontSize: 10, color: 'var(--aef-text-secondary)' }}
+                data-testid="login-forgot-password"
+              >
+                Forgot password?
+              </Link>
+            </div>
           </form>
 
           {/* Footer link */}

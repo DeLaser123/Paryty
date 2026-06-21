@@ -47,6 +47,7 @@ import { ProtectedRoute } from './components/auth/ProtectedRoute';
 import { PublicRoute } from './components/auth/PublicRoute';
 import { PlanGate } from './components/auth/PlanGate';
 import { ToastContainer } from './components/common/Toast';
+import { SessionTimeoutWarning } from './components/auth/SessionTimeoutWarning';
 import { LazyRoute } from './components/common/LazyRoute';
 import { lazyWithRetry } from './utils/lazyWithRetry';
 import { DashboardPage } from './components/dashboard/DashboardPage';
@@ -57,6 +58,7 @@ const TopologyCanvas = lazyWithRetry(() =>
 );
 const MetricsView = lazyWithRetry(() => import('./components/MetricsView'));
 const AlertView = lazyWithRetry(() => import('./components/AlertView'));
+const TimelineView = lazyWithRetry(() => import('./components/TimelineView'));
 const IntelView = lazyWithRetry(() => import('./components/intel/IntelView'));
 
 // Lazy-loaded auth + settings pages
@@ -88,8 +90,9 @@ function App() {
             <Route path="/" element={<DashboardPage />} />
             <Route path="/topology" element={<LazyRoute><TopologyCanvas /></LazyRoute>} />
             <Route path="/metrics" element={<LazyRoute><MetricsView /></LazyRoute>} />
+            <Route path="/timeline" element={<LazyRoute><TimelineView /></LazyRoute>} />
             <Route path="/alerts" element={<LazyRoute><AlertView /></LazyRoute>} />
-            <Route path="/settings" element={<ProtectedRoute requiredRoles={['admin']}><LazyRoute><SettingsPage /></LazyRoute></ProtectedRoute>} />
+            <Route path="/settings" element={<LazyRoute><SettingsPage /></LazyRoute>} />
             <Route path="/agents" element={<LazyRoute><AgentsPage /></LazyRoute>} />
             <Route path="/twins/new" element={<Navigate to="/?new=true" replace />} />
             <Route path="/twins/:id/edit" element={<LazyRoute><TwinEditPage /></LazyRoute>} />
@@ -107,6 +110,8 @@ function App() {
       </AuthProvider>
       {/* Toast notifications — rendered outside all layout for correct stacking */}
       <ToastContainer />
+      {/* Session timeout warning — appears 2min before token expiry */}
+      <SessionTimeoutWarning />
     </Router>
   );
 }

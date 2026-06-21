@@ -43,7 +43,7 @@ interface AlertsState {
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   fetchAlerts: () => Promise<void>;
-  acknowledgeAlert: (alertId: string) => void;
+  acknowledgeAlert: (alertId: string) => Promise<void>;
   silenceAlert: (alertId: string, durationMs: number) => void;
 
   // Computed
@@ -115,11 +115,18 @@ export const useAlertsStore = create<AlertsState>()((set, get) => ({
   },
 
   /**
-   * Acknowledge an alert. Updates alert state locally
-   * and adds to history. In production, this also calls
-   * the REST API: POST /api/v1/alerts/:id/acknowledge
+   * Acknowledge an alert. Calls the backend API (POST /api/v1/alerts/:id/acknowledge)
+   * and then updates local state on success. On failure, the alert state is unchanged.
    */
-  acknowledgeAlert: (alertId) =>
+  acknowledgeAlert: async (alertId: string) => {
+    try {
+      const client = getRestClient();
+      await client.acknowledgeAlert(alertId);
+    } catch {
+      set({ error: 'Failed to acknowledge alert' });
+      return;
+    }
+
     set((state) => {
       const alert = state.alerts.find((a) => a.id === alertId);
       if (!alert) return state;
@@ -135,8 +142,10 @@ export const useAlertsStore = create<AlertsState>()((set, get) => ({
         alertHistory: [acknowledged, ...state.alertHistory].slice(0, 100),
         selectedAlert:
           state.selectedAlert?.id === alertId ? null : state.selectedAlert,
+        error: null,
       };
-    }),
+    });
+  },
 
   /**
    * Silence an alert for a specified duration.

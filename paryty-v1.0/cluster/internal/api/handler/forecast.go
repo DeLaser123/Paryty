@@ -146,11 +146,9 @@ func (h *ForecastHandler) HandleGetModelAccuracy(w http.ResponseWriter, r *http.
 		return
 	}
 
-	serviceID := r.URL.Query().Get("service_id")
 	metricName := r.URL.Query().Get("metric")
 
 	req := &intelligence.ModelAccuracyRequest{
-		ServiceID:  serviceID,
 		MetricName: metricName,
 	}
 
@@ -182,7 +180,6 @@ func (h *ForecastHandler) HandleRetrainModels(w http.ResponseWriter, r *http.Req
 	}
 
 	req := &intelligence.RetrainRequest{
-		ServiceID:  body.ServiceID,
 		MetricName: body.MetricName,
 		Force:      body.Force,
 	}

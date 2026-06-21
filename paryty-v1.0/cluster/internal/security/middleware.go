@@ -1,6 +1,8 @@
 package security
 
 import (
+	"crypto/tls"
+	"fmt"
 	"net/http"
 	"sync"
 	"time"
@@ -8,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/paryty/paryty-v1.0/cluster/internal/plan"
+	"github.com/redis/go-redis/v9"
 )
 
 // =============================================================================
@@ -266,8 +269,8 @@ func SecurityHeaders() gin.HandlerFunc {
 		c.Header("Referrer-Policy", "strict-origin-when-cross-origin")
 		c.Header("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		c.Header("Content-Security-Policy",
-			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
-			"img-src 'self' data: blob:; connect-src 'self' ws: wss:; "+
+			"default-src 'self'; script-src 'self'; style-src 'self'; "+
+			"img-src 'self' data: blob:; connect-src 'self' wss: https:; "+
 			"font-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
 		c.Next()
 	}
@@ -408,4 +411,57 @@ func (l *tokenBucketLimiter) tryConsume(key string) (time.Duration, bool) {
 		retryAfter = 100 * time.Millisecond
 	}
 	return retryAfter, false
+}
+
+// =============================================================================
+// Distributed Rate Limit Middleware (Dragonfly/Redis)
+// =============================================================================
+
+// TenantRateLimiter enforces per-tenant request rate limits using Dragonfly.
+type TenantRateLimiter struct {
+	client *redis.Client
+	limit  int
+	window time.Duration
+}
+
+// NewTenantRateLimiter creates a distributed rate limiter backed by Dragonfly.
+// The redisAddr should point to the Dragonfly instance (Redis-compatible).
+// limit is the maximum number of requests per tenant within the given window.
+// tlsCfg, when non-nil, enables TLS for the Dragonfly connection.
+func NewTenantRateLimiter(redisAddr string, limit int, window time.Duration, tlsCfg *tls.Config) *TenantRateLimiter {
+	client := redis.NewClient(&redis.Options{Addr: redisAddr, TLSConfig: tlsCfg})
+	return &TenantRateLimiter{client: client, limit: limit, window: window}
+}
+
+// Middleware returns a Gin middleware that enforces per-tenant rate limits
+// using a sliding-window counter stored in Dragonfly. The tenant ID is read
+// from plan.CtxTenantID (set by the JWT auth middleware). Requests without
+// a tenant context pass through uncounted (fail-open for health probes etc.).
+//
+// Rate limit exceeded responses use HTTP 429 with a structured error body.
+func (rl *TenantRateLimiter) Middleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		tenant, ok := c.Get(string(plan.CtxTenantID))
+		if !ok {
+			c.Next()
+			return
+		}
+		key := fmt.Sprintf("ratelimit:%s:%d", tenant, time.Now().UnixMilli()/rl.window.Milliseconds())
+		count, err := rl.client.Incr(c.Request.Context(), key).Result()
+		if err != nil {
+			c.Next() // fail-open on Dragonfly errors
+			return
+		}
+		if count == 1 {
+			rl.client.Expire(c.Request.Context(), key, rl.window) //nolint:errcheck
+		}
+		if int(count) > rl.limit {
+			c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
+				"error":   "RATE_LIMITED",
+				"message": fmt.Sprintf("rate limit exceeded: %d requests per %s", rl.limit, rl.window),
+			})
+			return
+		}
+		c.Next()
+	}
 }

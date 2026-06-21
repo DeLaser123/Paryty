@@ -30,6 +30,7 @@ import {
   Sparkles,
   AlertTriangle,
   RefreshCw,
+  Loader2,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { useAuthStore } from '../stores/authStore';
@@ -382,9 +383,11 @@ interface StepConfirmProps {
   name: string;
   tenantName: string;
   planName: string;
+  termsAccepted: boolean;
+  setTermsAccepted: (v: boolean) => void;
 }
 
-function StepConfirm({ email, name, tenantName, planName }: StepConfirmProps) {
+function StepConfirm({ email, name, tenantName, planName, termsAccepted, setTermsAccepted }: StepConfirmProps) {
   const rows: { label: string; value: string; icon: React.ReactNode }[] = [
     { label: 'Email', value: email || '—', icon: <Mail size={12} /> },
     { label: 'Name', value: name || '—', icon: <User size={12} /> },
@@ -427,6 +430,50 @@ function StepConfirm({ email, name, tenantName, planName }: StepConfirmProps) {
           </div>
         ))}
       </div>
+
+      {/* Terms / Privacy consent checkbox */}
+      <label
+        data-testid="terms-checkbox"
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 'var(--aef-space-2)',
+          marginTop: 'var(--aef-space-3)',
+          cursor: 'pointer',
+          animation: `aef-panel-enter var(--aef-duration-standard) var(--aef-ease-settle) 240ms both`,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={termsAccepted}
+          onChange={(e) => setTermsAccepted(e.target.checked)}
+          style={{
+            marginTop: 2,
+            width: 14,
+            height: 14,
+            accentColor: 'var(--aef-text-primary)',
+            cursor: 'pointer',
+          }}
+          data-testid="terms-checkbox-input"
+        />
+        <span
+          style={{
+            fontFamily: 'var(--aef-font-body)',
+            fontSize: 10,
+            color: 'var(--aef-text-secondary)',
+            lineHeight: 1.5,
+          }}
+        >
+          I agree to the{' '}
+          <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--aef-text-primary)', textDecoration: 'underline' }}>
+            Terms of Service
+          </a>{' '}
+          and{' '}
+          <a href="/privacy" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--aef-text-primary)', textDecoration: 'underline' }}>
+            Privacy Policy
+          </a>.
+        </span>
+      </label>
     </div>
   );
 }
@@ -458,6 +505,7 @@ export function RegisterPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [focusedField, setFocusedField] = useState<HintField>(null);
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   // 150ms debounce on blur to avoid flicker when tabbing between fields
   const blurTimer = useRef<ReturnType<typeof setTimeout>>();
@@ -487,6 +535,8 @@ export function RegisterPage() {
         return email.trim().length > 0 && isPasswordValid(checkPassword(password)) && name.trim().length > 0 && tenantName.trim().length > 0;
       case 1:
         return selectedPlan.length > 0;
+      case 2:
+        return termsAccepted;
       default:
         return true;
     }
@@ -637,6 +687,7 @@ export function RegisterPage() {
                 <StepConfirm
                   email={email} name={name} tenantName={tenantName}
                   planName={plans.find((p) => p.name === selectedPlan)?.displayName ?? selectedPlan}
+                  termsAccepted={termsAccepted} setTermsAccepted={setTermsAccepted}
                 />
               )}
             </div>
@@ -665,7 +716,7 @@ export function RegisterPage() {
                   data-testid="register-submit"
                 >
                   {isSubmitting ? (
-                    'Creating…'
+                    <><Loader2 size={14} style={{ animation: 'aef-spin 0.8s linear infinite' }} /> Creating…</>
                   ) : isLastStep ? (
                     <><UserPlus size={14} /> Create Workspace</>
                   ) : (

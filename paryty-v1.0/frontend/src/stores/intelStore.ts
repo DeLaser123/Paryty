@@ -21,6 +21,7 @@ import type {
 } from '../types/intel';
 import { SEVERITY_ORDER } from '../types/intel';
 import { getRestClient } from '../api/rest';
+import { useToastStore } from './toastStore';
 
 // ─── Constants ──────────────────────────────────────────────────
 
@@ -249,6 +250,25 @@ export const useIntelStore = create<IntelState>()((set, get) => ({
       const known = state.knownMetrics.includes(event.metric_name)
         ? state.knownMetrics
         : [...state.knownMetrics, event.metric_name];
+
+      // Show toast for new anomalies
+      if (unique.length > 0) {
+        const highestSeverity = unique.reduce(
+          (max, a) => (SEVERITY_ORDER[a.severity] < SEVERITY_ORDER[max] ? a.severity : max),
+          unique[0].severity,
+        );
+        const toastType = highestSeverity === 'critical' || highestSeverity === 'high'
+          ? 'error'
+          : highestSeverity === 'medium'
+            ? 'warning'
+            : 'info';
+        useToastStore.getState().addToast({
+          type: toastType,
+          message: `${unique.length} new anomal${unique.length === 1 ? 'y' : 'ies'} detected on ${event.metric_name} (highest: ${highestSeverity})`,
+          duration: 8000,
+        });
+      }
+
       return { anomalies: merged, dataReceived: true, knownMetrics: known };
     });
   },

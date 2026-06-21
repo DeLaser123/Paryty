@@ -1,0 +1,80 @@
+# Paryty Self-Monitoring Alert Rules
+# These rules are loaded by the alert engine at startup.
+# Metrics follow the naming convention: paryty.{component}.{subsystem}.{metric_name}
+rules:
+  - name: "Cluster Ingestion Down"
+    metric: "paryty.cluster.ingestion.active_streams"
+    condition: "== 0"
+    duration: "2m"
+    severity: critical
+    message: "No active gRPC ingestion streams for 2+ minutes"
+
+  - name: "High Query Latency"
+    metric: "paryty.cluster.query.duration_ms"
+    condition: "p99 > 500"
+    duration: "5m"
+    severity: warning
+    message: "Query p99 latency exceeds 500ms"
+
+  - name: "Storage Hot Tier Slow"
+    metric: "paryty.cluster.storage.hot.read.duration_ms"
+    condition: "p99 > 10"
+    duration: "2m"
+    severity: warning
+    message: "Dragonfly read latency above 10ms"
+
+  - name: "Pipeline Processing Lag"
+    metric: "paryty.cluster.pipeline.queue.depth"
+    condition: "> 1000"
+    duration: "5m"
+    severity: critical
+    message: "Pipeline queue depth exceeds 1000 messages"
+
+  - name: "Agent Disconnected"
+    metric: "paryty.agent.grpc.connected"
+    condition: "== 0"
+    duration: "1m"
+    severity: critical
+    message: "Agent gRPC connection lost"
+
+  - name: "Dead Letter Queue Growing"
+    metric: "paryty.pipeline.dead_letter.size"
+    condition: "> 100"
+    duration: "5m"
+    severity: critical
+    message: "Dead letter queue exceeded 100 messages — data loss occurring"
+
+  - name: "Intelligence Drift Detected"
+    metric: "paryty.intelligence.drift.score"
+    condition: "> 0.7"
+    duration: "10m"
+    severity: warning
+    message: "ML model drift score exceeds 0.7 — retraining recommended"
+
+  - name: "Frontend Error Rate High"
+    metric: "paryty.frontend.errors.total"
+    condition: "increase(5m) > 10"
+    duration: "5m"
+    severity: warning
+    message: "Frontend error rate elevated — check browser console"
+
+  - name: "Ingestion Error Rate"
+    metric: "paryty.cluster.ingestion.errors.total"
+    condition: "increase(5m) > 50"
+    duration: "5m"
+    severity: warning
+    message: "Ingestion error rate elevated — check agent connectivity"
+
+  - name: "Cold Storage Write Latency"
+    metric: "paryty.cluster.storage.cold.write.duration_ms"
+    condition: "p99 > 5000"
+    duration: "10m"
+    severity: warning
+    message: "SeaweedFS write latency exceeds 5s"
+
+  - name: "Agent Memory Saturation"
+    metric: "paryty.agent.memory.bytes"
+    condition: "> 41943040"
+    duration: "5m"
+    severity: warning
+    message: "Agent memory usage exceeds 40MB — possible leak"

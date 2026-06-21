@@ -1,0 +1,102 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 09: AI Intelligence
+Date: 2026-06-20
+Tools Used: pip-audit, bandit, semgrep Python, Go vet
+================================================================================
+
+VULN-09-001 | aiohttp 3.13.3 — 22 CVEs (DoS, Credential Leaks, Header Injection)
+Severity: CRITICAL
+Pre-state:  intelligence/ depends on aiohttp 3.13.3
+Post-state: Same
+Evidence:   pip-audit found 22 CVEs in aiohttp 3.13.3:
+            CVE-2026-34515 (NTLM hash leak on Windows), CVE-2026-34513 (DNS cache
+            memory exhaustion), CVE-2026-34516 (multipart header memory exhaustion),
+            CVE-2026-34517 (multipart field memory exhaustion), CVE-2026-34519
+            (response reason header injection), CVE-2026-34518 (Cookie/Proxy-Auth
+            leak on redirect), CVE-2026-34520 (null byte in C parser), CVE-2026-34525
+            (multiple Host headers), CVE-2026-22815 (header/trailer memory exhaustion),
+            CVE-2026-34514 (content_type header injection), CVE-2026-34993 (CookieJar
+            arbitrary code execution), CVE-2026-47265 (cross-origin cookie leak),
+            CVE-2026-54273 (pipelined request memory exhaustion), CVE-2026-54279
+            (host-only cookie loss), CVE-2026-54277 (max_line_size bypass),
+            CVE-2026-50269 (multipart header injection), CVE-2026-54276 (digest
+            auth cross-origin leak), CVE-2026-54278 (zip bomb via compression),
+            CVE-2026-54280 (payload resource leak), CVE-2026-54274 (WebSocket
+            frame memory exhaustion), CVE-2026-54275 (TLS SNI bypass)
+            Fix version: 3.14.1+
+Reproduce:  python -m pip_audit --format json | grep aiohttp
+Mitigation: `pip install aiohttp>=3.14.1`
+
+VULN-09-002 | cryptography 46.0.5 — 5 CVEs (Name Constraint Bypass, Buffer Overflow)
+Severity: HIGH
+Evidence:   pip-audit: PYSEC-2026-35 (DNS name constraint bypass — CVE-2026-34073),
+            PYSEC-2026-36 (buffer overflow via non-contiguous buffer — CVE-2026-39892),
+            GHSA-537c-gmf6-5ccf (bundled OpenSSL vulnerability)
+            Fix version: 48.0.1
+Reproduce:  pip-audit shows cryptography 46.0.5 with 5 vulns
+Mitigation: `pip install cryptography>=48.0.1`
+
+VULN-09-003 | idna 3.11 — DoS via ReDoS
+Severity: MEDIUM
+Evidence:   pip-audit: PYSEC-2026-215 / CVE-2026-45409 — specially crafted
+            domain names cause excessive CPU consumption
+            Fix version: 3.15
+Reproduce:  python -c "import idna; idna.encode('\u0660' * 100000)"
+Mitigation: `pip install idna>=3.15`
+
+VULN-09-004 | pyasn1 0.6.2 — DoS via Recursion Bomb
+Severity: MEDIUM
+Evidence:   pip-audit: CVE-2026-30922 — deeply nested ASN.1 data causes
+            RecursionError/OOM. 10KB payload can crash the service.
+            Fix version: 0.6.3
+Reproduce:  python -c "from pyasn1.codec.ber import decoder; decoder.decode(b'\x30\x80'*50000)"
+Mitigation: `pip install pyasn1>=0.6.3`
+
+VULN-09-005 | python-dotenv 1.0.1 — Symlink File Overwrite
+Severity: MEDIUM
+Evidence:   pip-audit: CVE-2026-28684 — set_key()/unset_key() follow symlinks
+            when rewriting .env files, allowing local file overwrite.
+            Fix version: 1.2.2
+Reproduce:  Create symlink from .env to /etc/passwd, call set_key()
+Mitigation: `pip install python-dotenv>=1.2.2`
+
+VULN-09-006 | requests 2.32.5 — Predictable Temp File Names
+Severity: LOW
+Evidence:   pip-audit: CVE-2026-25645 — extract_zipped_paths() uses predictable
+            temp filenames. Local attacker can pre-create malicious files.
+            Fix version: 2.33.0
+            NOTE: This only affects direct calls to extract_zipped_paths(),
+            not standard requests usage.
+Reproduce:  N/A — Paryty intelligence likely doesn't use extract_zipped_paths()
+Mitigation: `pip install requests>=2.33.0`
+
+VULN-09-007 | urllib3 2.6.3 — 3 CVEs (Resource Exhaustion, Header Leak)
+Severity: MEDIUM
+Evidence:   pip-audit: PYSEC-2026-142 (decompression resource exhaustion —
+            CVE-2026-44432), PYSEC-2026-141 (cross-origin redirect header leak —
+            CVE-2026-44431)
+            Fix version: 2.7.0
+Reproduce:  pip-audit shows urllib3 2.6.3 with 3 vulns
+Mitigation: `pip install urllib3>=2.7.0`
+
+VULN-09-008 | starlette 1.3.1 Incompatibility (Dependency Conflict)
+Severity: LOW
+Evidence:   pip install semgrep upgraded starlette from 0.40.x to 1.3.1.
+            fastapi 0.115.6 requires starlette<0.42.0,>=0.40.0, but 1.3.1 is
+            installed. This may cause runtime failures.
+Reproduce:  pip check (after semgrep installation)
+Mitigation: `pip install 'starlette>=0.40.0,<0.42.0'` or upgrade fastapi.
+
+VULN-09-009 | Go Vet — Pre-Existing Intelligence Handler Issues
+Severity: LOW
+Evidence:   go vet: internal/api/handler/anomaly.go:59 unknown field Window
+            internal/api/handler/forecast.go:153 unknown field ServiceID
+            These are the gRPC handler files that bridge Go to Python intel.
+            Pre-existing struct field mismatches — not security-critical but
+            may indicate broken API contracts.
+Reproduce:  go vet ./internal/api/handler/...
+
+================================================================================
+SUMMARY: 9 findings (1 CRITICAL, 1 HIGH, 4 MEDIUM, 3 LOW)
+The Python intelligence layer has the most dependency vulnerabilities.
+================================================================================

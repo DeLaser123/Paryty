@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"errors"
+	"net"
 	"net/mail"
 	"sync"
 	"time"
@@ -14,8 +15,10 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/plan"
 	parytyv1 "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 	"github.com/paryty/paryty-v1.0/cluster/internal/security"
+	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/peer"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -25,15 +28,20 @@ import (
 // It handles user registration, login, token refresh, logout, and token validation.
 type AuthHandler struct {
 	parytyv1.UnimplementedAuthServiceServer
-	tm        *TokenManager
-	db        *pgxpool.Pool
-	engine    *plan.PlanEngine
-	loginRate *loginRateLimiter
-	logger    *zap.Logger
-	audit     *security.AuditLogger
+	tm                    *TokenManager
+	db                    *pgxpool.Pool
+	engine                *plan.PlanEngine
+	loginRate             *loginRateLimiter
+	registerRate          *registerRateLimiter
+	distributedLoginRL    *DistributedRateLimiter
+	distributedRegisterRL *DistributedRateLimiter
+	logger                *zap.Logger
+	audit                 *security.AuditLogger
 }
 
 // loginRateLimiter provides per-email brute-force protection for login.
+// NOTE: In-memory only — does not work across multiple pods. For multi-pod
+// deployments, use the Dragonfly-backed TenantRateLimiter middleware instead.
 // The attempts map is bounded: when it reaches maxTrackedKeys, expired
 // entries are pruned; if still full, the new attempt is allowed but not
 // tracked (fail-open for availability — bcrypt cost still throttles).
@@ -129,19 +137,101 @@ func (l *loginRateLimiter) recordSuccess(key string) {
 	delete(l.attempts, key)
 }
 
+// registerRateLimiter provides per-IP brute-force protection for registration.
+// NOTE: In-memory only — does not work across multiple pods. For multi-pod
+// deployments, use the Dragonfly-backed TenantRateLimiter middleware instead.
+// Limits to 5 registrations per hour per IP address.
+type registerRateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string]*registerWindow
+}
+
+type registerWindow struct {
+	count        int
+	windowEndsAt time.Time
+}
+
+const (
+	maxRegisterAttempts = 5
+	registerWindowSize  = 1 * time.Hour
+	maxTrackedRegisterIPs = 100_000
+)
+
+func newRegisterRateLimiter() *registerRateLimiter {
+	return &registerRateLimiter{
+		attempts: make(map[string]*registerWindow),
+	}
+}
+
+// allow returns true if a registration attempt is permitted for the given IP.
+func (r *registerRateLimiter) allow(ip string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	now := time.Now()
+	w, tracked := r.attempts[ip]
+
+	// Expired window → start fresh.
+	if tracked && now.After(w.windowEndsAt) {
+		delete(r.attempts, ip)
+		tracked = false
+	}
+
+	if !tracked {
+		if len(r.attempts) >= maxTrackedRegisterIPs {
+			r.pruneExpiredLocked(now)
+		}
+		if len(r.attempts) >= maxTrackedRegisterIPs {
+			return true // fail-open
+		}
+		r.attempts[ip] = &registerWindow{
+			count:        1,
+			windowEndsAt: now.Add(registerWindowSize),
+		}
+		return true
+	}
+
+	w.count++
+	if w.count > maxRegisterAttempts {
+		return false
+	}
+	return true
+}
+
+// pruneExpiredLocked removes entries whose window has passed.
+func (r *registerRateLimiter) pruneExpiredLocked(now time.Time) {
+	for key, w := range r.attempts {
+		if now.After(w.windowEndsAt) {
+			delete(r.attempts, key)
+		}
+	}
+}
+
 // NewAuthHandler creates a new AuthHandler. A nil logger is replaced with
 // zap.NewNop() so callers without logging configured remain safe.
-func NewAuthHandler(tm *TokenManager, db *pgxpool.Pool, engine *plan.PlanEngine, logger *zap.Logger, audit *security.AuditLogger) *AuthHandler {
+//
+// redisClient, when non-nil, enables Dragonfly-backed distributed rate
+// limiting that works across multiple pods. When nil (or when Dragonfly is
+// unreachable) the in-memory rate limiters handle brute-force protection.
+func NewAuthHandler(tm *TokenManager, db *pgxpool.Pool, engine *plan.PlanEngine, logger *zap.Logger, audit *security.AuditLogger, redisClient *redis.Client) *AuthHandler {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+	var distributedLoginRL, distributedRegisterRL *DistributedRateLimiter
+	if redisClient != nil {
+		distributedLoginRL = NewDistributedRateLimiter(redisClient)
+		distributedRegisterRL = NewDistributedRateLimiter(redisClient)
+	}
 	return &AuthHandler{
-		tm:        tm,
-		db:        db,
-		engine:    engine,
-		loginRate: newLoginRateLimiter(),
-		logger:    logger,
-		audit:     audit,
+		tm:                    tm,
+		db:                    db,
+		engine:                engine,
+		loginRate:             newLoginRateLimiter(),
+		registerRate:          newRegisterRateLimiter(),
+		distributedLoginRL:    distributedLoginRL,
+		distributedRegisterRL: distributedRegisterRL,
+		logger:                logger,
+		audit:                 audit,
 	}
 }
 
@@ -167,6 +257,24 @@ func (h *AuthHandler) Register(ctx context.Context, req *parytyv1.RegisterReques
 	}
 	if !h.engine.ValidatePlanName(planName) {
 		return nil, status.Errorf(codes.InvalidArgument, "plan %q is not available for signup", planName)
+	}
+
+	// Brute-force protection: distributed rate limit (Dragonfly-backed)
+	// takes precedence. Falls through to the in-memory limiter when
+	// Dragonfly is unreachable (fail-open). IP is extracted from gRPC peer.
+	clientIP := extractClientIP(ctx)
+	if clientIP != "" {
+		if h.distributedRegisterRL != nil {
+			key := RegisterKey(clientIP)
+			if allowed, retryAfter := h.distributedRegisterRL.Allow(ctx, key, maxRegisterAttempts, registerWindowSize); !allowed {
+				return nil, status.Errorf(codes.ResourceExhausted,
+					"too many registration attempts; please try again in %.0f seconds", retryAfter.Seconds())
+			}
+		}
+		if !h.registerRate.allow(clientIP) {
+			return nil, status.Error(codes.ResourceExhausted,
+				"too many registration attempts; please try again later")
+		}
 	}
 
 	// Hash password.
@@ -204,6 +312,17 @@ func (h *AuthHandler) Register(ctx context.Context, req *parytyv1.RegisterReques
 			return nil, status.Error(codes.AlreadyExists, "a user with this email already exists in this tenant")
 		}
 		return nil, status.Errorf(codes.Internal, "create user: %v", err)
+	}
+
+	// FEAT-08: Generate email verification token (non-fatal on failure).
+	verifyToken := generateTokenID()
+	verifyHash := HashRefreshToken(verifyToken)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO email_verifications (user_id, token_hash, expires_at)
+		VALUES ($1, $2, NOW() + INTERVAL '24 hours')
+	`, userID, verifyHash); err != nil {
+		h.logger.Warn("failed to create email verification token",
+			zap.String("user_id", userID), zap.Error(err))
 	}
 
 	// Commit transaction before plan assignment — keeps plan assignment outside
@@ -258,7 +377,19 @@ func (h *AuthHandler) Login(ctx context.Context, req *parytyv1.LoginRequest) (*p
 		return nil, status.Error(codes.InvalidArgument, "email and password are required")
 	}
 
-	// Brute-force protection: rate-limit login attempts per email.
+	// Brute-force protection: distributed rate limit (Dragonfly-backed)
+	// takes precedence and works across multiple pods. Falls through to
+	// the in-memory limiter when Dragonfly is unreachable (fail-open).
+	if h.distributedLoginRL != nil {
+		key := LoginKey(req.Email)
+		if allowed, retryAfter := h.distributedLoginRL.Allow(ctx, key, maxLoginFailures, loginWindowSize); !allowed {
+			return nil, status.Errorf(codes.ResourceExhausted,
+				"too many login attempts; please try again in %.0f seconds", retryAfter.Seconds())
+		}
+	}
+
+	// In-memory rate limit as secondary backstop (or primary when Dragonfly
+	// is not configured).
 	if !h.loginRate.allow(req.Email) {
 		return nil, status.Error(codes.ResourceExhausted,
 			"too many login attempts; please try again later")
@@ -460,7 +591,9 @@ func (h *AuthHandler) RefreshToken(ctx context.Context, req *parytyv1.RefreshTok
 	}, nil
 }
 
-// Logout revokes the given refresh token.
+// Logout revokes ALL active refresh tokens for the user (entire token family).
+// This ensures that if an attacker holds a different token from the same
+// rotation family, it is also invalidated on logout.
 func (h *AuthHandler) Logout(ctx context.Context, req *parytyv1.LogoutRequest) (*emptypb.Empty, error) {
 	if req.RefreshToken == "" {
 		return nil, status.Error(codes.InvalidArgument, "refresh_token is required")
@@ -475,7 +608,8 @@ func (h *AuthHandler) Logout(ctx context.Context, req *parytyv1.LogoutRequest) (
 		WHERE token_hash = $1 AND revoked_at IS NULL
 	`, hash).Scan(&userID, &tenantID)
 	if err != nil {
-		// Token not found or already revoked — still attempt to revoke.
+		// Token not found or already revoked — still attempt to revoke
+		// the presented token in case it was not yet expired.
 		_, _ = h.db.Exec(ctx, `
 			UPDATE refresh_tokens SET revoked_at = now()
 			WHERE token_hash = $1 AND revoked_at IS NULL
@@ -483,18 +617,20 @@ func (h *AuthHandler) Logout(ctx context.Context, req *parytyv1.LogoutRequest) (
 		return &emptypb.Empty{}, nil
 	}
 
+	// Revoke ALL active refresh tokens for this user (entire token family).
+	// Logout should terminate every session, not just the current one.
 	_, err = h.db.Exec(ctx, `
 		UPDATE refresh_tokens SET revoked_at = now()
-		WHERE token_hash = $1 AND revoked_at IS NULL
-	`, hash)
+		WHERE user_id = $1 AND revoked_at IS NULL
+	`, userID)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "revoke refresh token: %v", err)
+		return nil, status.Errorf(codes.Internal, "revoke refresh tokens: %v", err)
 	}
 
 	// Audit log successful logout.
 	if h.audit != nil {
 		h.audit.LogAction(tenantID, userID, "auth.logout", "user", userID, map[string]interface{}{
-			"token_hash": hash[:8] + "...", // Truncated for security
+			"token_family_revoked": true,
 		})
 	}
 
@@ -591,4 +727,20 @@ func buildPermissions(role string) map[string]bool {
 func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// extractClientIP extracts the client IP address from a gRPC context's peer
+// info. Returns an empty string if the peer info is unavailable (e.g., in
+// tests or when called from a non-gRPC context like a REST adapter that
+// already has the IP from c.ClientIP()).
+func extractClientIP(ctx context.Context) string {
+	p, ok := peer.FromContext(ctx)
+	if !ok {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(p.Addr.String())
+	if err != nil {
+		return p.Addr.String()
+	}
+	return host
 }

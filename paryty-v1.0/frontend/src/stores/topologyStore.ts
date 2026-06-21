@@ -14,6 +14,10 @@ export interface ViewportState {
 
 export type LayoutMode = 'force' | 'hierarchical' | 'radial';
 
+// ─── Health Filter ─────────────────────────────────────────────
+
+export type HealthFilter = 'all' | 'healthy' | 'degraded' | 'unhealthy';
+
 // ─── Cluster Navigation ────────────────────────────────────────
 
 export interface ClusterBreadcrumb {
@@ -31,6 +35,7 @@ interface TopologyState {
   hoveredNode: TopologyNode | null;
   searchQuery: string;
   filterTypes: string[];
+  filterHealth: HealthFilter;
   isLoading: boolean;
   error: string | null;
   version: string | null;
@@ -61,6 +66,7 @@ interface TopologyState {
   hoverNode: (node: TopologyNode | null) => void;
   setSearchQuery: (query: string) => void;
   setFilterTypes: (types: string[]) => void;
+  setFilterHealth: (health: HealthFilter) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
   zoomToNode: (nodeId: string) => void;
@@ -88,6 +94,7 @@ export const useTopologyStore = create<TopologyState>()(
     hoveredNode: null,
     searchQuery: '',
     filterTypes: [],
+    filterHealth: 'all',
     isLoading: false,
     error: null,
     version: null,
@@ -178,6 +185,7 @@ export const useTopologyStore = create<TopologyState>()(
     hoverNode: (node) => set({ hoveredNode: node }),
     setSearchQuery: (query) => set({ searchQuery: query }),
     setFilterTypes: (types) => set({ filterTypes: types }),
+    setFilterHealth: (health) => set({ filterHealth: health }),
     setLoading: (loading) => set({ isLoading: loading }),
     setError: (error) => set({ error }),
 
@@ -203,7 +211,7 @@ export const useTopologyStore = create<TopologyState>()(
 
     // Existing computed (preserved)
     filteredNodes: () => {
-      const { topology, searchQuery, filterTypes } = get();
+      const { topology, searchQuery, filterTypes, filterHealth } = get();
       if (!topology) return [];
       let nodes = topology.nodes;
       if (searchQuery) {
@@ -217,6 +225,9 @@ export const useTopologyStore = create<TopologyState>()(
       }
       if (filterTypes.length > 0) {
         nodes = nodes.filter((n) => filterTypes.includes(n.type));
+      }
+      if (filterHealth !== 'all') {
+        nodes = nodes.filter((n) => n.status === filterHealth);
       }
       return nodes;
     },

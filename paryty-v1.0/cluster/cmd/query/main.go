@@ -6,12 +6,14 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"flag"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -19,6 +21,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"github.com/redis/go-redis/v9"
 	api "github.com/paryty/paryty-v1.0/cluster/internal/api/query"
 	"github.com/paryty/paryty-v1.0/cluster/internal/auth"
 	"github.com/paryty/paryty-v1.0/cluster/internal/config"
@@ -29,6 +33,10 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
 	"github.com/paryty/paryty-v1.0/cluster/internal/twin"
 	"go.uber.org/zap"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 )
 
 // planLimitsToMap converts plan.LimitSet to a flat map for JSON serialization.
@@ -127,6 +135,39 @@ func composeMiddleware(mws ...gin.HandlerFunc) gin.HandlerFunc {
 	}
 }
 
+// initOTelMeter initializes the OpenTelemetry meter with a Prometheus exporter
+// for Paryty self-monitoring (dogfooding principle). Returns the meter and a
+// shutdown function. On failure, returns a no-op meter from the default provider.
+func initOTelMeter(logger *zap.Logger) (metric.Meter, func()) {
+	exporter, err := prometheus.New()
+	if err != nil {
+		logger.Warn("Failed to create OTel prometheus exporter", zap.Error(err))
+		return otel.Meter("paryty"), func() {}
+	}
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+	otel.SetMeterProvider(provider)
+	return otel.Meter("paryty.cluster.query"), func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			logger.Warn("OTel meter provider shutdown error", zap.Error(err))
+		}
+	}
+}
+
+// otelMiddleware records golden signal metrics (latency, traffic, errors) for
+// every HTTP request processed by the query service.
+func otelMiddleware(queryDuration metric.Float64Histogram, queryRequests metric.Int64Counter, queryErrors metric.Int64Counter) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		start := time.Now()
+		c.Next()
+		duration := float64(time.Since(start).Milliseconds())
+		queryDuration.Record(c.Request.Context(), duration)
+		queryRequests.Add(c.Request.Context(), 1)
+		if c.Writer.Status() >= 400 {
+			queryErrors.Add(c.Request.Context(), 1)
+		}
+	}
+}
+
 func main() {
 	// Determine config path: flag > env > default
 	configPath := "configs/cluster/cluster.yaml"
@@ -135,7 +176,21 @@ func main() {
 	}
 	flag.StringVar(&configPath, "config", configPath, "Path to YAML configuration file")
 	queryPort := flag.String("port", "8080", "Query service HTTP port")
+	tlsCertFileFlag := flag.String("tls-cert", "", "Path to TLS certificate PEM file")
+	tlsKeyFileFlag := flag.String("tls-key", "", "Path to TLS private key PEM file")
 	flag.Parse()
+
+	// TLS env vars act as defaults when CLI flags are not set
+	tlsCertFile := *tlsCertFileFlag
+	tlsKeyFile := *tlsKeyFileFlag
+	if tlsCertFile == "" {
+		tlsCertFile = os.Getenv("PARYTY_TLS_CERT_FILE")
+	}
+	if tlsKeyFile == "" {
+		tlsKeyFile = os.Getenv("PARYTY_TLS_KEY_FILE")
+	}
+
+	isDevMode := os.Getenv("PARYTY_DEV_MODE") == "true"
 
 	// Initialize logger
 	logger, err := zap.NewProduction()
@@ -144,6 +199,47 @@ func main() {
 		os.Exit(1)
 	}
 	defer logger.Sync() //nolint:errcheck
+
+	// ── TLS Configuration ────────────────────────────────────────────────
+	// Production deployments MUST use TLS. Dev mode allows plaintext.
+	// Set PARYTY_REQUIRE_TLS=true to enforce at startup (fatal if certs missing).
+	requireTLS := os.Getenv("PARYTY_REQUIRE_TLS") == "true" ||
+		os.Getenv("PARYTY_DEV_MODE") != "true"
+
+	if requireTLS && (tlsCertFile == "" || tlsKeyFile == "") {
+		logger.Fatal("TLS is required in production mode. Provide --tls-cert and --tls-key flags, " +
+			"or set PARYTY_TLS_CERT_FILE and PARYTY_TLS_KEY_FILE environment variables. " +
+			"Override with PARYTY_REQUIRE_TLS=false for development only.")
+	}
+
+	var httpTLSConfig *tls.Config
+	if tlsCertFile != "" && tlsKeyFile != "" {
+		cert, certErr := tls.LoadX509KeyPair(tlsCertFile, tlsKeyFile)
+		if certErr != nil {
+			logger.Fatal("Failed to load TLS certificate", zap.Error(certErr))
+		}
+		httpTLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+			MinVersion:   tls.VersionTLS13,
+		}
+	}
+
+	// Create TLS config for Dragonfly client connections.
+	// Production enforces TLS 1.3; dev mode allows plaintext.
+	var dragonflyTLS *tls.Config
+	if !isDevMode {
+		dragonflyTLS = &tls.Config{MinVersion: tls.VersionTLS13}
+	}
+
+	// Determine PostgreSQL SSL mode: production requires encryption;
+	// dev mode disables it for local setups. Environment override wins.
+	dbSSLMode := "require"
+	if isDevMode {
+		dbSSLMode = "disable"
+	}
+	if v := os.Getenv("PARYTY_DB_SSLMODE"); v != "" {
+		dbSSLMode = v
+	}
 
 	// Load configuration
 	cfg, err := config.Load(configPath)
@@ -156,11 +252,24 @@ func main() {
 
 	logger.Info("Starting Paryty Query Service", zap.String("port", *queryPort))
 
+	// Initialize OpenTelemetry meter with Prometheus exporter for self-monitoring.
+	meter, otelShutdown := initOTelMeter(logger)
+	defer otelShutdown()
+
+	queryDuration, _ := meter.Float64Histogram("paryty.cluster.query.duration_ms",
+		metric.WithDescription("Query request duration in milliseconds"))
+	queryRequests, _ := meter.Int64Counter("paryty.cluster.query.requests.total",
+		metric.WithDescription("Total query requests"))
+	queryErrors, _ := meter.Int64Counter("paryty.cluster.query.errors.total",
+		metric.WithDescription("Total query errors"))
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	// Initialize storage tier orchestrator
-	store, err := storage.New(ctx, cfg.ToStorageConfig())
+	storageCfg := cfg.ToStorageConfig()
+	storageCfg.Warm.SSLMode = dbSSLMode
+	store, err := storage.New(ctx, storageCfg)
 	if err != nil {
 		logger.Fatal("Failed to initialize storage", zap.Error(err))
 	}
@@ -188,6 +297,11 @@ func main() {
 				_, err := conn.Exec(ctx, "SELECT set_config('app.current_tenant_id', '', false)")
 				return err
 			}
+			poolCfg.MaxConns = int32(runtime.NumCPU() * 4)
+			poolCfg.MinConns = int32(runtime.NumCPU())
+			poolCfg.MaxConnLifetime = 1 * time.Hour
+			poolCfg.MaxConnIdleTime = 30 * time.Minute
+			poolCfg.HealthCheckPeriod = 30 * time.Second
 			cpPool, err = pgxpool.NewWithConfig(ctx, poolCfg)
 			if err != nil {
 				logger.Warn("Failed to create control plane pool, API key management disabled",
@@ -196,6 +310,10 @@ func main() {
 				cpPool = nil
 			} else {
 				defer cpPool.Close()
+				// Run versioned migrations before idempotent DDL.
+				if err := controlplane.RunMigrations(ctx, cpPool, "migrations"); err != nil {
+					logger.Warn("Migration runner error (non-fatal)", zap.Error(err))
+				}
 				// Ensure control plane tables exist.
 				if err := controlplane.EnsureTables(ctx, cpPool); err != nil {
 					logger.Warn("Failed to ensure control plane tables", zap.Error(err))
@@ -211,6 +329,41 @@ func main() {
 	} else {
 		logger.Warn("DATABASE_URL not set -- API key management disabled")
 	}
+
+	// ── Read Replica PostgreSQL Pool ────────────────────────────────────
+	// Offloads read-heavy queries (GET topology, metrics, traces) from the
+	// primary control plane pool. Optional; falls back to primary if unset.
+	var cpReplicaPool *pgxpool.Pool
+	if replicaDSN := os.Getenv("DATABASE_REPLICA_URL"); replicaDSN != "" {
+		replicaCfg, cfgErr := pgxpool.ParseConfig(replicaDSN)
+		if cfgErr != nil {
+			logger.Warn("Failed to parse DATABASE_REPLICA_URL, read replica disabled",
+				zap.Error(cfgErr),
+			)
+		} else {
+			// Replica pool uses the same RLS GUC initialization as primary.
+			replicaCfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+				_, err := conn.Exec(ctx, "SELECT set_config('app.current_tenant_id', '', false)")
+				return err
+			}
+			replicaCfg.MaxConns = int32(runtime.NumCPU() * 8)
+			replicaCfg.MinConns = int32(runtime.NumCPU())
+			replicaCfg.MaxConnLifetime = 1 * time.Hour
+			replicaCfg.MaxConnIdleTime = 30 * time.Minute
+			replicaCfg.HealthCheckPeriod = 30 * time.Second
+			cpReplicaPool, err = pgxpool.NewWithConfig(ctx, replicaCfg)
+			if err != nil {
+				logger.Warn("Failed to create read replica pool",
+					zap.Error(err),
+				)
+				cpReplicaPool = nil
+			} else {
+				defer cpReplicaPool.Close()
+				logger.Info("Read replica PostgreSQL pool connected")
+			}
+		}
+	}
+
 	// Load plan definitions from YAML configuration.
 	plansPath := "configs/cluster/plans.yaml"
 	if v := os.Getenv("PARYTY_PLANS_PATH"); v != "" {
@@ -268,8 +421,9 @@ func main() {
 
 	// Initialize query cache (backed by Dragonfly)
 	cacheCfg := api.CacheConfig{
-		Addr: cfg.Cluster.Storage.Hot.Addr,
-		TTL:  cfg.TTLDuration(),
+		Addr:      cfg.Cluster.Storage.Hot.Addr,
+		TTL:       cfg.TTLDuration(),
+		TLSConfig: dragonflyTLS,
 	}
 	queryCache := api.NewQueryCache(cacheCfg, logger)
 	defer queryCache.Close()
@@ -280,6 +434,7 @@ func main() {
 
 	// Wire control plane DB and plan engine into the query service for admin routes.
 	queryService.SetDB(cpPool)
+	queryService.SetReadPool(cpReplicaPool)
 	queryService.SetPlanEngine(planEngine)
 
 	// Parse the shared origin allow-list once — it governs both HTTP CORS
@@ -305,8 +460,14 @@ func main() {
 
 	// Create Gin router
 	router := gin.New()
+	// Disable trusted proxy detection — ClientIP() will use net.RemoteAddr
+	// instead of trusting X-Forwarded-For headers, preventing IP spoofing
+	// that would bypass rate limiting. Deployments behind a reverse proxy
+	// must configure specific trusted proxies instead.
+	router.SetTrustedProxies(nil)
 	router.Use(security.SecurityHeaders())
 	router.Use(gin.Recovery())
+	router.Use(otelMiddleware(queryDuration, queryRequests, queryErrors))
 	// Phase 8 middleware chain: SecurityHeaders → Recovery → CORS → RequestID → AuditBegin
 	router.Use(security.CORS(corsOrigins...))
 	router.Use(security.RequestID())
@@ -323,9 +484,12 @@ func main() {
 	router.GET("/health", healthHandler)
 	router.GET("/api/v1/health", healthHandler)
 
-	// NOTE: query data routes (topology/metrics/traces/agents/timeline) are
-	// registered on the JWT-protected group below — they expose tenant data
-	// and MUST never be mounted on an unauthenticated group.
+	// Prometheus metrics endpoint for self-monitoring (dogfooding).
+	router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+
+	// Agent binary downloads — public route, authenticated via API key query parameter.
+	// Agents don't have JWT tokens; the download handler validates the API key internally.
+	router.GET("/api/v1/agents/download/:platform", queryService.DownloadAgentBinary)
 
 	// â”€â”€ Phase 8: Register Auth Routes (PostgreSQL-backed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -333,14 +497,31 @@ func main() {
 	public := router.Group("/api/v1/auth")
 
 	if cpPool != nil {
-		authHandler := auth.NewAuthHandler(tokenManager, cpPool, planEngine, logger, auditLogger)
+		// Obtain the Dragonfly Redis client for distributed rate limiting
+		// across multiple query-service pods. Falls back to in-memory rate
+		// limiting when Dragonfly is unreachable or not configured.
+		var redisClientForAuth *redis.Client
+		if store != nil {
+			redisClientForAuth = store.HotStore().RDB()
+		}
+		authHandler := auth.NewAuthHandler(tokenManager, cpPool, planEngine, logger, auditLogger, redisClientForAuth)
 		cookieSecure := os.Getenv("PARYTY_DEV_MODE") != "true"
+		// Production safeguard: if cookieSecure is false (dev mode), warn loudly.
+		// Secure cookies are silently rejected by browsers over HTTP, so dev mode
+		// must disable Secure. Production deployments MUST NOT set PARYTY_DEV_MODE=true.
+		if !cookieSecure {
+			logger.Warn("PARYTY_DEV_MODE=true — auth cookies sent WITHOUT Secure flag. DO NOT use in production.")
+		}
 		authAdapter := auth.NewAuthRESTAdapter(authHandler, cpPool, planEngine, cookieSecure)
 
 		public.POST("/register", authAdapter.Register)
 		public.POST("/login", authAdapter.Login)
 		public.POST("/refresh", authAdapter.RefreshToken)
 		public.POST("/logout", authAdapter.Logout)
+		public.POST("/change-password", authAdapter.ChangePassword)
+		public.POST("/verify-email", authAdapter.VerifyEmail)
+		public.POST("/forgot-password", authAdapter.ForgotPassword)
+		public.POST("/reset-password", authAdapter.ResetPassword)
 		logger.Info("Auth REST routes wired with PostgreSQL backend")
 	} else {
 		logger.Warn("No PostgreSQL control plane â€” auth routes not available")
@@ -354,6 +535,18 @@ func main() {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "PostgreSQL control plane not configured"})
 		})
 		public.POST("/logout", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "PostgreSQL control plane not configured"})
+		})
+		public.POST("/change-password", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "PostgreSQL control plane not configured"})
+		})
+		public.POST("/verify-email", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "PostgreSQL control plane not configured"})
+		})
+		public.POST("/forgot-password", func(c *gin.Context) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "PostgreSQL control plane not configured"})
+		})
+		public.POST("/reset-password", func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"message": "PostgreSQL control plane not configured"})
 		})
 	}
@@ -392,6 +585,16 @@ func main() {
 	authd.Use(plan.GinPlanInfoInjector(planEngine))
 	authd.Use(queryService.RLSTenantMiddleware())
 	authd.Use(security.RateLimit(security.DefaultRateLimitConfig()))
+
+	// Distributed per-tenant rate limiter backed by Dragonfly (Redis-compatible).
+	// Supplements the in-memory token bucket with a distributed sliding-window
+	// counter for multi-pod deployments.
+	redisAddr := os.Getenv("PARYTY_DRAGONFLY_ADDR")
+	if redisAddr == "" {
+		redisAddr = "localhost:6379"
+	}
+	tenantRL := security.NewTenantRateLimiter(redisAddr, 100, 1*time.Minute, dragonflyTLS)
+	authd.Use(tenantRL.Middleware())
 
 	// Register query data routes (rest.go) on the JWT-protected group.
 	// Tenant scope for every handler is derived from JWT claims.
@@ -578,10 +781,12 @@ func main() {
 	router.GET("/ws", auth.GinJWTAuthFlexible(tokenManager), wsHandler.HandleWebSocket)
 
 	// Wire SSE endpoints — same flexible auth (EventSource cannot set headers).
+	// RLS middleware ensures tenant isolation for SSE streams.
 	sseAuth := auth.GinJWTAuthFlexible(tokenManager)
-	router.GET("/api/v1/timeline/replay", sseAuth, sseHandler.HandleTimeline)
-	router.GET("/api/v1/metrics/:agent_id/stream", sseAuth, sseHandler.HandleMetricsStream)
-	router.GET("/api/v1/events/stream", sseAuth, sseHandler.HandleEventStream)
+	sseRLS := composeMiddleware(sseAuth, queryService.RLSTenantMiddleware())
+	router.GET("/api/v1/timeline/replay", sseRLS, sseHandler.HandleTimeline)
+	router.GET("/api/v1/metrics/:agent_id/stream", sseRLS, sseHandler.HandleMetricsStream)
+	router.GET("/api/v1/events/stream", sseRLS, sseHandler.HandleEventStream)
 
 	// Wire intelligence API handlers (Phase 6) — JWT-protected and plan-gated:
 	// intelligence results are tenant-confidential and a paid-plan feature.
@@ -597,6 +802,7 @@ func main() {
 		intelGroup := router.Group("/api/v1")
 		intelGroup.Use(auth.GinJWTAuth(tokenManager))
 		intelGroup.Use(plan.GinPlanInfoInjector(planEngine))
+		intelGroup.Use(queryService.RLSTenantMiddleware())
 		intelGroup.Use(plan.GinFeatureGate(planEngine, "paryty_intel"))
 		intelHandlers.RegisterRoutes(intelGroup)
 		defer intelHandlers.Close()
@@ -629,18 +835,28 @@ func main() {
 
 	// Create HTTP server
 	srv := &http.Server{
-		Addr:         fmt.Sprintf(":%s", *queryPort),
+		Addr:         ":" + *queryPort,
 		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+	if httpTLSConfig != nil {
+		srv.TLSConfig = httpTLSConfig
 	}
 
 	// Start server in background
 	go func() {
-		logger.Info("Query service listening", zap.String("address", srv.Addr))
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Fatal("Failed to start server", zap.Error(err))
+		if httpTLSConfig != nil {
+			logger.Info("Starting HTTPS server", zap.String("addr", srv.Addr))
+			if err := srv.ListenAndServeTLS(tlsCertFile, tlsKeyFile); err != nil && err != http.ErrServerClosed {
+				logger.Fatal("Failed to start HTTPS server", zap.Error(err))
+			}
+		} else {
+			logger.Warn("Starting HTTP server WITHOUT TLS — dev mode only. Use --tls-cert and --tls-key for production.")
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Fatal("Failed to start server", zap.Error(err))
+			}
 		}
 	}()
 

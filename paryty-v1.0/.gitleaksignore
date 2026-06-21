@@ -1,0 +1,5 @@
+# Test JWT token — uses HS256 with local dev secret. Not a production credential.
+paryty-v1.0/cluster/tests/integration/auth_flow_test.go:jwt:192
+# Dev-only TLS certificate private key for local HTTPS proxy testing.
+# Generate with: openssl req -x509 -newkey rsa:2048 -keyout moonshot_key.pem -out moonshot_cert.pem -days 365 -nodes -subj "/CN=localhost"
+paryty-v1.0/scripts/moonshot_key.pem:private-key:1

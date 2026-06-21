@@ -1,4 +1,4 @@
-﻿# Paryty Development Docker Compose
+# Paryty Development Docker Compose
 # Usage: podman-compose --env-file ../../.env.dev -f docker-compose.dev.yaml up -d
 version: '3.8'
 
@@ -38,6 +38,23 @@ services:
       - 0.0.0.0:33145
       - --advertise-rpc-addr
       - redpanda:33145
+    # ---- TLS (production) ----
+    # Uncomment and add to the command list above to enable TLS on Redpanda:
+    #   - --kafka-addr
+    #   - SSL://0.0.0.0:9093
+    #   - --advertise-kafka-addr
+    #   - SSL://redpanda:9093
+    #   - --pandaproxy-addr
+    #   - TLS://0.0.0.0:8083
+    #   - --advertise-pandaproxy-addr
+    #   - TLS://redpanda:8083
+    # Also mount TLS certs:
+    #   volumes:
+    #     - ./certs/redpanda:/etc/redpanda/certs:ro
+    #   environment:
+    #     - REDPANDA_RPK_TLS_KEY=/etc/redpanda/certs/redpanda.key
+    #     - REDPANDA_RPK_TLS_CERT=/etc/redpanda/certs/redpanda.crt
+    #     - REDPANDA_RPK_TLS_TRUSTSTORE=/etc/redpanda/certs/ca.crt
     volumes:
       - /mnt/d/ParytyData/redpanda:/var/lib/redpanda/data
     healthcheck:
@@ -51,6 +68,16 @@ services:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
     ports:
       - "${PARYTY_PORT_DRAGONFLY}:6379"
+    # ---- TLS (production) ----
+    # To enable TLS, add these arguments to the dragonfly command:
+    #   command: >
+    #     dragonfly --tls
+    #     --tls_cert_file=/etc/dragonfly/certs/server.crt
+    #     --tls_key_file=/etc/dragonfly/certs/server.key
+    #     --requirepass=${PARYTY_DRAGONFLY_PASSWORD}
+    #   volumes:
+    #     - ./certs/dragonfly:/etc/dragonfly/certs:ro
+    #     - /mnt/d/ParytyData/dragonfly:/data
     volumes:
       - /mnt/d/ParytyData/dragonfly:/data
 
@@ -60,6 +87,16 @@ services:
       - "${PARYTY_PORT_QUESTDB_WEB}:9000"  # Web console + REST
       - "${PARYTY_PORT_QUESTDB_ILP}:9009"  # InfluxDB line protocol
       - "${PARYTY_PORT_QUESTDB_PG}:8812"   # PostgreSQL wire protocol
+    # ---- TLS (production) ----
+    # QuestDB supports TLS on the PostgreSQL wire protocol port.
+    # To enable, set these environment variables:
+    #   environment:
+    #     - QDB_PG_TLS_ENABLED=true
+    #     - QDB_PG_TLS_CERT_PATH=/etc/questdb/certs/server.crt
+    #     - QDB_PG_TLS_PRIVATE_KEY_PATH=/etc/questdb/certs/server.key
+    #   volumes:
+    #     - ./certs/questdb:/etc/questdb/certs:ro
+    #     - questdb_data:/var/lib/questdb
     volumes:
       - questdb_data:/var/lib/questdb
     healthcheck:
@@ -73,6 +110,16 @@ services:
     image: postgres:16-alpine
     ports:
       - "${PARYTY_PORT_POSTGRES}:5432"
+    # ---- TLS (production) ----
+    # PostgreSQL supports TLS natively. To enable, add:
+    #   command: >
+    #     postgres -c ssl=on
+    #     -c ssl_cert_file=/etc/postgres/certs/server.crt
+    #     -c ssl_key_file=/etc/postgres/certs/server.key
+    #   volumes:
+    #     - ./certs/postgres:/etc/postgres/certs:ro
+    #     - postgres_data:/var/lib/postgresql/data
+    # Then change DATABASE_URL from ?sslmode=disable to ?sslmode=verify-full
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -141,6 +188,13 @@ services:
     ports:
       - "${PARYTY_PORT_SWFS_S3}:8333"  # S3 API gateway
     command: s3 -filer=seaweedfs-filer:8888 -port=8333
+    # ---- TLS (production) ----
+    # To enable HTTPS on the S3 gateway, add these flags to the command:
+    #   command: s3 -filer=seaweedfs-filer:8888 -port=8333
+    #     -cert=/etc/seaweedfs/certs/server.crt
+    #     -key=/etc/seaweedfs/certs/server.key
+    #   volumes:
+    #     - ./certs/seaweedfs:/etc/seaweedfs/certs:ro
     depends_on:
       - seaweedfs-filer
     healthcheck:
@@ -187,7 +241,7 @@ services:
       - "${PARYTY_PORT_QUERY}:8080"  # REST/WS/SSE API
     environment:
       DATABASE_URL: postgres://paryty:paryty@postgres:5432/paryty?sslmode=disable
-      PARYTY_JWT_SECRET: "61a61ee4dce5c4e8c6378b71bfefbfb7c94cfc54351ff6db8d93b2b4687b605d"
+      PARYTY_JWT_SECRET: "${PARYTY_JWT_SECRET}"
       PARYTY_DEV_MODE: "true"
       PARYTY_REDPANDA_BROKERS: redpanda:9092
       PARYTY_DRAGONFLY_ADDR: dragonfly:6379
@@ -243,7 +297,7 @@ services:
       retries: 3
       start_period: 10s
 
-  # paryty-frontend:  # EXCLUDED — run natively via `npm run dev` in frontend/
+  # paryty-frontend:  # EXCLUDED � run natively via `npm run dev` in frontend/
   #   See .env.dev for VITE_API_URL / VITE_WS_URL settings.
 
   # --- Phase 6: Intelligence Layer ---

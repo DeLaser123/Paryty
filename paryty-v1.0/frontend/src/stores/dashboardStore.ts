@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { getRestClient } from '../api/rest';
+import { getRestClient, ApiClientError } from '../api/rest';
 import type { DigitalParyty, CreateParytyDraft, TwinDetails } from '../types/digitalParyty';
 import { backendTwinToDigitalParyty } from '../types/digitalParyty';
 import type { AbilityId } from '../types/ability';
@@ -52,6 +52,12 @@ interface DashboardState {
 
   /** ID of the currently active/selected twin. */
   activeTwinId: string | null;
+
+  /** Whether a quota exceeded error occurred during last commitDraft. */
+  quotaExceeded: boolean;
+
+  /** Dismiss quota exceeded state. */
+  clearQuotaExceeded: () => void;
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 
@@ -107,12 +113,14 @@ export const useDashboardStore = create<DashboardState>()((set, get) => ({
   isLoading: false,
   error: null,
   activeTwinId: loadActiveTwinId(),
+  quotaExceeded: false,
 
   agents: [],
   agentsLoading: false,
 
-  openWizard: () => set({ wizardOpen: true, draft: emptyDraft(), wizardStep: 0 }),
-  closeWizard: () => set({ wizardOpen: false }),
+  openWizard: () => set({ wizardOpen: true, draft: emptyDraft(), wizardStep: 0, quotaExceeded: false }),
+  closeWizard: () => set({ wizardOpen: false, quotaExceeded: false }),
+  clearQuotaExceeded: () => set({ quotaExceeded: false }),
 
   setDraftName: (name) => set((s) => ({ draft: { ...s.draft, name } })),
   setDraftSystemLabel: (label) => set((s) => ({ draft: { ...s.draft, systemLabel: label } })),
@@ -137,27 +145,37 @@ export const useDashboardStore = create<DashboardState>()((set, get) => ({
   commitDraft: async () => {
     const { draft, catalogue } = get();
     const now = new Date().toISOString();
-    
-    // Call backend API to create twin with proper UUID
+
+    // Call backend API to create twin with abilities
     const client = getRestClient();
-    const response = await client.post<{ data: { id: string; name: string; description: string; status: string; createdAt: string; updatedAt: string } }>('/api/v1/twins', {
-      name: draft.name || 'Unnamed Digital Paryty',
-      description: draft.systemLabel || 'Unknown System',
-    });
-    
-    const twin = response.data;
-    const next: DigitalParyty = {
-      id: twin.id,
-      name: twin.name,
-      systemLabel: twin.description || 'Unknown System',
-      health: 'unknown',
-      abilities: draft.selectedAbilities.map((id) => ({ id, enabledAt: now })),
-      config: { agentIds: draft.agentIds },
-      summary: {},
-      createdAt: twin.createdAt || now,
-      updatedAt: twin.updatedAt || now,
-    };
-    set({ catalogue: [...catalogue, next], wizardOpen: false, draft: emptyDraft(), wizardStep: 0 });
+    try {
+      const response = await client.post<{ data: { id: string; name: string; description: string; status: string; abilities?: string[]; createdAt: string; updatedAt: string } }>('/api/v1/twins', {
+        name: draft.name || 'Unnamed Digital Paryty',
+        description: draft.systemLabel || 'Unknown System',
+        abilities: draft.selectedAbilities,
+        agent_ids: draft.agentIds,
+      });
+
+      const twin = response.data;
+      const next: DigitalParyty = {
+        id: twin.id,
+        name: twin.name,
+        systemLabel: twin.description || 'Unknown System',
+        health: 'unknown',
+        abilities: (twin.abilities ?? draft.selectedAbilities).map((id) => ({ id: id as AbilityId, enabledAt: now })),
+        config: { agentIds: draft.agentIds },
+        summary: {},
+        createdAt: twin.createdAt || now,
+        updatedAt: twin.updatedAt || now,
+      };
+      set({ catalogue: [...catalogue, next], wizardOpen: false, draft: emptyDraft(), wizardStep: 0, quotaExceeded: false });
+    } catch (err) {
+      if (err instanceof ApiClientError && err.status === 402) {
+        set({ quotaExceeded: true, wizardOpen: false });
+        return;
+      }
+      throw err;
+    }
   },
 
   addAbility: (parytyId, abilityId) =>

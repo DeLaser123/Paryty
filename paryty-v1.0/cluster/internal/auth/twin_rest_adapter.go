@@ -26,7 +26,7 @@ func NewTwinRESTAdapter(handler *TwinHandler) *TwinRESTAdapter {
 }
 
 // CreateTwin adapts TwinHandler.CreateTwin for the REST API.
-func (a *TwinRESTAdapter) CreateTwin(ctx context.Context, tenantID, name, description string) (map[string]interface{}, error) {
+func (a *TwinRESTAdapter) CreateTwin(ctx context.Context, tenantID, name, description string, abilities []string) (map[string]interface{}, error) {
 	req := &parytyv1.CreateTwinRequest{
 		Name:        name,
 		Description: description,
@@ -37,7 +37,14 @@ func (a *TwinRESTAdapter) CreateTwin(ctx context.Context, tenantID, name, descri
 	if err != nil {
 		return nil, err
 	}
-	return twinInfoToMap(info), nil
+	m := twinInfoToMap(info)
+	// Inject abilities from the REST request (not yet in proto).
+	if len(abilities) > 0 {
+		m["abilities"] = abilities
+	} else {
+		m["abilities"] = []string{}
+	}
+	return m, nil
 }
 
 // ListTwins adapts TwinHandler.ListTwins for the REST API.
@@ -49,7 +56,12 @@ func (a *TwinRESTAdapter) ListTwins(ctx context.Context, tenantID string) ([]map
 	}
 	twins := make([]map[string]interface{}, 0, len(resp.Twins))
 	for _, t := range resp.Twins {
-		twins = append(twins, twinInfoToMap(t))
+		m := twinInfoToMap(t)
+		// Enrich with abilities from DB config.
+		if abilities, err := a.tm.GetTwinAbilities(ctx, t.Id); err == nil {
+			m["abilities"] = abilities
+		}
+		twins = append(twins, m)
 	}
 	return twins, nil
 }
@@ -61,7 +73,12 @@ func (a *TwinRESTAdapter) GetTwin(ctx context.Context, tenantID, twinID string) 
 	if err != nil {
 		return nil, err
 	}
-	return twinInfoToMap(info), nil
+	m := twinInfoToMap(info)
+	// Enrich with abilities from DB config.
+	if abilities, err := a.tm.GetTwinAbilities(ctx, twinID); err == nil {
+		m["abilities"] = abilities
+	}
+	return m, nil
 }
 
 // UpdateTwin adapts TwinHandler.UpdateTwin for the REST API.
@@ -144,12 +161,17 @@ func twinInfoToMap(t *parytyv1.TwinInfo) map[string]interface{} {
 		m["updatedAt"] = t.UpdatedAt.AsTime().UTC().Format("2006-01-02T15:04:05Z")
 	}
 	if t.Config != nil {
-		m["config"] = map[string]interface{}{
+		cfgMap := map[string]interface{}{
 			"agentLabels":              t.Config.AgentLabels,
 			"enabledCollectors":        t.Config.EnabledCollectors,
 			"collectionIntervalSeconds": t.Config.CollectionIntervalSeconds,
 			"samplingRate":             t.Config.SamplingRate,
 		}
+		m["config"] = cfgMap
+	}
+	// Abilities default to empty array if not set by REST adapter.
+	if _, ok := m["abilities"]; !ok {
+		m["abilities"] = []string{}
 	}
 	return m
 }

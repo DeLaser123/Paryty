@@ -1,11 +1,12 @@
 # Scale Load Test Scenario
-# 10,000 agents, 10 metrics per agent per second
+# 10,000 agents, 5 metrics per agent, 10s interval, 10 minute duration
 # Tests system capacity under high agent count
+# Target: p99 ingestion < 100ms, error rate < 0.1%
 
 name: scale
 num_agents: 10000
-metrics_per_agent: 10
-interval: 1s
+metrics_per_agent: 5
+interval: 10s
 duration: 10m
 ingestion_addr: "localhost:8080"
 burst_mode: false

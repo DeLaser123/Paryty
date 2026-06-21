@@ -77,6 +77,7 @@ export interface TwinDetails {
   status: string;
   agentCount: number;
   config: TwinConfig;
+  abilities: string[];
   createdAt: string;
   updatedAt: string;
 }
@@ -124,7 +125,10 @@ export function backendTwinToDigitalParyty(twin: TwinDetails): DigitalParyty {
     name: twin.name,
     systemLabel: twin.description || 'Unknown System',
     health: mapTwinStatus(twin.status),
-    abilities: [], // Backend doesn't track abilities; populated locally
+    abilities: (twin.abilities ?? []).map((id) => ({
+      id: id as AbilityId,
+      enabledAt: twin.createdAt,
+    })),
     config: {
       agentIds: [], // Not available from backend; agents are tracked via assignments
       tenantLabel: undefined,

@@ -1,0 +1,183 @@
+# Paryty VirtualServices — external traffic routing
+#
+# Routes ingress traffic from the Istio ingress gateway to the
+# appropriate Paryty services. All external requests flow through
+# the gateway, which handles TLS termination (via cert-manager
+# certificates) and routes based on Host and path prefix.
+#
+# Gateway: paryty-gateway (shared ingress gateway in the istio-system
+# namespace, or a dedicated gateway in the paryty namespace).
+#
+# References:
+#   - Istio VirtualService + Gateway
+#   - Architecture rule: "Frontend <-> Cluster: REST + WebSocket only"
+#   - cert-manager certificate: paryty-tls (tls/certificate.yaml)
+
+---
+# ─── Frontend — SPA static assets + API proxy ──────────────────
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: paryty-frontend
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  hosts:
+    - "app.paryty.io"
+    - "paryty.io"
+  gateways:
+    - istio-system/paryty-gateway
+  http:
+    # Static assets — route to frontend nginx
+    - match:
+        - uri:
+            prefix: /assets/
+        - uri:
+            regex: ".*\\.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$"
+      route:
+        - destination:
+            host: paryty-frontend.paryty.svc.cluster.local
+            port:
+              number: 80
+      corsPolicy:
+        allowOrigins:
+          - exact: "https://app.paryty.io"
+          - exact: "https://paryty.io"
+        allowMethods:
+          - GET
+          - HEAD
+          - OPTIONS
+        allowHeaders:
+          - "*"
+        maxAge: 86400s
+
+    # SPA fallback — all other routes serve index.html
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: paryty-frontend.paryty.svc.cluster.local
+            port:
+              number: 80
+
+---
+# ─── Query API — REST + WebSocket ─────────────────────────────
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: paryty-query-api
+  namespace: paryty
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  hosts:
+    - "api.paryty.io"
+  gateways:
+    - istio-system/paryty-gateway
+  http:
+    # WebSocket upgrade — must happen before REST path routing
+    - match:
+        - uri:
+            prefix: /api/v1/ws
+      route:
+        - destination:
+            host: paryty-query.paryty.svc.cluster.local
+            port:
+              number: 8080
+      websocketUpgrade: true
+      timeout: 86400s
+      retries:
+        attempts: 0
+
+    # REST API — all /api/* paths
+    - match:
+        - uri:
+            prefix: /api/
+      route:
+        - destination:
+            host: paryty-query.paryty.svc.cluster.local
+            port:
+              number: 8080
+      timeout: 30s
+      retries:
+        attempts: 2
+        perTryTimeout: 5s
+        retryOn: "connect-failure,refused-stream,unavailable,cancelled,resource-exhausted"
+      corsPolicy:
+        allowOrigins:
+          - exact: "https://app.paryty.io"
+          - exact: "https://paryty.io"
+        allowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - PATCH
+          - OPTIONS
+        allowHeaders:
+          - "Authorization"
+          - "Content-Type"
+          - "X-Request-ID"
+        exposeHeaders:
+          - "X-Request-ID"
+          - "X-RateLimit-Remaining"
+          - "X-RateLimit-Reset"
+        maxAge: 86400s
+
+    # Health checks — no auth required
+    - match:
+        - uri:
+            exact: /healthz
+        - uri:
+            exact: /readyz
+      route:
+        - destination:
+            host: paryty-query.paryty.svc.cluster.local
+            port:
+              number: 8080
+      timeout: 5s
+      retries:
+        attempts: 0
+
+---
+# ─── Gateway — shared ingress gateway ─────────────────────────
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: paryty-gateway
+  namespace: istio-system
+  labels:
+    app.kubernetes.io/name: paryty
+    app.kubernetes.io/part-of: paryty
+    app.kubernetes.io/component: service-mesh
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 443
+        name: https-paryty
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: paryty-tls-certs  # cert-manager secret
+      hosts:
+        - "app.paryty.io"
+        - "api.paryty.io"
+        - "paryty.io"
+    - port:
+        number: 80
+        name: http-paryty
+        protocol: HTTP
+      hosts:
+        - "app.paryty.io"
+        - "api.paryty.io"
+        - "paryty.io"
+      tls:
+        httpsRedirect: true  # redirect HTTP → HTTPS

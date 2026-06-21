@@ -382,6 +382,14 @@ impl GrpcClient {
         } else {
             format!("http://{}", self.endpoint)
         };
+
+        // Extract hostname for TLS domain verification before endpoint_uri is moved.
+        let tls_hostname: Option<String> = if self.tls_enabled {
+            extract_host(&endpoint_uri).map(|h| h.to_string())
+        } else {
+            None
+        };
+
         let mut endpoint = Endpoint::from_shared(endpoint_uri)
             .context("Invalid endpoint URL")?
             .timeout(std::time::Duration::from_secs(60))
@@ -392,14 +400,9 @@ impl GrpcClient {
         if self.tls_enabled {
             let mut tls_config = tonic::transport::ClientTlsConfig::new();
 
-            // Extract hostname from endpoint URI for domain verification.
-            // This prevents MITM attacks by verifying the server's certificate
-            // matches the hostname we're connecting to.
-            if let Ok(uri) = endpoint_uri.parse::<http::Uri>() {
-                if let Some(host) = uri.host() {
-                    tls_config = tls_config.domain_name(host);
-                    debug!("TLS domain verification enabled for host: {}", host);
-                }
+            if let Some(ref host) = tls_hostname {
+                tls_config = tls_config.domain_name(host);
+                debug!("TLS domain verification enabled for host: {}", host);
             }
 
             endpoint = endpoint.tls_config(tls_config).context("Failed to configure TLS")?;
@@ -778,6 +781,17 @@ impl Clone for GrpcClient {
             config_path: self.config_path.clone(),
         }
     }
+}
+
+
+/// Extract hostname from a URL string (e.g., "https://cluster.paryty.io:443" → "cluster.paryty.io").
+fn extract_host(url: &str) -> Option<&str> {
+    let without_scheme = url.strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))
+        .unwrap_or(url);
+    let host_port = without_scheme.split('/').next()?;
+    let host = host_port.split(':').next()?;
+    if host.is_empty() { None } else { Some(host) }
 }
 
 #[cfg(test)]

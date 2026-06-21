@@ -37,7 +37,7 @@ import { useIntelStore } from '../../stores/intelStore';
 import { useTwinStore } from '../../stores/twinStore';
 import { getRestClient } from '../../api/rest';
 import { useToastStore } from '../../stores/toastStore';
-import { ABILITY_CATALOGUE } from '../../types/ability';
+import { ABILITY_CATALOGUE, ABILITY_FEATURE_MAP } from '../../types/ability';
 import { ParytySelect } from '../common/ParytySelect';
 import { useIntel } from '../../hooks/useIntel';
 import { useDashboardPolling } from '../../hooks/useDashboardPolling';
@@ -1079,7 +1079,7 @@ function EmptyState({ onNew }: { onNew: () => void }) {
 
 // ─── Wizard ──────────────────────────────────────────────────────────────
 
-const WIZARD_STEPS = ['Identity', 'Abilities', 'Confirm'];
+const WIZARD_STEPS = ['Identity', 'Abilities', 'Agents', 'Confirm'];
 
 function WizardStepDots({ current, total }: { current: number; total: number }) {
   return (
@@ -1133,15 +1133,6 @@ function StepAbilities() {
   const toggle = useDashboardStore((s) => s.toggleDraftAbility);
   const hasFeature = usePlanStore((s) => s.hasFeature);
 
-  const abilityFeatureMap: Record<string, string> = {
-    topology_observation: 'topology_monitoring',
-    metrics_monitoring: 'metrics',
-    alerts: 'alerts',
-    timeline_replay: 'timeline_replay',
-    forecasting: 'paryty_intel',
-    watif_drills: 'paryty_intel',
-  };
-
   return (
     <>
       <p style={{
@@ -1153,7 +1144,7 @@ function StepAbilities() {
       <div className="dp-ability-grid">
         {ABILITY_CATALOGUE.map((ability) => {
           const isSelected = selected.includes(ability.id);
-          const featureName = abilityFeatureMap[ability.id];
+          const featureName = ABILITY_FEATURE_MAP[ability.id];
           const isAvailable = featureName ? hasFeature(featureName) : true;
           return (
             <button
@@ -1173,6 +1164,78 @@ function StepAbilities() {
                 {ability.name}{!isAvailable && ' (Upgrade to unlock)'}
               </span>
               <span className="dp-ability-tile__desc">{ability.description}</span>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
+function StepAgents() {
+  const agents = useDashboardStore((s) => s.agents);
+  const agentsLoading = useDashboardStore((s) => s.agentsLoading);
+  const draftAgentIds = useDashboardStore((s) => s.draft.agentIds);
+  const setDraftAgentIds = useDashboardStore((s) => s.setDraftAgentIds);
+
+  const toggleAgent = (agentId: string) => {
+    const isSelected = draftAgentIds.includes(agentId);
+    setDraftAgentIds(
+      isSelected
+        ? draftAgentIds.filter((id) => id !== agentId)
+        : [...draftAgentIds, agentId]
+    );
+  };
+
+  if (agentsLoading) {
+    return (
+      <p style={{
+        fontFamily: 'var(--aef-font-body)', fontSize: 11,
+        color: 'var(--aef-text-secondary)', textAlign: 'center',
+        padding: 'var(--aef-space-6) 0',
+      }}>
+        Loading agents…
+      </p>
+    );
+  }
+
+  if (agents.length === 0) {
+    return (
+      <p style={{
+        fontFamily: 'var(--aef-font-body)', fontSize: 11,
+        color: 'var(--aef-text-secondary)', lineHeight: 1.6,
+      }}>
+        No agents available. Agents will be linked after creation.
+      </p>
+    );
+  }
+
+  return (
+    <>
+      <p style={{
+        fontFamily: 'var(--aef-font-body)', fontSize: 11,
+        color: 'var(--aef-text-secondary)', lineHeight: 1.6,
+      }}>
+        Select agents to assign to this Digital Paryty. You can skip this step and assign agents later.
+      </p>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--aef-space-2)' }}>
+        {agents.map((agent) => {
+          const isSelected = draftAgentIds.includes(agent.agent_id);
+          return (
+            <button
+              key={agent.agent_id}
+              type="button"
+              className={clsx('dp-ability-tile', isSelected && 'dp-ability-tile--selected')}
+              onClick={() => toggleAgent(agent.agent_id)}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 'var(--aef-space-3)', padding: 'var(--aef-space-2) var(--aef-space-3)' }}
+            >
+              <CheckCircle2 size={14} className="dp-ability-tile__check" aria-hidden />
+              <span style={{ fontFamily: 'var(--aef-font-body)', fontSize: 11, color: 'var(--aef-text-primary)' }}>
+                {agent.hostname || agent.agent_id}
+              </span>
+              <span style={{ fontFamily: 'var(--aef-font-body)', fontSize: 10, color: 'var(--aef-text-secondary)', marginLeft: 'auto' }}>
+                {agent.os} · {agent.status}
+              </span>
             </button>
           );
         })}
@@ -1244,7 +1307,7 @@ function CreateParytyWizard() {
 
   const isLastStep = step === WIZARD_STEPS.length - 1;
   const canAdvance = step === 0 ? draft.name.trim().length > 0 : true;
-  const stepContent = [<StepIdentity />, <StepAbilities />, <StepConfirm />][step];
+  const stepContent = [<StepIdentity />, <StepAbilities />, <StepAgents />, <StepConfirm />][step];
   const primaryLabel = isLastStep ? 'Create Digital Paryty' : 'Continue';
 
   return (
@@ -1325,6 +1388,9 @@ export function DashboardPage() {
   const error         = useDashboardStore((s) => s.error);
   const fetchTwins    = useDashboardStore((s) => s.fetchTwins);
   const activeTwinId  = useDashboardStore((s) => s.activeTwinId);
+  const quotaExceeded = useDashboardStore((s) => s.quotaExceeded);
+  const clearQuotaExceeded = useDashboardStore((s) => s.clearQuotaExceeded);
+  const currentPlan   = usePlanStore((s) => s.currentPlan);
   const alerts        = useAlertsStore((s) => s.alerts);
   const forecasts     = useIntelStore((s) => s.forecasts);
   const anomalies     = useIntelStore((s) => s.anomalies);
@@ -1332,6 +1398,17 @@ export function DashboardPage() {
   const agentsLoading = useDashboardStore((s) => s.agentsLoading);
   const navigate      = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+
+  // Quota pre-check: verify catalogue count < maxTwins before opening wizard.
+  const handleNewTwin = useCallback(() => {
+    const maxTwins = currentPlan?.limits?.maxTwins ?? 0;
+    if (maxTwins > 0 && catalogue.length >= maxTwins) {
+      setShowQuotaModal(true);
+      return;
+    }
+    openWizard();
+  }, [catalogue.length, currentPlan, openWizard]);
 
   // ─── Live polling hooks ─────────────────────────────────────────────────
 
@@ -1397,11 +1474,11 @@ export function DashboardPage() {
   // Auto-open wizard when ?new=true
   useEffect(() => {
     if (searchParams.get('new') === 'true') {
-      openWizard();
+      handleNewTwin();
       searchParams.delete('new');
       setSearchParams(searchParams, { replace: true });
     }
-  }, [searchParams, openWizard, setSearchParams]);
+  }, [searchParams, handleNewTwin, setSearchParams]);
 
   // ─── Derived data ───────────────────────────────────────────────────────
 
@@ -1473,7 +1550,7 @@ export function DashboardPage() {
           <div className="dp-page__header-actions">
             <button
               className="aef-btn aef-btn-active"
-              onClick={openWizard}
+              onClick={handleNewTwin}
               data-testid="dashboard-new-twin"
             >
               <Plus size={14} /> New Digital Paryty
@@ -1537,8 +1614,14 @@ export function DashboardPage() {
         <div className="dp-two-pane">
           {/* Main pane (left) */}
           <div className="dp-main-pane" ref={mainPaneRef}>
-            {!isLoading && catalogue.length === 0 ? (
-              <EmptyState onNew={openWizard} />
+            {isLoading ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--aef-space-3)', padding: 'var(--aef-space-4)' }}>
+                <div className="dp-skeleton dp-skeleton-card" />
+                <div className="dp-skeleton dp-skeleton-card" />
+                <div className="dp-skeleton dp-skeleton-card" />
+              </div>
+            ) : catalogue.length === 0 ? (
+              <EmptyState onNew={handleNewTwin} />
             ) : (
               <div className="dp-accordion">
                 {/* Section 1: Your Digital Parytys */}
@@ -1572,7 +1655,7 @@ export function DashboardPage() {
                       ))}
                     </div>
                   ) : (
-                    <EmptyState onNew={openWizard} />
+              <EmptyState onNew={handleNewTwin} />
                   )}
                 </AccordionSection>
 
@@ -1645,10 +1728,10 @@ export function DashboardPage() {
                   )}
                 </AccordionSection>
 
-                {/* Section 4: Metric Aggregations */}
+                {/* Section 4: Twin Summary */}
                 <AccordionSection
                   icon={<Cpu size={14} />}
-                  title="Metric Aggregations"
+                  title="Twin Summary"
                   meta={catalogue.length}
                   isOpen={expandedSection === 3}
                   onToggle={() => toggleSection(3)}
@@ -1692,6 +1775,36 @@ export function DashboardPage() {
 
       {/* Wizard modal */}
       <CreateParytyWizard />
+
+      {/* Quota exceeded modal */}
+      {(showQuotaModal || quotaExceeded) && (
+        <div className="aef-modal-overlay" onClick={(e) => { if (e.target === e.currentTarget) { setShowQuotaModal(false); clearQuotaExceeded(); } }}>
+          <div className="aef-modal" style={{ maxWidth: 420 }} role="dialog" aria-modal="true" aria-label="Twin Limit Reached">
+            <div className="aef-modal-header">
+              <span className="aef-modal-title">Twin Limit Reached</span>
+              <button className="aef-modal-close" onClick={() => { setShowQuotaModal(false); clearQuotaExceeded(); }} aria-label="Close">
+                <X size={14} />
+              </button>
+            </div>
+            <div className="aef-modal-body">
+              <p className="aef-modal-para">
+                You've reached the maximum of {currentPlan?.limits?.maxTwins ?? '?'} Digital Parytys for your {currentPlan?.planName ?? 'current'} plan.
+              </p>
+              <p className="aef-modal-para" style={{ color: 'var(--aef-text-secondary)' }}>
+                Upgrade your plan to create more Digital Parytys.
+              </p>
+            </div>
+            <div className="aef-modal-footer">
+              <button className="aef-btn aef-btn-inactive" onClick={() => { setShowQuotaModal(false); clearQuotaExceeded(); }}>
+                Cancel
+              </button>
+              <button className="aef-btn aef-btn-active" onClick={() => { setShowQuotaModal(false); clearQuotaExceeded(); navigate('/settings'); }}>
+                Upgrade Plan
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Counter detail modal — accent matches card variant */}
       {activeCounterModal && (() => {

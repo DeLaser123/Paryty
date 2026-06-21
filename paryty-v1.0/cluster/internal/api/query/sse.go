@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,11 +14,15 @@ import (
 	"go.uber.org/zap"
 )
 
+const maxSSEConnections = 50
+
 // SSEHandler handles Server-Sent Events.
 type SSEHandler struct {
 	store        *storage.Store
 	logger       *zap.Logger
 	kafkaBrokers []string
+	connCount    int
+	connMu       sync.Mutex
 }
 
 // NewSSEHandler creates a new SSE handler.
@@ -29,9 +34,35 @@ func NewSSEHandler(store *storage.Store, logger *zap.Logger, kafkaBrokers []stri
 	}
 }
 
+// acquireConnection returns true if a new SSE connection is allowed.
+func (h *SSEHandler) acquireConnection() bool {
+	h.connMu.Lock()
+	defer h.connMu.Unlock()
+	if h.connCount >= maxSSEConnections {
+		return false
+	}
+	h.connCount++
+	return true
+}
+
+// releaseConnection decrements the active SSE connection count.
+func (h *SSEHandler) releaseConnection() {
+	h.connMu.Lock()
+	defer h.connMu.Unlock()
+	if h.connCount > 0 {
+		h.connCount--
+	}
+}
+
 // HandleTimeline handles SSE timeline replay.
 // Requires JWT auth; tenant scope comes from the validated claims.
 func (h *SSEHandler) HandleTimeline(c *gin.Context) {
+	if !h.acquireConnection() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "too many SSE connections"})
+		return
+	}
+	defer h.releaseConnection()
+
 	if _, ok := requireTenant(c); !ok {
 		return
 	}
@@ -102,6 +133,12 @@ func (h *SSEHandler) HandleTimeline(c *gin.Context) {
 // Requires JWT auth (header or token query param via GinJWTAuthFlexible);
 // tenant scope comes from the validated claims.
 func (h *SSEHandler) HandleMetricsStream(c *gin.Context) {
+	if !h.acquireConnection() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "too many SSE connections"})
+		return
+	}
+	defer h.releaseConnection()
+
 	agentID := c.Param("agent_id")
 	tenant, ok := requireTenant(c)
 	if !ok {
@@ -142,6 +179,12 @@ func (h *SSEHandler) HandleMetricsStream(c *gin.Context) {
 // Route: GET /api/v1/events/stream
 // Requires JWT auth; tenant scope comes from the validated claims.
 func (h *SSEHandler) HandleEventStream(c *gin.Context) {
+	if !h.acquireConnection() {
+		c.JSON(http.StatusServiceUnavailable, gin.H{"error": "too many SSE connections"})
+		return
+	}
+	defer h.releaseConnection()
+
 	tenant, ok := requireTenant(c)
 	if !ok {
 		return

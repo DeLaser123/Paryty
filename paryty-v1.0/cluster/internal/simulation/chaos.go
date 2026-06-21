@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"math/rand"
 	"net/http"
 	"net/url"
 	"os/exec"
@@ -13,6 +12,8 @@ import (
 	"time"
 
 	"go.uber.org/zap"
+
+	mathrand "math/rand/v2"
 )
 
 // ChaosRunner executes chaos engineering experiments and load tests.
@@ -322,10 +323,10 @@ func (cr *ChaosRunner) captureSteadyState(_ context.Context, metrics map[string]
 	// In a production implementation, this would query the hot store for
 	// current CPU, memory, error rate, and latency metrics.
 	// Placeholder values represent a healthy steady state.
-	metrics["cpu_usage"] = rand.Float64()*30 + 20   // 20-50%
-	metrics["memory_usage"] = rand.Float64()*20 + 40 // 40-60%
-	metrics["error_rate"] = rand.Float64() * 0.01    // 0-1%
-	metrics["latency_p99"] = rand.Float64()*50 + 50  // 50-100ms
+	metrics["cpu_usage"] = mathrand.Float64()*30 + 20   // 20-50%
+	metrics["memory_usage"] = mathrand.Float64()*20 + 40 // 40-60%
+	metrics["error_rate"] = mathrand.Float64() * 0.01    // 0-1%
+	metrics["latency_p99"] = mathrand.Float64()*50 + 50  // 50-100ms
 	return nil
 }
 

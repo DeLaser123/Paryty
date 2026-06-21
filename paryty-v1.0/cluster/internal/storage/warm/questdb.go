@@ -21,12 +21,14 @@ import (
 
 // Config contains configuration for the QuestDB client.
 type Config struct {
-	Addr     string `yaml:"addr" json:"addr"`
-	ILPAddr  string `yaml:"ilp_addr" json:"ilp_addr"`
-	Database string `yaml:"database" json:"database"`
-	Username string `yaml:"username" json:"username"`
-	Password string `yaml:"password" json:"password"`
-	MaxConns int    `yaml:"max_conns" json:"max_conns"`
+	Addr        string `yaml:"addr" json:"addr"`
+	ILPAddr     string `yaml:"ilp_addr" json:"ilp_addr"`
+	Database    string `yaml:"database" json:"database"`
+	Username    string `yaml:"username" json:"username"`
+	Password    string `yaml:"password" json:"password"`
+	MaxConns    int    `yaml:"max_conns" json:"max_conns"`
+	SSLMode     string `yaml:"sslmode" json:"sslmode"`         // PostgreSQL sslmode: disable, require, verify-ca, verify-full
+	SSLRootCert string `yaml:"sslrootcert" json:"sslrootcert"` // Path to CA certificate for SSL verification
 }
 
 // Client is the QuestDB warm storage client.
@@ -38,9 +40,21 @@ type Client struct {
 
 // New creates a new QuestDB client. It initializes the PG connection pool,
 // optionally connects the ILP sender, and ensures all required tables exist.
+// SSLMode defaults to "disable" when empty; set to "require" in production
+// for encrypted PostgreSQL connections. SSLRootCert specifies the CA cert path.
 func New(ctx context.Context, cfg Config) (*Client, error) {
 	connStr := fmt.Sprintf("postgres://%s:%s@%s/%s",
 		cfg.Username, cfg.Password, cfg.Addr, cfg.Database)
+
+	// SEC-09: Encryption in transit — append SSL parameters when configured.
+	sslMode := cfg.SSLMode
+	if sslMode == "" {
+		sslMode = "disable"
+	}
+	connStr += "?sslmode=" + sslMode
+	if cfg.SSLRootCert != "" {
+		connStr += "&sslrootcert=" + cfg.SSLRootCert
+	}
 
 	poolCfg, err := pgxpool.ParseConfig(connStr)
 	if err != nil {
@@ -382,6 +396,21 @@ var createTableStatements = []string{
 		applied_at TIMESTAMP,
 		description STRING
 	)`,
+
+	// ---- Anomaly Detection Table ----
+
+	`CREATE TABLE IF NOT EXISTS anomalies (
+		timestamp TIMESTAMP,
+		id SYMBOL,
+		tenant_id SYMBOL,
+		severity SYMBOL,
+		metric_name SYMBOL,
+		agent_id SYMBOL,
+		score DOUBLE,
+		expected_value DOUBLE,
+		actual_value DOUBLE,
+		description STRING
+	) TIMESTAMP(timestamp) PARTITION BY DAY WAL`,
 }
 
 // ---- Metric Operations (PG INSERT — fallback path) ----
@@ -1202,4 +1231,152 @@ func (c *Client) InsertDbQueryEvent(ctx context.Context, tenant string, event *D
 		return fmt.Errorf("insert db query event: %w", err)
 	}
 	return nil
+}
+
+// ---- Anomaly Operations ----
+
+// AnomalyRecord represents an anomaly detection result stored in QuestDB.
+type AnomalyRecord struct {
+	ID            string    `json:"id"`
+	TenantID      string    `json:"tenant_id"`
+	AgentID       string    `json:"agent_id"`
+	MetricName    string    `json:"metric_name"`
+	Severity      string    `json:"severity"`
+	Score         float64   `json:"score"`
+	ExpectedValue float64   `json:"expected_value"`
+	ActualValue   float64   `json:"actual_value"`
+	Description   string    `json:"description"`
+	Timestamp     time.Time `json:"timestamp"`
+}
+
+// StoreAnomaly inserts a single anomaly detection result into the anomalies table.
+// Uses SQL INSERT for reliability. For high-throughput, batch-friendly ILP
+// could be added as a future optimization.
+func (c *Client) StoreAnomaly(ctx context.Context, anomaly *AnomalyRecord) error {
+	query := `INSERT INTO anomalies
+		(timestamp, id, tenant_id, severity, metric_name, agent_id,
+		 score, expected_value, actual_value, description)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+
+	_, err := c.pool.Exec(ctx, query,
+		anomaly.Timestamp, anomaly.ID, anomaly.TenantID, anomaly.Severity,
+		anomaly.MetricName, anomaly.AgentID,
+		anomaly.Score, anomaly.ExpectedValue, anomaly.ActualValue,
+		anomaly.Description,
+	)
+	if err != nil {
+		return fmt.Errorf("store anomaly: %w", err)
+	}
+	return nil
+}
+
+// StoreAnomalyBatch inserts a batch of anomaly records within a single transaction.
+func (c *Client) StoreAnomalyBatch(ctx context.Context, anomalies []AnomalyRecord) error {
+	tx, err := c.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx) //nolint:errcheck
+
+	for _, a := range anomalies {
+		query := `INSERT INTO anomalies
+			(timestamp, id, tenant_id, severity, metric_name, agent_id,
+			 score, expected_value, actual_value, description)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`
+		if _, err := tx.Exec(ctx, query,
+			a.Timestamp, a.ID, a.TenantID, a.Severity,
+			a.MetricName, a.AgentID,
+			a.Score, a.ExpectedValue, a.ActualValue,
+			a.Description,
+		); err != nil {
+			return fmt.Errorf("insert anomaly %s: %w", a.ID, err)
+		}
+	}
+
+	return tx.Commit(ctx)
+}
+
+// ListAnomaliesResult contains the paginated result of anomaly queries.
+type ListAnomaliesResult struct {
+	Anomalies []AnomalyRecord `json:"anomalies"`
+	Total     int64           `json:"total"`
+	Limit     int             `json:"limit"`
+	Offset    int             `json:"offset"`
+}
+
+// ListAnomalies queries anomalies scoped to a tenant with optional time range
+// filtering and pagination. Returns the result set plus a total count for
+// pagination metadata.
+//
+// Parameters:
+//   - tenant: mandatory tenant filter (RLS enforcement).
+//   - start, end: optional time range filter. Zero values disable filtering.
+//   - severity: optional severity filter (critical, warning, info). Empty = all.
+//   - limit, offset: pagination controls.
+func (c *Client) ListAnomalies(ctx context.Context, tenant string, start, end time.Time, severity string, limit, offset int) (*ListAnomaliesResult, error) {
+	// Build WHERE clause with tenant filter (mandatory for RLS).
+	where := "WHERE tenant_id = $1"
+	args := []any{tenant}
+	argIdx := 2
+
+	if !start.IsZero() {
+		where += fmt.Sprintf(" AND timestamp >= $%d", argIdx)
+		args = append(args, start)
+		argIdx++
+	}
+	if !end.IsZero() {
+		where += fmt.Sprintf(" AND timestamp <= $%d", argIdx)
+		args = append(args, end)
+		argIdx++
+	}
+	if severity != "" {
+		where += fmt.Sprintf(" AND severity = $%d", argIdx)
+		args = append(args, severity)
+		argIdx++
+	}
+
+	// Count total matching rows for pagination.
+	countQuery := fmt.Sprintf(`SELECT COUNT(*) FROM anomalies %s`, where)
+	var total int64
+	if err := c.pool.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+		return nil, fmt.Errorf("count anomalies: %w", err)
+	}
+
+	// Query results with pagination.
+	query := fmt.Sprintf(`SELECT timestamp, id, tenant_id, severity, metric_name,
+		agent_id, score, expected_value, actual_value, description
+		FROM anomalies %s
+		ORDER BY timestamp DESC
+		LIMIT $%d OFFSET $%d`, where, argIdx, argIdx+1)
+	args = append(args, limit, offset)
+
+	rows, err := c.pool.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("query anomalies: %w", err)
+	}
+	defer rows.Close()
+
+	var anomalies []AnomalyRecord
+	for rows.Next() {
+		var a AnomalyRecord
+		if err := rows.Scan(
+			&a.Timestamp, &a.ID, &a.TenantID, &a.Severity, &a.MetricName,
+			&a.AgentID, &a.Score, &a.ExpectedValue, &a.ActualValue,
+			&a.Description,
+		); err != nil {
+			return nil, fmt.Errorf("scan anomaly: %w", err)
+		}
+		anomalies = append(anomalies, a)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration: %w", err)
+	}
+
+	return &ListAnomaliesResult{
+		Anomalies: anomalies,
+		Total:     total,
+		Limit:     limit,
+		Offset:    offset,
+	}, nil
 }

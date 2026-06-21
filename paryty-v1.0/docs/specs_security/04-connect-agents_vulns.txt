@@ -1,0 +1,97 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 04: Connect Agents
+Date: 2026-06-20
+Tools Used: gitleaks (GIT HISTORY), semgrep, Go vet
+================================================================================
+
+VULN-04-001 | Production API Key Committed to Git — pk_live_27e00f019ed5...
+Severity: CRITICAL
+Pre-state:  configs/agent/agent.yaml, agent-gai-tech-linux.yaml, docker-compose.dev.yaml
+            with real API key
+Post-state: Same (unchanged — key still in git history)
+Evidence:   gitleaks found `pk_live_27e00f019ed5bdcc74e984a7ad947bf5` in:
+            - paryty-v1.0/configs/agent/agent.yaml (line with paryty_api_key)
+            - paryty-v1.0/configs/agent/agent-gai-tech-linux.yaml
+            - paryty-v1.0/deploy/compose/docker-compose.dev.yaml
+            Committed in commits 1eb... and a72... across 2 commits.
+Analysis:   This is a real Paryty API key (pk_live_ prefix, 32 hex chars) that
+            was committed to a git repository. The key is visible in the git
+            history and can be retrieved by anyone with repo access. If the key
+            is still active on any cluster, an attacker could use it to register
+            rogue agents, receive telemetry, or access the API.
+Reproduce:  git log -p -- configs/agent/agent.yaml | grep pk_live_
+            gitleaks git -v .
+Mitigation: 1. IMMEDIATELY rotate all pk_live_27e00f019ed5... keys on the cluster
+            2. Add configs/agent/*.yaml to .gitignore (or use .env files)
+            3. Run BFG Repo-Cleaner or git filter-repo to purge from history
+            4. Generate new API keys and never commit them
+
+VULN-04-002 | Production API Key Committed — pk_live_6a89eaf0d573...
+Severity: CRITICAL
+Pre-state:  scripts/gen_key_hash.py, insert_api_key.py, docker-compose.dev.yaml
+            with real API key
+Post-state: Same (unchanged — key still in git history)
+Evidence:   gitleaks found `pk_live_6a89eaf0d573619d927dc19895039dc7` in:
+            - paryty-v1.0/scripts/gen_key_hash.py
+            - paryty-v1.0/scripts/insert_api_key.py
+            - paryty-v1.0/configs/agent/agent.yaml (commit a72...)
+            - paryty-v1.0/deploy/compose/docker-compose.dev.yaml (commit a72...)
+Reproduce:  grep -r "pk_live_6a89eaf0" paryty-v1.0/
+Mitigation: Immediate key rotation + purge from git history
+
+VULN-04-003 | Production API Key Committed — pk_live_97bec08c75...
+Severity: CRITICAL
+Evidence:   gitleaks found `pk_live_97bec08c75fc797abb9f48b361259f1c` in:
+            - paryty-v1.0/configs/agent/agent-gai-tech-linux.yaml
+Reproduce:  grep -r "pk_live_97bec08c" paryty-v1.0/
+Mitigation: Same as above — immediate rotation
+
+VULN-04-004 | Production API Key Committed — pk_live_9e379f2c...
+Severity: CRITICAL
+Evidence:   gitleaks found `pk_live_9e379f2cec27272283b9076eb22eff5e` in:
+            - paryty-v1.0/scripts/verify_key.py
+            - tmp_key.json (root of workspace)
+Reproduce:  grep -r "pk_live_9e379f2c" .
+Mitigation: Same — immediate rotation
+
+VULN-04-005 | NVIDIA API Key Exposed in Script Files
+Severity: CRITICAL
+Evidence:   gitleaks found `nvapi-qulAKQB7gaEelIPppUOPI3aFv8EkKzhTrO` in:
+            - paryty-v1.0/scripts/test_nvidia.py (commit bcb...)
+            - paryty-v1.0/scripts/kimi_https_proxy.py
+            - paryty-v1.0/scripts/kimi_proxy.py (2 occurrences)
+Analysis:   This appears to be an NVIDIA API key exposed in 3 test/proxy scripts.
+            If this key is still valid, it could be used to access NVIDIA APIs
+            incurring costs, or access any associated resources.
+Reproduce:  grep -r "nvapi" paryty-v1.0/scripts/
+Mitigation: 1. IMMEDIATELY rotate the NVIDIA API key
+            2. Remove from all scripts
+            3. Purge from git history
+            4. Use environment variables for API keys
+
+VULN-04-006 | Docker Compose Contains Sensitive Token
+Severity: HIGH
+Evidence:   gitleaks found `61a61ee4dce5c4e8c6378b71bfefbfb7c94cfc54` in:
+            - paryty-v1.0/deploy/compose/docker-compose.dev.yaml (commit a72...)
+Analysis:   This 40-char hex string looks like a SHA-1 hash or token committed
+            to the docker-compose file.
+Reproduce:  grep "61a61ee4dc" deploy/compose/docker-compose.dev.yaml
+Mitigation: Investigate what this token is. If it's a credential, rotate and
+            remove from compose file.
+
+VULN-04-007 | Agent Download Endpoint Has No Rate Limiting
+Severity: MEDIUM
+Pre-state:  Backend has DownloadAgentBinary handler
+Post-state: Same (unchanged frontend now uses cluster endpoint)
+Evidence:   Code review of rest.go — DownloadAgentBinary only validates API key,
+            no per-IP or per-key rate limiting.
+Analysis:   An attacker could repeatedly download agent binaries to consume
+            bandwidth. The API key validation provides authentication but not
+            abuse prevention.
+Reproduce:  while true; do curl -o /dev/null "http://localhost:8080/api/v1/agents/download/linux?key=VALID_KEY"; done
+Mitigation: Add rate limiting middleware to the download endpoint.
+
+================================================================================
+SUMMARY: 7 findings (5 CRITICAL, 1 HIGH, 1 MEDIUM)
+This spec has the most critical findings — 5 real API keys committed to git.
+================================================================================

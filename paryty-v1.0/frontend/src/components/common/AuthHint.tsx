@@ -141,12 +141,64 @@ function PasswordContent({ passwordValue, isRegister }: { passwordValue?: string
   const pw = passwordValue ?? '';
   const checks = evalPassword(pw);
   const allMet = allPasswordRulesMet(checks);
+  const metCount = PASSWORD_RULES.filter((r) => checks[r.key]).length;
+  const hasInput = pw.length > 0;
+
+  const strengthLabels = ['Very Weak', 'Weak', 'Fair', 'Good', 'Strong'];
+  const strengthColors = [
+    'var(--aef-counter-variant-b)',
+    'var(--aef-counter-variant-b)',
+    '#eab308',
+    '#22c55e',
+    'var(--aef-text-success)',
+  ];
+  const strengthLabel = strengthLabels[metCount];
+  const strengthColor = strengthColors[metCount];
 
   return (
     <>
       <p className="auth-hint__text">
         Your password must meet all five requirements below.
       </p>
+
+      {/* Visual strength meter */}
+      {hasInput && (
+        <div
+          className="auth-hint__strength-meter"
+          data-testid="auth-hint-strength-meter"
+          style={{
+            animation: 'aef-scale-in var(--aef-duration-standard) var(--aef-ease-settle) both',
+          }}
+        >
+          <div style={{
+            display: 'flex',
+            gap: 3,
+            marginBottom: 'var(--aef-space-1)',
+          }}>
+            {[0, 1, 2, 3, 4].map((i) => (
+              <div
+                key={i}
+                style={{
+                  flex: 1,
+                  height: 3,
+                  borderRadius: 2,
+                  background: i < metCount ? strengthColor : 'var(--aef-border)',
+                  transition: 'background var(--aef-duration-fast) var(--aef-ease-exit)',
+                }}
+              />
+            ))}
+          </div>
+          <span style={{
+            fontFamily: 'var(--aef-font-body)',
+            fontSize: 9,
+            color: strengthColor,
+            transition: 'color var(--aef-duration-fast) var(--aef-ease-exit)',
+          }}>
+            {strengthLabel}
+          </span>
+        </div>
+      )}
+
       <div className="auth-hint__req-list">
         {PASSWORD_RULES.map((rule, i) => {
           const met = checks[rule.key];

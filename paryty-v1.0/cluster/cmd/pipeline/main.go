@@ -6,6 +6,9 @@
 //
 // Configuration is loaded from YAML (or defaults) with environment variable
 // overrides. Graceful shutdown on SIGINT/SIGTERM.
+//
+// Self-monitoring (dogfooding): exposes OpenTelemetry metrics via a
+// Prometheus-compatible /metrics endpoint on port 9092.
 package main
 
 import (
@@ -13,6 +16,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -26,8 +30,34 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage/hot"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage/warm"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/prometheus"
+	"go.opentelemetry.io/otel/metric"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.uber.org/zap"
 )
+
+// initOTelMeter initializes the OpenTelemetry meter with a Prometheus exporter
+// for Paryty self-monitoring (dogfooding principle). Returns the meter and a
+// shutdown function. On failure, returns a no-op meter from the default provider.
+//
+// Pattern: identical to query/main.go initOTelMeter for consistency across
+// all cluster services.
+func initOTelMeter(logger *zap.Logger) (metric.Meter, func()) {
+	exporter, err := prometheus.New()
+	if err != nil {
+		logger.Warn("Failed to create OTel prometheus exporter", zap.Error(err))
+		return otel.Meter("paryty"), func() {}
+	}
+	provider := sdkmetric.NewMeterProvider(sdkmetric.WithReader(exporter))
+	otel.SetMeterProvider(provider)
+	return otel.Meter("paryty.cluster.pipeline"), func() {
+		if err := provider.Shutdown(context.Background()); err != nil {
+			logger.Warn("OTel meter provider shutdown error", zap.Error(err))
+		}
+	}
+}
 
 func main() {
 	// Determine config path: flag > env > default.
@@ -35,6 +65,7 @@ func main() {
 	if v := os.Getenv("PARYTY_CONFIG_PATH"); v != "" {
 		configPath = v
 	}
+	metricsPort := flag.String("metrics-port", "9092", "Prometheus metrics HTTP port")
 	flag.StringVar(&configPath, "config", configPath, "Path to YAML configuration file")
 	flag.Parse()
 
@@ -71,6 +102,46 @@ func main() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	// ── Initialize OpenTelemetry meter with Prometheus exporter ─────────
+	meter, otelShutdown := initOTelMeter(logger)
+	defer otelShutdown()
+
+	// Register golden-signal pipeline metrics.
+	messagesTotal, _ := meter.Int64Counter("paryty.cluster.pipeline.messages.total",
+		metric.WithDescription("Total messages processed by pipeline"))
+	errorsTotal, _ := meter.Int64Counter("paryty.cluster.pipeline.errors.total",
+		metric.WithDescription("Total processing errors in pipeline"))
+	queueDepth, _ := meter.Int64Gauge("paryty.cluster.pipeline.queue.depth",
+		metric.WithDescription("Current inbound queue depth"))
+	deadLetterSize, _ := meter.Int64Gauge("paryty.pipeline.dead_letter.size",
+		metric.WithDescription("Current dead letter queue size"))
+
+	pipelineMetrics := &processing.PipelineMetrics{
+		MessagesTotal:  messagesTotal,
+		ErrorsTotal:    errorsTotal,
+		QueueDepth:     queueDepth,
+		DeadLetterSize: deadLetterSize,
+	}
+
+	// ── Start Prometheus /metrics HTTP server on dedicated port ─────────
+	metricsMux := http.NewServeMux()
+	metricsMux.Handle("/metrics", promhttp.Handler())
+	metricsMux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"healthy","service":"paryty-pipeline"}`))
+	})
+	metricsSrv := &http.Server{
+		Addr:    ":" + *metricsPort,
+		Handler: metricsMux,
+	}
+	go func() {
+		logger.Info("Pipeline metrics endpoint listening", zap.String("addr", metricsSrv.Addr))
+		if err := metricsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error("Metrics server error", zap.Error(err))
+		}
+	}()
 
 	logger.Info("Starting Paryty Pipeline",
 		zap.String("tenant", tenant),
@@ -274,6 +345,7 @@ func main() {
 		logger,
 		tenant,
 		memConfig,
+		pipelineMetrics,
 	)
 
 	if err := pipeline.Start(ctx); err != nil {

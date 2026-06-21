@@ -4,19 +4,25 @@
 //! the agent, loads configuration, wires the communication lifecycle,
 //! starts collection layers, and handles cooperative shutdown via
 //! a `CancellationToken` + OS signal handler.
+//!
+//! Observability is dogfooded: the agent exposes its own golden-signal
+//! metrics via a `/metrics` endpoint (Prometheus format) and emits
+//! structured JSON logs via `tracing-subscriber`.
 
 use std::sync::Arc;
 
 use anyhow::Result;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
+#[macro_use]
+mod logging;
 mod communication;
 mod config;
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 mod ebpf;
 mod metal;
+mod observability;
 mod proto;
 mod supervisor;
 
@@ -83,7 +89,10 @@ async fn main() -> Result<()> {
         .json()
         .init();
 
-    info!("Starting Paryty Agent");
+    agent_info!("Starting Paryty Agent");
+
+    // ── Initialize self-metrics (dogfooding) ──────────────────────────
+    let metrics = Arc::new(observability::Metrics::new());
 
     // ── Root cancellation token for cooperative shutdown ──────────────
     let cancel_token = CancellationToken::new();
@@ -98,7 +107,7 @@ async fn main() -> Result<()> {
                 .unwrap_or_else(|_| "configs/agent/agent.yaml".to_string())
         });
         config::persist_api_key(&config_path, new_key)?;
-        info!(path = %config_path, "API key persisted to config file");
+        agent_info!(path = %config_path, "API key persisted to config file");
         eprintln!("✓ API key updated in {}", config_path);
         eprintln!("  Restart the agent for the new key to take effect.");
         eprintln!(
@@ -108,12 +117,12 @@ async fn main() -> Result<()> {
     }
 
     let config = if let Some(path) = &cli.config_path {
-        info!(path = %path, "Loading config from CLI argument");
+        agent_info!(path = %path, "Loading config from CLI argument");
         config::load_from_path(path)?
     } else {
         config::load()?
     };
-    info!(
+    agent_info!(
         agent_id = %config.agent.id,
         endpoint = %config.agent.cluster_endpoint,
         "Configuration loaded successfully"
@@ -127,7 +136,7 @@ async fn main() -> Result<()> {
             .unwrap_or_else(|_| "configs/agent/agent.yaml".to_string())
     }))
     .await;
-    info!("Communication layer initialized");
+    agent_info!("Communication layer initialized");
 
     // ── Wire communication lifecycle ─────────────────────────────────
     //
@@ -141,10 +150,12 @@ async fn main() -> Result<()> {
 
     match comm.connect().await {
         Ok(()) => {
-            info!("Connected to cluster at {}", config.agent.cluster_endpoint);
+            metrics.set_grpc_connected(true);
+            agent_info!("Connected to cluster at {}", config.agent.cluster_endpoint);
         }
         Err(e) => {
-            warn!(
+            metrics.set_grpc_connected(false);
+            agent_warn!(
                 error = %e,
                 endpoint = %config.agent.cluster_endpoint,
                 "Initial connection failed — reconnection loop will retry"
@@ -159,7 +170,7 @@ async fn main() -> Result<()> {
     comm.start_registration_loop();
     comm.start_heartbeat_loop();
     comm.start_stream_listener();
-    info!("Communication background loops started (reconnect, registration, heartbeat, stream)");
+    agent_info!("Communication background loops started (reconnect, registration, heartbeat, stream)");
 
     // ── Spawn collection layers ──────────────────────────────────────
     let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
@@ -169,20 +180,22 @@ async fn main() -> Result<()> {
         let token = cancel_token.child_token();
         let metal_config = config.layers.metal.clone();
         let comm = comm.clone();
+        let metrics = metrics.clone();
         let handle = tokio::spawn(async move {
             tokio::select! {
                 result = metal::run(metal_config, (*comm).clone()) => {
                     if let Err(e) = result {
-                        error!("Metal scraper error: {}", e);
+                        metrics.inc_errors();
+                        agent_error!(error = %e, "Metal scraper error");
                     }
                 }
                 _ = token.cancelled() => {
-                    info!("Metal scraper shutting down (cancel signal)");
+                    agent_info!("Metal scraper shutting down (cancel signal)");
                 }
             }
         });
         handles.push(handle);
-        info!("Metal scraper started");
+        agent_info!("Metal scraper started");
     }
 
     // Layer 2: eBPF Network Observer (Linux only)
@@ -197,6 +210,7 @@ async fn main() -> Result<()> {
         let token = cancel_token.child_token();
         let ebpf_config = config.layers.ebpf.clone();
         let comm = comm.clone();
+        let metrics = metrics.clone();
         let handle = tokio::task::spawn_blocking(move || {
             // Create a single-threaded tokio runtime for the eBPF event loop.
             // Failure here must not bring down the whole agent — the metal
@@ -205,7 +219,8 @@ async fn main() -> Result<()> {
             let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
                 Ok(rt) => rt,
                 Err(e) => {
-                    error!("Failed to create eBPF thread runtime; eBPF layer disabled: {}", e);
+                    metrics.inc_errors();
+                    agent_error!(error = %e, "Failed to create eBPF thread runtime; eBPF layer disabled");
                     return;
                 }
             };
@@ -214,23 +229,25 @@ async fn main() -> Result<()> {
                 tokio::select! {
                     result = ebpf::run(ebpf_config, (*comm).clone()) => {
                         if let Err(e) = result {
-                            error!("eBPF observer error: {}", e);
+                            metrics.inc_errors();
+                            agent_error!(error = %e, "eBPF observer error");
                         }
                     }
                     _ = token.cancelled() => {
-                        info!("eBPF observer shutting down (cancel signal)");
+                        agent_info!("eBPF observer shutting down (cancel signal)");
                     }
                 }
             });
         });
         handles.push(handle);
-        info!("eBPF network observer started (dedicated thread)");
+        agent_info!("eBPF network observer started (dedicated thread)");
     }
 
     // Layer 3: Supervisor (optional)
     if config.layers.supervisor.enabled {
         let token = cancel_token.child_token();
         let comm = comm.clone();
+        let metrics = metrics.clone();
         let handle = tokio::spawn(async move {
             tokio::select! {
                 _ = async {
@@ -239,35 +256,36 @@ async fn main() -> Result<()> {
                     supervisor.run(&comm).await;
                 } => {}
                 _ = token.cancelled() => {
-                    info!("Supervisor shutting down (cancel signal)");
+                    agent_info!("Supervisor shutting down (cancel signal)");
                 }
             }
         });
         handles.push(handle);
-        info!("Supervisor started");
+        agent_info!("Supervisor started");
     }
 
     // Self-metrics endpoint
     if config.agent.self_metrics.enabled {
         let token = cancel_token.child_token();
         let port = config.agent.self_metrics.port;
+        let metrics = metrics.clone();
         let handle = tokio::spawn(async move {
             tokio::select! {
-                result = start_metrics_endpoint(port) => {
+                result = start_metrics_endpoint(port, metrics) => {
                     if let Err(e) = result {
-                        error!("Metrics endpoint error: {}", e);
+                        agent_error!(error = %e, "Metrics endpoint error");
                     }
                 }
                 _ = token.cancelled() => {
-                    info!("Metrics endpoint shutting down (cancel signal)");
+                    agent_info!("Metrics endpoint shutting down (cancel signal)");
                 }
             }
         });
         handles.push(handle);
-        info!(port = port, "Self-metrics endpoint started");
+        agent_info!(port = port, "Self-metrics endpoint started");
     }
 
-    info!(
+    agent_info!(
         agent_id = %config.agent.id,
         endpoint = %config.agent.cluster_endpoint,
         metal_enabled = config.layers.metal.enabled,
@@ -283,10 +301,10 @@ async fn main() -> Result<()> {
     let signal_token = cancel_token.clone();
     tokio::spawn(async move {
         if let Err(e) = tokio::signal::ctrl_c().await {
-            error!("Failed to listen for shutdown signal: {}", e);
+            agent_error!(error = %e, "Failed to listen for shutdown signal");
             return;
         }
-        info!("Shutdown signal received (Ctrl+C)");
+        agent_info!("Shutdown signal received (Ctrl+C)");
         signal_token.cancel();
     });
 
@@ -302,8 +320,9 @@ async fn main() -> Result<()> {
     //    flush edge buffer, disconnect gRPC).
     // 2. Wait for all collection layer tasks to finish (they observe
     //    the cancellation token and exit cleanly).
-    info!("Initiating graceful shutdown");
+    agent_info!("Initiating graceful shutdown");
 
+    metrics.set_grpc_connected(false);
     comm.shutdown().await;
 
     for handle in handles {
@@ -313,16 +332,19 @@ async fn main() -> Result<()> {
                 // Task was cancelled — this is expected during shutdown.
             }
             Err(e) => {
-                error!("Task panicked during shutdown: {:?}", e);
+                agent_error!(error = ?e, "Task panicked during shutdown");
             }
         }
     }
 
-    info!("Paryty Agent shutdown complete");
+    agent_info!("Paryty Agent shutdown complete");
     Ok(())
 }
 
-async fn start_metrics_endpoint(port: u16) -> Result<()> {
+/// Starts a minimal HTTP server on the given port that serves:
+///   - `GET /metrics` — Prometheus text format from the agent's self-metrics
+///   - `GET /health`  — JSON health check
+async fn start_metrics_endpoint(port: u16, metrics: Arc<observability::Metrics>) -> Result<()> {
     use tokio::io::AsyncWriteExt;
     use tokio::net::TcpListener;
 
@@ -330,23 +352,40 @@ async fn start_metrics_endpoint(port: u16) -> Result<()> {
         .await
         .map_err(|e| anyhow::anyhow!("Failed to bind metrics endpoint: {}", e))?;
 
-    info!("Metrics endpoint listening on port {}", port);
+    agent_info!("Metrics endpoint listening on port {}", port);
 
     loop {
         let (mut stream, _) = listener.accept().await?;
+        let metrics = metrics.clone();
 
         tokio::spawn(async move {
-            let body = serde_json::json!({
-                "status": "healthy",
-                "service": "paryty-agent",
-                "version": env!("CARGO_PKG_VERSION"),
-            });
-            let body_str = body.to_string();
+            // Minimal HTTP request parsing: read first line to determine path.
+            // We only support GET /metrics and GET /health. Any other request
+            // returns 404. This is intentionally minimal — no full HTTP parser
+            // dependency.
+            let mut buf = [0u8; 4096];
+            let n = match tokio::io::AsyncReadExt::read(&mut stream, &mut buf).await {
+                Ok(0) => return, // Connection closed before data
+                Ok(n) => n,
+                Err(_) => return,
+            };
+
+            let request = String::from_utf8_lossy(&buf[..n]);
+            let first_line = request.lines().next().unwrap_or("");
+
+            let (status, content_type, body) = if first_line.contains("/metrics") {
+                ("200 OK", "text/plain; version=0.0.4", metrics.render_prometheus())
+            } else {
+                // Default: health check (served at /health or any unmatched path)
+                ("200 OK", "application/json", metrics.render_json())
+            };
 
             let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
-                body_str.len(),
-                body_str
+                "HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                status,
+                content_type,
+                body.len(),
+                body
             );
 
             let _ = stream.write_all(response.as_bytes()).await;

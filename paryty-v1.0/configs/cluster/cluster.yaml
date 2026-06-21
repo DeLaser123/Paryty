@@ -115,7 +115,7 @@ cluster:
       # Runtime config
       stale_node_timeout: "5m"
       graph_snapshot_interval: "60s"
-      # Reduced from 10000 — the 30s correlation window only needs ~1K events
+      # Reduced from 10000 â€” the 30s correlation window only needs ~1K events
       # for temporal correlation. Saves up to 45 MB under load.
       event_buffer_size: 1000
       correlation_window: "30s"
@@ -180,6 +180,10 @@ cluster:
       password: ""
       db: 0
       pool_size: 10
+      # TLS for Dragonfly connections. Set tls: true in production and provide
+      # the CA certificate that signed the Dragonfly server certificate.
+      tls: false
+      tls_ca_file: ""
       ttl: "5m"
       topology:
         lock_retries: 3
@@ -204,6 +208,12 @@ cluster:
       username: "${PARYTY_QUESTDB_USERNAME}"
       password: "${PARYTY_QUESTDB_PASSWORD}"
       max_conns: 20
+      # PostgreSQL wire protocol TLS mode. Valid values:
+      #   "disable" - no TLS (dev / local)
+      #   "require" - TLS required, no certificate verification
+      #   "verify-ca" - TLS required, verify server certificate against CA
+      #   "verify-full" - TLS required, verify server certificate and hostname
+      sslmode: "disable"
       ilp:
         addr: "questdb:9009"
         buffer_size: 10000
@@ -256,7 +266,13 @@ cluster:
       endpoint: "127.0.0.1:8333"
       access_key: "${PARYTY_SWFS_ACCESS_KEY}"
       secret_key: "${PARYTY_SWFS_SECRET_KEY}"
+      # TLS configuration for the S3-compatible endpoint.
+      # Set use_ssl: true in production. When enabled, the client verifies
+      # the server certificate against the system CA pool by default.
+      # Provide a custom CA file for self-signed / internal-PKI certificates.
       use_ssl: false
+      tls_ca_file: ""
+      tls_insecure_skip_verify: false
       region: "us-east-1"
       bucket: "paryty-cold-storage"
       snapshots:

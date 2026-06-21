@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package paryty.v1;
+
+option go_package = "github.com/paryty/paryty-v1.0/cluster/internal/proto;parytyv1";
+
+import "google/protobuf/timestamp.proto";
+
+// PipelineMessage is the inter-stage message protocol for the processing
+// pipeline. When PARYTY_PIPELINE_MODE=distributed, messages are serialized
+// to Redpanda topics between stages instead of using in-process Go channels.
+// In single mode (default), the oneof payload is used directly via
+// Go channels for zero-copy inter-stage transfer.
+message PipelineMessage {
+  // Unique message identifier for deduplication and tracing.
+  string message_id = 1;
+
+  // Tenant identifier for multi-tenant isolation.
+  string tenant_id = 2;
+
+  // The pipeline stage that produced this message.
+  PipelineStage stage = 3;
+
+  // When this message was created.
+  google.protobuf.Timestamp created_at = 4;
+
+  // The stage-specific payload.
+  PipelinePayload payload = 5;
+}
+
+// PipelineStage identifies which stage produced a PipelineMessage.
+enum PipelineStage {
+  PIPELINE_STAGE_UNSPECIFIED = 0;
+  PIPELINE_STAGE_AGGREGATOR = 1;
+  PIPELINE_STAGE_CORRELATOR = 2;
+  PIPELINE_STAGE_ENRICHER = 3;
+}
+
+// PipelinePayload carries the stage-specific data as a oneof.
+message PipelinePayload {
+  oneof data {
+    // Aggregator output: windowed metric aggregations.
+    AggregatedMetrics aggregated = 1;
+
+    // Correlator output: correlated metrics with dependency graph.
+    CorrelatedMetrics correlated = 2;
+
+    // Enricher output: enriched metrics with metadata.
+    EnrichedMetrics enriched = 3;
+
+    // Anomaly payload: anomaly detection results from intelligence layer.
+    AnomalyEvent anomaly = 4;
+  }
+}
+
+// AggregatedMetrics represents windowed metric aggregations from the
+// aggregator stage. This is a lightweight proto representation of the
+// internal models.AggregatedMetric type, suitable for serialization.
+message AggregatedMetrics {
+  // Agent that produced these metrics.
+  string agent_id = 1;
+
+  // Metric name.
+  string name = 2;
+
+  // JSON-encoded labels.
+  string labels = 3;
+
+  // Aggregation window in seconds.
+  int64 window_seconds = 4;
+
+  // Aggregation type: sum, avg, min, max, p50, p95, p99.
+  string agg_type = 5;
+
+  // Aggregated value.
+  double value = 6;
+
+  // Window end timestamp.
+  google.protobuf.Timestamp timestamp = 7;
+}
+
+// CorrelatedMetrics represents the output of the correlator stage,
+// including service dependencies and topology changes.
+message CorrelatedMetrics {
+  // Agent that correlated these metrics.
+  string agent_id = 1;
+
+  // Service dependencies discovered.
+  repeated Dependency dependencies = 2;
+
+  // Topology changes detected.
+  repeated TopologyChange topology_changes = 3;
+
+  // Process services identified.
+  repeated string process_services = 4;
+
+  // Correlation timestamp.
+  google.protobuf.Timestamp timestamp = 5;
+}
+
+// Dependency represents a service-to-service dependency discovered
+// by the correlator.
+message Dependency {
+  string source_service = 1;
+  string target_service = 2;
+  string protocol = 3;
+}
+
+// TopologyChange represents a change in the service topology.
+message TopologyChange {
+  string node_id = 1;
+  string change_type = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}
+
+// EnrichedMetrics represents the output of the enricher stage,
+// with metadata, labels, and correlation results attached.
+message EnrichedMetrics {
+  // Agent that produced these metrics.
+  string agent_id = 1;
+
+  // Enriched metric batches (JSON-serialized for flexibility).
+  string metric_batch_json = 2;
+
+  // Correlation metadata.
+  CorrelatedMetrics correlation = 3;
+
+  // Enrichment timestamp.
+  google.protobuf.Timestamp timestamp = 4;
+}
+
+// AnomalyEvent represents an anomaly detection result published by
+// the intelligence layer and consumed by the pipeline for storage.
+message AnomalyEvent {
+  // Unique anomaly identifier.
+  string id = 1;
+
+  // Tenant scope.
+  string tenant_id = 2;
+
+  // Agent that produced the anomalous metrics.
+  string agent_id = 3;
+
+  // Metric name that triggered the anomaly.
+  string metric_name = 4;
+
+  // Anomaly severity: critical, warning, info.
+  string severity = 5;
+
+  // Anomaly score: 0.0 (normal) to 1.0 (highly anomalous).
+  double score = 6;
+
+  // Expected value from the model.
+  double expected_value = 7;
+
+  // Actual observed value.
+  double actual_value = 8;
+
+  // Human-readable anomaly description.
+  string description = 9;
+
+  // When the anomaly was detected.
+  google.protobuf.Timestamp timestamp = 10;
+}

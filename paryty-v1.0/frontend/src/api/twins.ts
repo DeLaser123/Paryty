@@ -17,6 +17,8 @@ export interface CreateTwinPayload {
   name: string;
   description?: string;
   config?: TwinConfig;
+  abilities?: string[];
+  agent_ids?: string[];
 }
 
 /** Payload for updating an existing twin. */

@@ -12,6 +12,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime"
 	"syscall"
 	"time"
 
@@ -122,12 +123,25 @@ func main() {
 	var cpPool *pgxpool.Pool
 
 	if dbURL != "" {
-		var err error
-		cpPool, err = pgxpool.New(ctx, dbURL)
+		poolCfg, cfgErr := pgxpool.ParseConfig(dbURL)
+		if cfgErr != nil {
+			logger.Fatal("Failed to parse control plane DSN", zap.Error(cfgErr))
+		}
+		poolCfg.MaxConns = int32(runtime.NumCPU() * 4)
+		poolCfg.MinConns = int32(runtime.NumCPU())
+		poolCfg.MaxConnLifetime = 1 * time.Hour
+		poolCfg.MaxConnIdleTime = 30 * time.Minute
+		poolCfg.HealthCheckPeriod = 30 * time.Second
+		cpPool, err = pgxpool.NewWithConfig(ctx, poolCfg)
 		if err != nil {
 			logger.Fatal("Failed to create control plane pool", zap.Error(err))
 		}
 		defer cpPool.Close()
+
+		// Run versioned migrations before idempotent DDL.
+		if err := controlplane.RunMigrations(ctx, cpPool, "migrations"); err != nil {
+			logger.Warn("Migration runner error (non-fatal)", zap.Error(err))
+		}
 
 		if err := controlplane.EnsureTables(ctx, cpPool); err != nil {
 			logger.Fatal("Failed to ensure control plane tables", zap.Error(err))

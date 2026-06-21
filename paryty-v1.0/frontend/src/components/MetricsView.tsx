@@ -3,11 +3,15 @@ import { useMetrics } from '../hooks/useMetrics';
 import { useMetricsStore } from '../stores/metricsStore';
 import { getProcessingClient } from '../engine/processing/processingClient';
 import { ParytySelect } from './common/ParytySelect';
+import { TimeRangeSelector } from './metrics/TimeRangeSelector';
+import { MetricCards } from './metrics/MetricCards';
+import { MetricChart } from './metrics/MetricChart';
 import type { MetricSample } from '../engine/processing/metrics';
 import type { AggregatedMetric } from '../types/metric';
 
 export default function MetricsView() {
-  const { selectedMetric, selectMetric, timeRange, setTimeRange } = useMetricsStore();
+  const selectedMetric = useMetricsStore((s) => s.selectedMetric);
+  const selectMetric = useMetricsStore((s) => s.selectMetric);
   const metrics = useMetrics(selectedMetric ?? undefined);
 
   // Aggregate raw metrics on the shared processing thread when data changes.
@@ -56,27 +60,23 @@ export default function MetricsView() {
           <ParytySelect
             options={[
               { label: 'Select metric...', value: '' },
-              { label: 'CPU Usage', value: 'cpu_usage' },
-              { label: 'Memory Usage', value: 'memory_usage' },
-              { label: 'Disk I/O', value: 'disk_io' },
-              { label: 'Network I/O', value: 'network_io' },
+              { label: 'CPU Usage', value: 'cpu.usage_percent' },
+              { label: 'CPU Load (1m)', value: 'cpu.load_average_1m' },
+              { label: 'Memory Usage', value: 'memory.usage_percent' },
+              { label: 'Memory Used', value: 'memory.used_bytes' },
+              { label: 'Disk I/O', value: 'disk.read_bytes_per_sec' },
+              { label: 'Disk Write', value: 'disk.write_bytes_per_sec' },
+              { label: 'Network I/O', value: 'network.rx_bytes_per_sec' },
+              { label: 'Network TX', value: 'network.tx_bytes_per_sec' },
             ]}
             value={selectedMetric ?? ''}
             onChange={(val) => selectMetric(val || null)}
             placeholder="Select metric..."
           />
-          <input
-            type="datetime-local"
-            value={timeRange.start.slice(0, 16)}
-            onChange={(e) => setTimeRange({ ...timeRange, start: e.target.value })}
-          />
-          <input
-            type="datetime-local"
-            value={timeRange.end.slice(0, 16)}
-            onChange={(e) => setTimeRange({ ...timeRange, end: e.target.value })}
-          />
+          <TimeRangeSelector />
         </div>
       </div>
+      <MetricCards />
       <div className="metrics-content">
         {metrics.isLoading && <div className="loading">Loading metrics...</div>}
         {metrics.error && <div className="error">{metrics.error}</div>}
@@ -85,11 +85,14 @@ export default function MetricsView() {
             <p>Select a metric to view data</p>
           </div>
         )}
-        {metrics.series.length > 0 && (
+        {metrics.series.length > 0 && selectedMetric && (
+          <MetricChart metricName={selectedMetric} />
+        )}
+        {metrics.series.length > 0 && !selectedMetric && (
           <div className="metric-chart-placeholder">
-            <h3>{selectedMetric}</h3>
+            <h3>All Metrics</h3>
             <p>{metrics.series.length} series, {metrics.series.reduce((a, s) => a + s.points.length, 0)} data points</p>
-            {/* Chart will be rendered here with recharts or custom canvas */}
+            {/* Select a specific metric from the cards or dropdown to view chart */}
           </div>
         )}
       </div>

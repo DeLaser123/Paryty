@@ -97,8 +97,6 @@ export class WebSocketClient {
   private silentReconnect = false;
   /** Whether a "giving up" warning has been logged (once per session). */
   private gaveUpLogged = false;
-  /** Returns the current access token for WS auth query parameter. */
-  private tokenGetter: (() => string | null) | null = null;
 
   // === Deduplication ===
   private recentMessageIds: Set<string> = new Set();
@@ -141,33 +139,27 @@ export class WebSocketClient {
 
   /**
    * Set a function that returns the current access token.
-   * The token is appended as a query parameter to the WebSocket URL because
-   * the browser WebSocket API cannot set custom headers. The backend's
-   * GinJWTAuthFlexible middleware accepts the token from the "token" query
-   * parameter when no Authorization header or httpOnly cookie is present.
+   * @deprecated No-op. Auth is now handled via httpOnly cookie
+   * (paryty_access_token) which the browser sends automatically on
+   * WebSocket upgrade requests (SameSite=Strict). SEC-12.
    */
-  setTokenGetter(fn: (() => string | null) | null): void {
-    this.tokenGetter = fn;
+  setTokenGetter(_fn: (() => string | null) | null): void {
+    // No-op — retained for API compatibility.
   }
 
   /**
-   * Build the WebSocket connection URL with auth token.
-   * The browser WebSocket API cannot set custom headers, so the access
-   * token is passed as a query parameter. The backend's GinJWTAuthFlexible
-   * middleware accepts this for streaming endpoints (WebSocket, SSE).
+   * Build the WebSocket connection URL.
+   * Authentication is handled via the httpOnly `paryty_access_token` cookie
+   * which the browser sends automatically during the WebSocket upgrade
+   * handshake. The backend's GinJWTAuthFlexible middleware checks the
+   * cookie before falling back to the query parameter (backward compat).
    *
-   * When no token is available (e.g. before login), connects without one —
-   * the backend will reject with 401, triggering the reconnect backoff.
+   * SECURITY: Tokens are never placed in the URL to prevent exposure in
+   * access logs, proxy logs, and browser history (SEC-12).
    */
   private buildUrl(): string {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const baseUrl = this.url.startsWith('ws') ? this.url : `${protocol}//${window.location.host}${this.url}`;
-
-    const token = this.tokenGetter?.();
-    if (token) {
-      const separator = baseUrl.includes('?') ? '&' : '?';
-      return `${baseUrl}${separator}token=${encodeURIComponent(token)}`;
-    }
     return baseUrl;
   }
 

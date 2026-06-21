@@ -56,7 +56,12 @@ func (h *SimulationHandler) HandleRunScenario(w http.ResponseWriter, r *http.Req
 	}
 
 	if req.TenantID == "" {
-		req.TenantID = "default"
+		tenantID, err := tenantFromRequest(r)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "missing tenant context")
+			return
+		}
+		req.TenantID = tenantID
 	}
 
 	scenario := simulation.WhatIfScenario{
@@ -103,9 +108,10 @@ func (h *SimulationHandler) HandleListScenarios(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	tenantID := r.URL.Query().Get("tenant_id")
-	if tenantID == "" {
-		tenantID = "default"
+	tenantID, err := tenantFromRequest(r)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, "missing tenant context")
+		return
 	}
 
 	scenarios, err := h.engine.ListScenarios(r.Context(), tenantID)

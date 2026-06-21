@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -36,6 +37,7 @@ type QueryService struct {
 	authHandler   interface{}                 // Phase 8: auth.AuthHandler (interface to avoid import cycles)
 	twinAPI       TwinAPI                     // Phase 8: TwinService for agent/twin management
 	db            *pgxpool.Pool               // Phase 8: PostgreSQL control plane pool
+	replicaPool   *pgxpool.Pool               // Phase 8: Read replica pool (nil → fallback to primary)
 	planEngine    *plan.PlanEngine            // Phase 8: Plan engine for plan operations
 	audit         *security.AuditLogger       // Phase 8: Audit logger for admin actions
 }
@@ -43,7 +45,7 @@ type QueryService struct {
 // TwinAPI defines the twin management operations needed by the REST layer.
 // Implemented by auth.TwinHandler to avoid circular imports.
 type TwinAPI interface {
-	CreateTwin(ctx context.Context, tenantID, name, description string) (map[string]interface{}, error)
+	CreateTwin(ctx context.Context, tenantID, name, description string, abilities []string) (map[string]interface{}, error)
 	ListTwins(ctx context.Context, tenantID string) ([]map[string]interface{}, error)
 	GetTwin(ctx context.Context, tenantID, twinID string) (map[string]interface{}, error)
 	UpdateTwin(ctx context.Context, tenantID, twinID, name, description string) (map[string]interface{}, error)
@@ -117,6 +119,9 @@ func (s *QueryService) RegisterRoutes(api *gin.RouterGroup) {
 		api.GET("/alerts/rules", s.GetAlertRules)
 		api.POST("/alerts/:alert_id/acknowledge", s.AcknowledgeAlert)
 
+		// Anomalies
+		api.GET("/anomalies", s.ListAnomalies)
+
 		// Agents
 		api.GET("/agents", s.ListAgents)
 		api.GET("/agents/:agent_id", s.GetAgent)
@@ -143,6 +148,21 @@ func (s *QueryService) SetTwinAPI(api TwinAPI) {
 // SetDB attaches a PostgreSQL pool for user/tenant management.
 func (s *QueryService) SetDB(db *pgxpool.Pool) {
 	s.db = db
+}
+
+// SetReadPool attaches a read replica PostgreSQL pool for read-heavy queries.
+// When nil, GetReadPool falls back to the primary pool.
+func (s *QueryService) SetReadPool(pool *pgxpool.Pool) {
+	s.replicaPool = pool
+}
+
+// GetReadPool returns the read replica pool if configured, otherwise the
+// primary control plane pool. Use for read-only queries to offload the primary.
+func (s *QueryService) GetReadPool() *pgxpool.Pool {
+	if s.replicaPool != nil {
+		return s.replicaPool
+	}
+	return s.db
 }
 
 // SetPlanEngine attaches a PlanEngine for plan management.
@@ -633,6 +653,13 @@ func (s *QueryService) QueryMetrics(c *gin.Context) {
 		return
 	}
 
+	// Enforce maximum time window (90 days) to prevent abuse.
+	const maxWindow = 90 * 24 * time.Hour
+	if end.Sub(start) > maxWindow || start.After(end) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "time range must not exceed 90 days"})
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
@@ -777,24 +804,19 @@ func (s *QueryService) QueryTracesPost(c *gin.Context) {
 		End     string `json:"end"`
 		Limit   int    `json:"limit"`
 	}
-	if err := c.ShouldBindJSON(&query); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
+
+	startTime, err := time.Parse(time.RFC3339, query.Start)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "invalid start format; use RFC3339"})
+		return
+	}
+	endTime, err := time.Parse(time.RFC3339, query.End)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "invalid end format; use RFC3339"})
 		return
 	}
 
-	start, _ := time.Parse(time.RFC3339, query.Start)
-	end, _ := time.Parse(time.RFC3339, query.End)
-	if start.IsZero() {
-		start = time.Now().Add(-1 * time.Hour)
-	}
-	if end.IsZero() {
-		end = time.Now()
-	}
-	if query.Limit == 0 {
-		query.Limit = 100
-	}
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
 	defer cancel()
 
 	tenant, ok := requireTenant(c)
@@ -802,7 +824,7 @@ func (s *QueryService) QueryTracesPost(c *gin.Context) {
 		return
 	}
 
-	traces, err := s.store.QueryTraces(ctx, tenant, query.Service, start, end, query.Limit)
+	traces, err := s.store.QueryTraces(ctx, tenant, query.Service, startTime, endTime, query.Limit)
 	if err != nil {
 		s.logger.Error("Failed to query traces", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Internal server error"})
@@ -1383,8 +1405,8 @@ func (s *QueryService) RegisterTwinRoutes(authGroup *gin.RouterGroup, writeMW, c
 	authGroup.GET("/agents/:agent_id/pairing-status", s.GetAgentPairingStatusREST)
 	authGroup.GET("/agents/check-blacklist/:agent_id", s.CheckBlacklistREST)
 
-	// Binary hosting — download agent binaries.
-	authGroup.GET("/agents/download/:platform", s.DownloadAgentBinary)
+	// NOTE: Agent binary download route is registered on the public router
+	// (not authGroup) in main.go — agents don't have JWT tokens.
 }
 
 // tenantFromJWT extracts the tenant ID from the Gin context populated by JWT middleware.
@@ -1410,15 +1432,17 @@ func (s *QueryService) CreateTwin(c *gin.Context) {
 	}
 
 	var req struct {
-		Name        string `json:"name" binding:"required"`
-		Description string `json:"description"`
+		Name        string   `json:"name" binding:"required"`
+		Description string   `json:"description"`
+		Abilities   []string `json:"abilities"`
+		AgentIDs    []string `json:"agent_ids"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "INVALID_ARGUMENT", "message": "Invalid request body"})
 		return
 	}
 
-	twin, err := s.twinAPI.CreateTwin(c.Request.Context(), tenantID, req.Name, req.Description)
+	twin, err := s.twinAPI.CreateTwin(c.Request.Context(), tenantID, req.Name, req.Description, req.Abilities)
 	if err != nil {
 		s.logger.Error("Failed to create twin", zap.Error(err))
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "INTERNAL", "message": "Failed to create twin"})
@@ -2682,8 +2706,64 @@ func (s *QueryService) CheckBlacklistREST(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"blacklisted": blacklisted})
 }
 
+// downloadRateLimiter provides per-IP rate limiting for agent binary downloads.
+// NOTE: In-memory only — does not work across multiple pods. For multi-pod
+// deployments, use the Dragonfly-backed TenantRateLimiter middleware instead.
+// Limits to 10 downloads per hour per IP to prevent bandwidth abuse.
+var (
+	downloadRateMu      sync.Mutex
+	downloadRateWindows = make(map[string]*downloadWindow)
+)
+
+type downloadWindow struct {
+	count   int
+	endsAt  time.Time
+}
+
+const maxDownloadsPerHour = 10
+
+func checkDownloadRate(ip string) bool {
+	downloadRateMu.Lock()
+	defer downloadRateMu.Unlock()
+	now := time.Now()
+	w, ok := downloadRateWindows[ip]
+	if ok && now.After(w.endsAt) {
+		delete(downloadRateWindows, ip)
+		ok = false
+	}
+	if !ok {
+		downloadRateWindows[ip] = &downloadWindow{count: 1, endsAt: now.Add(1 * time.Hour)}
+		return true
+	}
+	w.count++
+	return w.count <= maxDownloadsPerHour
+}
+
 // DownloadAgentBinary serves agent binaries for download.
+// Authenticated via API key query parameter (agents don't have JWT tokens).
 func (s *QueryService) DownloadAgentBinary(c *gin.Context) {
+	// Rate limit: 10 downloads per hour per IP.
+	if !checkDownloadRate(c.ClientIP()) {
+		c.JSON(http.StatusTooManyRequests, gin.H{"message": "rate limit exceeded; try again later"})
+		return
+	}
+
+	// Validate API key from query parameter.
+	apiKey := c.Query("key")
+	if apiKey == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "API key required; provide ?key=YOUR_API_KEY"})
+		return
+	}
+	tenantID, keyErr := s.apiKeyManager.ValidateKey(c.Request.Context(), apiKey)
+	if keyErr != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid API key"})
+		return
+	}
+	if tenantID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid API key"})
+		return
+	}
+
 	platform := c.Param("platform")
 
 	var filename string
@@ -2712,4 +2792,74 @@ func (s *QueryService) DownloadAgentBinary(c *gin.Context) {
 	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	c.Header("Content-Type", "application/octet-stream")
 	c.File(path)
+}
+
+// ListAnomalies handles GET /api/v1/anomalies — paginated anomaly list.
+func (s *QueryService) ListAnomalies(c *gin.Context) {
+	tenantID, ok := requireTenant(c)
+	if !ok {
+		return
+	}
+	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
+	offset, _ := strconv.Atoi(c.DefaultQuery("offset", "0"))
+	if limit <= 0 || limit > 500 {
+		limit = 50
+	}
+
+	// Optional time range filter.
+	var start, end time.Time
+	if s := c.Query("start"); s != "" {
+		if t, err := time.Parse(time.RFC3339, s); err == nil {
+			start = t
+		}
+	}
+	if e := c.Query("end"); e != "" {
+		if t, err := time.Parse(time.RFC3339, e); err == nil {
+			end = t
+		}
+	}
+
+	// Optional severity filter.
+	severity := c.Query("severity")
+
+	// Query anomalies from QuestDB warm storage.
+	result, err := s.store.WarmStore().ListAnomalies(
+		c.Request.Context(), tenantID, start, end, severity, limit, offset,
+	)
+	if err != nil {
+		s.logger.Error("failed to list anomalies",
+			zap.String("tenant", tenantID),
+			zap.Error(err),
+		)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error":   "INTERNAL_ERROR",
+			"message": "Failed to retrieve anomalies",
+		})
+		return
+	}
+
+	// Convert to frontend-compatible format.
+	anomalies := make([]gin.H, 0, len(result.Anomalies))
+	for _, a := range result.Anomalies {
+		anomalies = append(anomalies, gin.H{
+			"id":             a.ID,
+			"tenant_id":      a.TenantID,
+			"agent_id":       a.AgentID,
+			"metric_name":    a.MetricName,
+			"severity":       a.Severity,
+			"score":          a.Score,
+			"expected_value": a.ExpectedValue,
+			"actual_value":   a.ActualValue,
+			"description":    a.Description,
+			"timestamp":      a.Timestamp.Format(time.RFC3339),
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":   anomalies,
+		"total":  result.Total,
+		"limit":  result.Limit,
+		"offset": result.Offset,
+		"tenant": tenantID,
+	})
 }

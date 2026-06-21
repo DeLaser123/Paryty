@@ -1,0 +1,40 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 06: Topology Visualization
+Date: 2026-06-20
+Tools Used: semgrep (Rust, full), npm audit
+================================================================================
+
+VULN-06-001 | Rust Unsafe Usage in Metal Process Scraper (Shared)
+Severity: MEDIUM
+See VULN-03-004 in 03-create-digital-paryty_vulns.txt
+Evidence:   agent/src/metal/process.rs:469 — unsafe libc::poll call
+
+VULN-06-002 | WebGL Context Loss Handling May Leak GPU Resources
+Severity: LOW
+Pre-state:  PixiJS application created without explicit cleanup on context loss
+Post-state: Same (unchanged — standardized handling not specified)
+Evidence:   Code review: WebGLRenderer in PixiJS creates GPU resources that must
+            be explicitly destroyed. The TopologyCanvas component's useEffect
+            cleanup may not destroy all GPU resources.
+Analysis:   If WebGL context is lost and restored, textures/geometries not properly
+            recreated could cause rendering failures. No security impact, but
+            availability concern for users.
+Reproduce:  Open Chrome DevTools > Performance > simulate context loss while on
+            /topology page. Observe if topology recovers correctly.
+Mitigation: Ensure PixiJS renderer.destroy() is called in useEffect cleanup.
+            Handle webglcontextlost/webglcontextrestored events.
+
+VULN-06-003 | npm Shared Vulnerabilities
+Severity: HIGH
+See VULN-01-004 (undici) and VULN-01-003 (esbuild)
+
+VULN-06-004 | Semgrep Full Scan — General Findings in topology/area
+Severity: INFO
+Evidence:   Semgrep auto-config scanned 767 files with 645 rules. 62 total findings
+            across the project. Topology-specific findings were limited to general
+            code quality rules. No OWASP Top 10 critical findings in topology code.
+Reproduce:  semgrep scan --config auto --text ./frontend/src/components/topology/
+
+================================================================================
+SUMMARY: 4 findings (0 CRITICAL, 1 HIGH shared, 1 MEDIUM shared, 1 LOW, 1 INFO)
+================================================================================

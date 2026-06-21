@@ -1,0 +1,96 @@
+# Paryty Plan Definitions
+# =============================================================================
+# This file is the SINGLE SOURCE OF TRUTH for all SaaS plan definitions.
+# Plan assignments are stored in PostgreSQL (tenant_plans table) as JSONB
+# snapshots. Editing this file does NOT retroactively change existing tenant
+# plans — use the SyncPlans API to broadcast changes.
+#
+# Plan lifecycle:
+#   basic     — self-serve signup, up to 2 twins, topology only
+#   pro       — self-serve signup, up to 4 twins, +metrics +alerts
+#   pro_plus  — self-serve signup, up to 6 twins, all features
+#   enterprise — sales-led, NOT self-serve (creatable: false), dedicated infra
+
+plans:
+  basic:
+    display_name: "Basic"
+    max_twins: 2
+    creatable: true
+    features:
+      topology_monitoring: true
+      metrics: false
+      alerts: false
+      timeline_replay: false
+      paryty_intel: false
+    limits:
+      agents_per_twin: 10
+      data_retention_days: 7
+      metrics_resolution: "60s"
+      alert_rules_per_tenant: 5
+      sub_users: 2
+    quotas:
+      ingestion_bytes_per_day: 1073741824    # 1 GiB
+      query_requests_per_minute: 60
+
+  pro:
+    display_name: "Pro"
+    max_twins: 4
+    creatable: true
+    features:
+      topology_monitoring: true
+      metrics: true
+      alerts: true
+      timeline_replay: false
+      paryty_intel: false
+    limits:
+      agents_per_twin: 50
+      data_retention_days: 30
+      metrics_resolution: "15s"
+      alert_rules_per_tenant: 25
+      sub_users: 10
+    quotas:
+      ingestion_bytes_per_day: 10737418240   # 10 GiB
+      query_requests_per_minute: 300
+
+  pro_plus:
+    display_name: "Pro+"
+    max_twins: 6
+    creatable: true
+    features:
+      topology_monitoring: true
+      metrics: true
+      alerts: true
+      timeline_replay: true
+      paryty_intel: true
+    limits:
+      agents_per_twin: 200
+      data_retention_days: 90
+      metrics_resolution: "10s"
+      alert_rules_per_tenant: 100
+      sub_users: 25
+    quotas:
+      ingestion_bytes_per_day: 107374182400  # 100 GiB
+      query_requests_per_minute: 1000
+
+  enterprise:
+    display_name: "Enterprise"
+    max_twins: 10
+    creatable: false   # NOT available for self-signup
+    features:
+      topology_monitoring: true
+      metrics: true
+      alerts: true
+      timeline_replay: true
+      paryty_intel: true
+      sso: true
+      custom_retention: true
+      dedicated_infra: true
+    limits:
+      agents_per_twin: 1000
+      data_retention_days: 365
+      metrics_resolution: "5s"
+      alert_rules_per_tenant: 500
+      sub_users: 100
+    quotas:
+      ingestion_bytes_per_day: 1099511627776 # 1 TiB
+      query_requests_per_minute: 5000

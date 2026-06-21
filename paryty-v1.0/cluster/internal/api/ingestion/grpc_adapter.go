@@ -800,9 +800,8 @@ func RLSTenantInterceptor(db *pgxpool.Pool) grpc.UnaryServerInterceptor {
 		}
 
 		tenant := TenantFromContext(ctx)
-		if tenant == "" || tenant == "default" {
-			// No tenant context, continue (auth interceptor will handle rejection)
-			return handler(ctx, req)
+		if tenant == "" {
+			return nil, status.Error(codes.Unauthenticated, "missing tenant context for RLS")
 		}
 
 		// Set the PostgreSQL session variable for RLS.

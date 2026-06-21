@@ -1,0 +1,54 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 02: Login & Session Persistence
+Date: 2026-06-20
+Tools Used: semgrep, gitleaks, npm audit, Go fuzz
+================================================================================
+
+VULN-02-001 | Proactive Refresh Timer Uses setTimeout (Drift Accumulates)
+Severity: LOW
+Pre-state:  No proactive refresh
+Post-state: authStore.ts implements scheduleRefresh() with setTimeout
+Evidence:   Code review of authStore.ts. Timer fires 2min before expiresAt.
+Analysis:   setTimeout with a fixed delay (expiryMs - 120000 - Date.now()) works
+            for a single cycle. But subsequent scheduled refreshes (after a silent
+            refresh) schedule a new timeout based on the new expiresAt. If the
+            browser tab is backgrounded, setTimeout may be throttled by the
+            browser, causing the refresh to happen late. The SessionTimeoutWarning
+            component uses setInterval which is similarly affected.
+Reproduce:  Log in, background the tab for 15+ minutes, return. Token may have
+            expired before the deferred timer fires.
+Mitigation: Acceptable. `document.visibilitychange` event could trigger an
+            immediate check on return, but the existing initAuth() on mount
+            already handles this.
+
+VULN-02-002 | Cookie Secure Flag Same As Spec 01
+Severity: MEDIUM
+See VULN-01-001 in 01-signup-and-plan-selection_vulns.txt
+(cookies in auth_rest_adapter.go Login() use same conditional Secure flag)
+
+VULN-02-003 | Integration Test JWT Token in Source
+Severity: LOW
+Pre-state:  cluster/tests/integration/auth_flow_test.go contains a hardcoded JWT
+Post-state: Same (unchanged)
+Evidence:   gitleaks detected: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ... in
+            cluster/tests/integration/auth_flow_test.go (commit a72...)
+Analysis:   This is a test fixture token. Not a real credential. However,
+            hardcoded JWTs in test files could mislead developers into thinking
+            JWTs are safe to hardcode. The token uses HS256 with a local secret.
+Reproduce:  git log -p -- cluster/tests/integration/auth_flow_test.go | grep "eyJ"
+Mitigation: Acceptable for tests. Recommend adding a comment: "TEST JWT ONLY —
+            DO NOT USE IN PRODUCTION".
+
+VULN-02-004 | Go Fuzz Testing — Zero Crashes Found
+Severity: INFO
+Evidence:   `go test -fuzz=FuzzValidatePassword -fuzztime=15s ./internal/auth/...`
+            Result: 0 crashes. Password validation is robust against fuzzed inputs.
+Reproduce:  go test -fuzz=. -fuzztime=30s ./internal/auth/...
+
+VULN-02-005 | esbuild + undici CVEs (shared)
+Severity: HIGH
+See VULN-01-003 and VULN-01-004
+
+================================================================================
+SUMMARY: 5 findings (0 CRITICAL, 1 HIGH shared, 1 MEDIUM shared, 2 LOW, 1 INFO)
+================================================================================

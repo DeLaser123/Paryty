@@ -466,6 +466,10 @@ fn read_proc_file_timeout(pid: u32, name: &str, timeout_ms: i32) -> Option<Strin
     // poll() with configurable timeout — if the kernel doesn't have data ready
     // within this window, the process is likely inaccessible.
     let mut pfd = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+    // SAFETY: pfd is a stack-allocated pollfd struct with a valid fd obtained
+    // from a File opened above. pfd is not moved or dropped during the poll()
+    // call, and its lifetime exceeds the syscall. poll() is a read-only syscall
+    // with no memory safety implications beyond correct pointer validity.
     let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
     if ret <= 0 {
         return None; // timeout or error

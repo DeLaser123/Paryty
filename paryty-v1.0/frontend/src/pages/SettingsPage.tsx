@@ -165,6 +165,9 @@ function PlanTab() {
   const plans = usePlanStore((s) => s.plans);
   const fetchCurrentPlan = usePlanStore((s) => s.fetchCurrentPlan);
   const fetchPlans = usePlanStore((s) => s.fetchPlans);
+  const addToast = useToastStore((s) => s.addToast);
+  const client = getRestClient();
+  const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
 
   useEffect(() => {
     fetchCurrentPlan();
@@ -267,8 +270,25 @@ function PlanTab() {
               {plan.maxTwins > 0 ? `Up to ${plan.maxTwins} Parytys` : 'Unlimited Parytys'}
             </span>
             {plan.name !== currentPlan.planName && plan.creatable && (
-              <button className="aef-btn aef-btn-active" style={{ marginTop: 'var(--aef-space-2)' }}>
-                <ArrowUpRight size={12} /> Upgrade
+              <button
+                className="aef-btn aef-btn-active"
+                style={{ marginTop: 'var(--aef-space-2)', opacity: upgradingPlan === plan.name ? 0.4 : 1 }}
+                disabled={upgradingPlan !== null}
+                onClick={async () => {
+                  setUpgradingPlan(plan.name);
+                  try {
+                    await client.post('/api/v1/tenant/plan/change', { planName: plan.name });
+                    addToast({ type: 'success', message: `Upgraded to ${plan.displayName}!` });
+                    fetchCurrentPlan();
+                  } catch {
+                    addToast({ type: 'error', message: 'Failed to change plan. Contact support.' });
+                  } finally {
+                    setUpgradingPlan(null);
+                  }
+                }}
+                data-testid={`upgrade-${plan.name}`}
+              >
+                <ArrowUpRight size={12} /> {upgradingPlan === plan.name ? 'Upgrading…' : 'Upgrade'}
               </button>
             )}
           </div>
@@ -286,6 +306,8 @@ function ApiKeysTab() {
   const [keyName, setKeyName] = useState('');
   const [isCreating, setIsCreating] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [rotatingKeyId, setRotatingKeyId] = useState<string | null>(null);
+  const [confirmPassword, setConfirmPassword] = useState('');
   const addToast = useToastStore((s) => s.addToast);
   const client = getRestClient();
 
@@ -331,12 +353,22 @@ function ApiKeysTab() {
   }, [client, addToast]);
 
   const handleRotate = useCallback(async (id: string, name: string) => {
-    if (!window.confirm(`Are you sure you want to rotate the key "${name}"? The old key will be invalidated immediately.`)) {
+    if (rotatingKeyId !== id) {
+      setRotatingKeyId(id);
+      setConfirmPassword('');
       return;
     }
+    // Require password re-entry for security-sensitive key rotation.
+    if (!confirmPassword) {
+      addToast({ type: 'error', message: 'Enter your password to confirm key rotation.' });
+      return;
+    }
+    setRotatingKeyId(null);
+    setConfirmPassword('');
     try {
-      // BUGFIX: Backend wraps response in {"data": ...} envelope. Extract .data.
-      const resp = await client.put<{ data: RotateApiKeyResponse }>(`/api/v1/api-keys/${id}/rotate`);
+      const resp = await client.put<{ data: RotateApiKeyResponse }>(`/api/v1/api-keys/${id}/rotate`, {
+        password: confirmPassword,
+      });
       const result = resp.data;
       setNewKey({ ...result, name, createdAt: new Date().toISOString() });
       addToast({ type: 'success', message: 'API key rotated. Copy the new key now — it won\'t be shown again.' });
@@ -344,7 +376,7 @@ function ApiKeysTab() {
     } catch {
       addToast({ type: 'error', message: 'Failed to rotate API key.' });
     }
-  }, [client, addToast, fetchKeys]);
+  }, [client, addToast, fetchKeys, rotatingKeyId, confirmPassword]);
 
   const handleCopy = useCallback(async (key: string) => {
     try {
@@ -457,23 +489,57 @@ function ApiKeysTab() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 'var(--aef-space-1)' }}>
-                        <button
-                          className="aef-btn aef-btn-inactive"
-                          onClick={() => handleRotate(key.id, key.name)}
-                          aria-label={`Rotate key ${key.name}`}
-                          style={{ padding: '2px 6px' }}
-                          title="Rotate key"
-                        >
-                          <ArrowUpRight size={12} />
-                        </button>
-                        <button
-                          className="aef-btn aef-btn-inactive"
-                          onClick={() => handleDelete(key.id)}
-                          aria-label={`Delete key ${key.name}`}
-                          style={{ padding: '2px 6px' }}
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                        {rotatingKeyId === key.id ? (
+                          <>
+                            <input
+                              type="password"
+                              placeholder="Enter password to confirm"
+                              value={confirmPassword}
+                              onChange={(e) => setConfirmPassword(e.target.value)}
+                              className="aef-input aef-input--compact"
+                              style={{ width: 160, padding: '2px 6px', fontSize: 10 }}
+                              data-testid={`rotate-password-${key.id}`}
+                            />
+                            <button
+                              className="aef-btn aef-btn-active"
+                              onClick={() => handleRotate(key.id, key.name)}
+                              aria-label={`Confirm rotate key ${key.name}`}
+                              style={{ padding: '2px 6px', fontSize: 11 }}
+                              data-testid={`confirm-rotate-${key.id}`}
+                            >
+                              Confirm
+                            </button>
+                            <button
+                              className="aef-btn aef-btn-inactive"
+                              onClick={() => { setRotatingKeyId(null); setConfirmPassword(''); }}
+                              aria-label={`Cancel rotate key ${key.name}`}
+                              style={{ padding: '2px 6px', fontSize: 11 }}
+                              data-testid={`cancel-rotate-${key.id}`}
+                            >
+                              Cancel
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button
+                              className="aef-btn aef-btn-inactive"
+                              onClick={() => handleRotate(key.id, key.name)}
+                              aria-label={`Rotate key ${key.name}`}
+                              style={{ padding: '2px 6px' }}
+                              title="Rotate key"
+                            >
+                              <ArrowUpRight size={12} />
+                            </button>
+                            <button
+                              className="aef-btn aef-btn-inactive"
+                              onClick={() => handleDelete(key.id)}
+                              aria-label={`Delete key ${key.name}`}
+                              style={{ padding: '2px 6px' }}
+                            >
+                              <Trash2 size={12} />
+                            </button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>

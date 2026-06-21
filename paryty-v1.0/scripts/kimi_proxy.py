@@ -7,7 +7,7 @@ Rewrites model names so Qoder's "kimi-k2.6" becomes NVIDIA's "moonshotai/kimi-k2
 Usage:
   1. Run: python kimi_proxy.py
   2. In Qoder: Add Kimi BYOK with:
-     - API Key: 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
+      - API Key: YOUR_NVIDIA_API_KEY (set NVIDIA_API_KEY env var)
      - Base URL override (if supported): http://localhost:8765/v1
 
 If Qoder doesn't allow URL override for Kimi, see README instructions below.
@@ -15,13 +15,14 @@ If Qoder doesn't allow URL override for Kimi, see README instructions below.
 
 import http.server
 import json
+import os
 import urllib.request
 import ssl
 import sys
 
 LISTEN_PORT = 8765
 NVIDIA_BASE = "https://integrate.api.nvidia.com/v1"
-NVIDIA_KEY = "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"
+NVIDIA_KEY = os.environ.get("NVIDIA_API_KEY", "YOUR_NVIDIA_API_KEY")
 
 # Map Qoder model names -> NVIDIA model names
 MODEL_MAP = {

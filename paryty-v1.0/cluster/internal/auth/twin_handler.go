@@ -72,7 +72,7 @@ func (h *TwinHandler) CreateTwin(ctx context.Context, req *parytyv1.CreateTwinRe
 	}
 
 	cfg := twinConfigFromProto(req.Config)
-	t, err := h.tm.CreateTwin(ctx, tenantID, req.Name, req.Description, cfg)
+	t, err := h.tm.CreateTwin(ctx, tenantID, req.Name, req.Description, cfg, nil)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "create twin: %v", err)
 	}

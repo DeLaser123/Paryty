@@ -4,6 +4,7 @@ package hot
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -58,11 +59,12 @@ func agentStatePattern(tenant string) string {
 
 // Config contains configuration for the Dragonfly client.
 type Config struct {
-	Addr     string        `yaml:"addr" json:"addr"`
-	Password string        `yaml:"password" json:"password"`
-	DB       int           `yaml:"db" json:"db"`
-	PoolSize int           `yaml:"pool_size" json:"pool_size"`
-	TTL      time.Duration `yaml:"ttl" json:"ttl"`
+	Addr      string        `yaml:"addr" json:"addr"`
+	Password  string        `yaml:"password" json:"password"`
+	DB        int           `yaml:"db" json:"db"`
+	PoolSize  int           `yaml:"pool_size" json:"pool_size"`
+	TTL       time.Duration `yaml:"ttl" json:"ttl"`
+	TLSConfig *tls.Config   `yaml:"-" json:"-"` // TLS config for encrypted Dragonfly connections
 }
 
 // Client is the Dragonfly hot storage client.
@@ -73,16 +75,18 @@ type Client struct {
 
 // New creates a new Dragonfly client.
 // If cfg.TTL is zero, it defaults to 5 minutes.
+// If cfg.TLSConfig is non-nil, the connection to Dragonfly uses TLS.
 func New(cfg Config) *Client {
 	if cfg.TTL == 0 {
 		cfg.TTL = defaultTTL
 	}
 
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
-		PoolSize: cfg.PoolSize,
+		Addr:      cfg.Addr,
+		Password:  cfg.Password,
+		DB:        cfg.DB,
+		PoolSize:  cfg.PoolSize,
+		TLSConfig: cfg.TLSConfig,
 	})
 
 	return &Client{

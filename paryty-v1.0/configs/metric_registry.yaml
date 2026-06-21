@@ -1,0 +1,96 @@
+# Paryty Canonical Metric Name Registry
+#
+# This is the SINGLE SOURCE OF TRUTH for all metric names in Paryty.
+# All components MUST use these exact names when exporting metrics.
+# Convention: paryty.{component}.{subsystem}.{metric_name}
+# All lowercase, dot-separated.
+# Suffix: _total for counters, _bytes for gauges, _duration_ms for histograms.
+
+registry:
+  # === AGENT (Rust) ===
+  agent:
+    latency:
+      - paryty.agent.grpc.send.duration_ms        # Histogram: Time to send one batch to cluster
+    traffic:
+      - paryty.agent.metrics.collected.total       # Counter: Total metrics scraped
+    errors:
+      - paryty.agent.errors.total                  # Counter: Collection errors by type
+    saturation:
+      - paryty.agent.memory.bytes                  # Gauge: Current memory usage
+      - paryty.agent.edge_buffer.size              # Gauge: Edge buffer queue depth
+    health:
+      - paryty.agent.grpc.connected                # Gauge: 1=connected, 0=disconnected
+      - paryty.agent.ebpf.active                   # Gauge: 1=eBPF loaded, 0=fallback
+
+  # === CLUSTER — INGESTION (Go) ===
+  cluster.ingestion:
+    latency:
+      - paryty.cluster.ingestion.process.duration_ms   # Histogram: Validate + route one message
+    traffic:
+      - paryty.cluster.ingestion.messages.total        # Counter: Messages ingested by tenant, type
+    errors:
+      - paryty.cluster.ingestion.errors.total          # Counter: Validation errors, routing failures
+    saturation:
+      - paryty.cluster.ingestion.active_streams         # Gauge: Active gRPC streams
+
+  # === CLUSTER — PIPELINE (Go) ===
+  cluster.pipeline:
+    latency:
+      - paryty.cluster.pipeline.stage.duration_ms       # Histogram: Per-stage processing time
+    traffic:
+      - paryty.cluster.pipeline.messages.total          # Counter: Messages processed per stage
+    errors:
+      - paryty.cluster.pipeline.errors.total            # Counter: Processing errors per stage
+    saturation:
+      - paryty.cluster.pipeline.queue.depth             # Gauge: Inbound queue depth
+      - paryty.pipeline.dead_letter.size               # Gauge: Dead letter queue size
+
+  # === CLUSTER — STORAGE (Go) ===
+  cluster.storage:
+    latency:
+      - paryty.cluster.storage.hot.read.duration_ms     # Histogram: Dragonfly read
+      - paryty.cluster.storage.hot.write.duration_ms    # Histogram: Dragonfly write
+      - paryty.cluster.storage.warm.write.duration_ms   # Histogram: QuestDB ILP write
+      - paryty.cluster.storage.cold.write.duration_ms   # Histogram: SeaweedFS upload
+    errors:
+      - paryty.cluster.storage.errors.total             # Counter: Storage errors per tier
+    saturation:
+      - paryty.cluster.storage.hot.connections          # Gauge: Active Dragonfly connections
+
+  # === CLUSTER — QUERY (Go) ===
+  cluster.query:
+    latency:
+      - paryty.cluster.query.duration_ms                # Histogram: API query latency
+    traffic:
+      - paryty.cluster.query.requests.total             # Counter: Requests by endpoint, method
+    errors:
+      - paryty.cluster.query.errors.total               # Counter: 4xx, 5xx by endpoint
+    saturation:
+      - paryty.cluster.query.active_connections         # Gauge: Active WebSocket connections
+
+  # === INTELLIGENCE LAYER (Python) ===
+  intelligence:
+    latency:
+      - paryty.intelligence.prediction.duration_ms       # Histogram: Model inference latency
+    traffic:
+      - paryty.intelligence.predictions.total            # Counter: Predictions by model type
+    errors:
+      - paryty.intelligence.errors.total                 # Counter: Prediction failures
+    saturation:
+      - paryty.intelligence.model.memory.bytes           # Gauge: Model memory usage
+    health:
+      - paryty.intelligence.model.version                # Gauge: Current model version
+      - paryty.intelligence.drift.score                  # Gauge: Current drift score 0-1
+
+  # === FRONTEND (TypeScript) ===
+  frontend:
+    latency:
+      - paryty.frontend.render.frame_ms                  # Histogram: Frame render time
+      - paryty.frontend.api.duration_ms                  # Histogram: API call latency
+    traffic:
+      - paryty.frontend.api.calls.total                  # Counter: API calls by endpoint
+    errors:
+      - paryty.frontend.errors.total                     # Counter: JS errors, WebGL context losses
+    saturation:
+      - paryty.frontend.gpu.memory.bytes                 # Gauge: GPU memory usage
+      - paryty.frontend.nodes.count                      # Gauge: Current node count

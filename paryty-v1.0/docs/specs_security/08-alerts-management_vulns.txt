@@ -1,0 +1,39 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 08: Alerts Management
+Date: 2026-06-20
+Tools Used: semgrep, npm audit, Go vet
+================================================================================
+
+VULN-08-001 | Alert Acknowledgement Is Local-Only (Not Synced to Backend)
+Severity: HIGH
+Pre-state:  alertsStore.acknowledgeAlert sets local state to `resolved`
+Post-state: Same (unchanged)
+Evidence:   Code review of alertsStore.ts:122-139. The acknowledgeAlert function
+            only modifies local Zustand state. It does NOT call the backend API
+            (POST /api/v1/alerts/:id/acknowledge exists at rest.go:118 but is
+            NOT called by the store).
+Analysis:   When a user acknowledges an alert, it appears resolved locally but
+            is NOT persisted to the backend. Refreshing the page restores the
+            alert to its previous state. Other users/team members don't see
+            the acknowledgement. This creates confusion and may cause multiple
+            people to respond to the same alert.
+Reproduce:  1. Open /alerts page with active alerts
+            2. Click "Acknowledge" on an alert
+            3. Refresh the page
+            4. Alert appears unacknowledged again
+Mitigation: Wire acknowledgeAlert to call POST /api/v1/alerts/:id/acknowledge
+
+VULN-08-002 | Alert Actions Are Local-Only (Silence, Resolve) — Confirmation Gap
+Severity: MEDIUM
+Evidence:   Same analysis as VULN-08-001. silenceAlert and resolve actions are
+            local Zustand state changes only, not calling backend endpoints.
+Reproduce:  Attempt to silence an alert, refresh page — alert reappears.
+Mitigation: Wire all alert actions to corresponding backend endpoints.
+
+VULN-08-003 | npm Shared Vulnerabilities
+Severity: HIGH
+See VULN-01-004 and VULN-01-003
+
+================================================================================
+SUMMARY: 3 findings (0 CRITICAL, 2 HIGH, 1 MEDIUM)
+================================================================================

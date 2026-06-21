@@ -14,6 +14,7 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/config"
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
+	"github.com/paryty/paryty-v1.0/cluster/internal/storage/warm"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"go.uber.org/zap"
 )
@@ -80,6 +81,10 @@ func (m *mockPipelineStore) StoreAggregatedMetric(_ context.Context, _ string, m
 	m.storeAggCalls++
 	m.storedAggMetrics = append(m.storedAggMetrics, metric)
 	return m.storeAggErr
+}
+
+func (m *mockPipelineStore) StoreAnomaly(_ context.Context, _ string, _ *warm.AnomalyRecord) error {
+	return nil
 }
 
 // mockPipelineProducer implements PipelineProducer for testing.
@@ -208,6 +213,7 @@ func newTestPipeline(t *testing.T, store *mockPipelineStore, producer *mockPipel
 		mockDF,
 		logger, "test-tenant",
 		memConfig,
+		nil, // pipelineMetrics — nil means metric recording is no-op
 	)
 }
 
@@ -246,6 +252,7 @@ func TestPipeline_NewPipeline_DefaultTenant(t *testing.T) {
 		&mockPipelineStore{}, &mockPipelineProducer{}, &mockPipelineConsumer{},
 		mockDF, logger, "",
 		config.MemoryConfig{}, // Zero-value memory config for default test.
+		nil,                   // pipelineMetrics — nil for tests.
 	)
 
 	if p.tenant != "default" {

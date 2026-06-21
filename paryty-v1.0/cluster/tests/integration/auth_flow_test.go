@@ -189,7 +189,9 @@ func TestTokenManager_ValidateAccess_InvalidTokens(t *testing.T) {
 	}{
 		{"empty token", "", true},
 		{"malformed", "not-a-jwt", true},
-		{"wrong signature", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", true},
+		// TEST JWT ONLY — uses HS256 with a local dev secret.
+		// DO NOT use this token or secret in production.
+		{"wrong signature", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U", true}, // gitleaks:allow
 		{"random garbage", "xyz.abc.123", true},
 	}
 

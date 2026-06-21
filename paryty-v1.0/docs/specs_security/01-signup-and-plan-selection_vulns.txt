@@ -1,0 +1,85 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 01: Sign Up & Plan Selection
+Date: 2026-06-20
+Tools Used: semgrep, npm audit, gitleaks, wapiti
+================================================================================
+
+VULN-01-001 | Cookie Secure Flag Is Variable (Conditionally Absent)
+Severity: MEDIUM
+Pre-state:  spec calls for "HttpOnly, SameSite=Strict, conditional Secure"
+Post-state: auth_rest_adapter.go uses `Secure: a.cookieSecure` where cookieSecure
+            is `os.Getenv("PARYTY_DEV_MODE") != "true"`
+Evidence:   semgrep-go found 6 cookie-missing-secure warnings at lines 199,205,212,218
+            in cluster/internal/auth/auth_rest_adapter.go
+Analysis:   In dev mode (PARYTY_DEV_MODE=true), cookies are sent without Secure flag.
+            This is intentional for local HTTP development but means ANY deployment
+            without PARYTY_DEV_MODE explictly set to "true" WILL get Secure cookies.
+            However, if PARYTY_DEV_MODE is not set at all (empty string), cookieSecure
+            defaults to true — so production behavior is correct. The risk is that
+            manual deployments might accidentally run in dev mode.
+Reproduce:  Set PARYTY_DEV_MODE=true, start cluster, register — observe cookies lack
+            Secure flag (visible in browser DevTools > Application > Cookies).
+Mitigation: FALSE POSITIVE for production. Acceptable for dev. Recommend adding
+            explicit env guard: `if os.Getenv("PARYTY_DEV_MODE") == ""` before
+            production deployment scripts.
+
+VULN-01-002 | Registration Rate Limiter Uses ClientIP (IP Spoofing Possible)
+Severity: MEDIUM
+Pre-state:  spec spec section 2.1 mentions rate limiting BE-01
+Post-state: handler.go implements registerRateLimiter using c.ClientIP() in
+            auth_rest_adapter.go:67
+Evidence:   Code review of auth_rest_adapter.go Register handler
+Analysis:   `c.ClientIP()` trusts X-Forwarded-For/X-Real-IP headers by default
+            in Gin. An attacker can spoof their IP via these headers, bypassing
+            the 5/hour/IP rate limit. Proxy/CDN deployments need trusted proxy
+            configuration (`router.SetTrustedProxies()` / `router.ForwardedByClientIP`).
+Reproduce:  curl -H "X-Forwarded-For: 10.0.0.1" -X POST /api/v1/auth/register -d '{...}'
+            Repeat 5 times. Then change X-Forwarded-For to 10.0.0.2. Register
+            successfully — bypassing rate limit.
+Mitigation: Configure Gin trusted proxies in main.go. For dev: not exploitable
+            without a reverse proxy trusting external headers.
+
+VULN-01-003 | esbuild Dev Server Accessible (npm dependency)
+Severity: MODERATE
+Pre-state:  package.json includes vite which depends on esbuild
+Post-state: Same
+Evidence:   npm audit: GHSA-67mh-4wv8-2f99 — esbuild <=0.24.2 allows any website to
+            send requests to the dev server and read responses
+Reproduce:  Start `npm run dev`, navigate to localhost:3000. esbuild dev server
+            will accept cross-origin requests from any website.
+Mitigation: Upgrade vite to >=8.0.16 (npm audit fix --force). Not exploitable in
+            production (production builds don't use dev server).
+
+VULN-01-004 | undici Multiple CVEs (npm dependency)
+Severity: HIGH
+Pre-state:  package.json includes undici (indirect via vite)
+Post-state: Same
+Evidence:   npm audit: GHSA-vmh5-mc38-953g (TLS certificate validation bypass),
+            GHSA-pr7r-676h-xcf6 (cross-user info disclosure via cache),
+            GHSA-p88m-4jfj-68fv (HTTP header injection via Set-Cookie),
+            GHSA-vxpw-j846-p89q (WebSocket DoS),
+            GHSA-hm92-r4w5-c3mj (cross-origin routing via SOCKS5),
+            GHSA-35p6-xmwp-9g52 (response queue poisoning),
+            GHSA-g8m3-5g58-fq7m (SameSite cookie downgrade)
+Reproduce:  `npm audit` in frontend/
+Mitigation: `npm audit fix` to upgrade undici. Not exploitable in production
+            (undici is a dev dependency via vite).
+
+VULN-01-005 | Refresh Token in Register Response Body (Pre-Fix)
+Severity: LOW
+Pre-state:  spec section 4.1 says refreshToken should NOT be in body
+Post-state: auth_rest_adapter.go Register() now removes refreshToken from body
+            (delete(body, "refreshToken") at line ~235) and sets httpOnly cookies.
+Evidence:   Code review of reality report 01-signup implementation
+Analysis:   This was a gap in the pre-state (token traveled in JSON body). Fixed
+            in the reality implementation. The refreshToken is now only in the
+            httpOnly cookie.
+Reproduce:  N/A — already fixed.
+Mitigation: Already mitigated.
+
+================================================================================
+SUMMARY: 5 findings (0 CRITICAL, 2 HIGH, 2 MEDIUM, 1 LOW)
+Tools run: semgrep (8 Go findings, 6 in this spec), npm audit (3 total),
+           gitleaks (spec doc contains example token — false positive),
+           wapiti (frontend scan — no spec-specific findings)
+================================================================================

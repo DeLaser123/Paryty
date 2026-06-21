@@ -38,8 +38,9 @@ interface AuthProviderProps {
  *
  * On mount:
  * 1. Wires up the RestClient token getter and refresh callback.
- * 2. Wires up the WebSocket token getter.
+ * 2. Wires up the SSE token getter.
  * 3. Attempts silent token refresh if a stored refresh token exists.
+ * 4. Reconnects WebSocket on token change (auth via httpOnly cookie, SEC-12).
  */
 export function AuthProvider({ children }: AuthProviderProps) {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
@@ -47,7 +48,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const accessToken = useAuthStore((s) => s.accessToken);
   const initAuth = useAuthStore((s) => s.initAuth);
 
-  // Wire auth into RestClient and WebSocket
+  // Wire auth into RestClient and SSE (WebSocket uses httpOnly cookie)
   useEffect(() => {
     const client = getRestClient();
     client.setTokenGetter(() => useAuthStore.getState().accessToken);
@@ -55,8 +56,9 @@ export function AuthProvider({ children }: AuthProviderProps) {
       return await useAuthStore.getState().refreshAuth();
     });
 
-    const ws = getWsClient();
-    ws.setTokenGetter(() => useAuthStore.getState().accessToken);
+    // WebSocket auth is handled via httpOnly cookie (paryty_access_token)
+    // which the browser sends automatically on WebSocket upgrade. No token
+    // getter needed. (SEC-12: removed token from WS URL query parameter)
 
     // SSE clients read the token through a module-level getter because
     // EventSource cannot set request headers.
@@ -65,7 +67,6 @@ export function AuthProvider({ children }: AuthProviderProps) {
     return () => {
       client.setTokenGetter(null);
       client.setAuthRefreshCallback(null);
-      ws.setTokenGetter(null);
       setSseTokenGetter(null);
     };
   }, []);

@@ -1,0 +1,60 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 11: Admin & Team Management
+Date: 2026-06-20
+Tools Used: semgrep, npm audit, Go vet
+================================================================================
+
+VULN-11-001 | No Backend Endpoint for Change Password
+Severity: HIGH
+Pre-state:  Spec calls for ChangePassword endpoint (B-01, B-02)
+Post-state: SettingsPage.tsx has password change form calling
+            POST /api/v1/auth/change-password but NO backend handler exists.
+            grep across cluster/ found zero matches for "change-password" or
+            "ChangePassword" in Go handlers.
+Evidence:   `grep -r "change-password\|ChangePassword" cluster/` returns no results
+            in handler/endpoint code. SettingsPage.tsx:57-83 posts to a non-existent
+            endpoint.
+Analysis:   Users can fill in and submit the change password form, but the request
+            will 404. This is a broken feature that could mislead users into
+            thinking their password was changed.
+Reproduce:  1. Navigate to /settings > Account tab
+            2. Fill in "Change Password" form
+            3. Click "Change Password"
+            4. Observe 404 or network error in DevTools
+Mitigation: Implement POST /api/v1/auth/change-password handler in handler.go.
+
+VULN-11-002 | Admin-Only Route Protection
+Severity: LOW (Design Decision)
+Pre-state:  App.tsx wraps /settings with RequiredRoles(['admin'])
+Post-state: Same
+Evidence:   App.tsx:93: `<ProtectedRoute requiredRoles={['admin']}><SettingsPage /></ProtectedRoute>`
+Analysis:   Non-admin users (operator, viewer) cannot access ANY settings,
+            including their own profile/API keys. The spec (11-admin spec)
+            requires that non-admins CAN access settings but the Users tab is
+            hidden. Current implementation is more restrictive than spec requires.
+Reproduce:  Log in as operator role, attempt to navigate to /settings.
+Mitigation: Remove requiredRoles from route. Let SettingsPage component handle
+            tab visibility (it already filters Users tab for non-admins).
+
+VULN-11-003 | API Key Rotation Without Re-Authentication
+Severity: MEDIUM
+Pre-state:  SettingsPage.tsx has API key rotation
+Post-state: Rotation now uses inline confirmation (no window.confirm)
+Evidence:   Code review of SettingsPage.tsx handleRotate function.
+Analysis:   API key rotation does not require the user to re-enter their password
+            or provide a second factor. If an attacker gains temporary access to
+            a logged-in session (e.g., unattended computer), they could rotate
+            all API keys and take control.
+Reproduce:  1. Log in as admin
+            2. Go to Settings > API Keys > Rotate
+            3. Confirm without re-entering password
+Mitigation: Require password re-entry for key rotation. Or implement a separate
+            API key management token.
+
+VULN-11-004 | npm Shared Vulnerabilities
+Severity: HIGH
+See VULN-01-004 and VULN-01-003
+
+================================================================================
+SUMMARY: 4 findings (0 CRITICAL, 2 HIGH, 1 MEDIUM, 1 LOW)
+================================================================================

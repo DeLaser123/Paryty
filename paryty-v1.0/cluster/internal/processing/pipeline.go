@@ -12,6 +12,7 @@ package processing
 import (
 	"context"
 	"fmt"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -21,9 +22,12 @@ import (
 	"github.com/paryty/paryty-v1.0/cluster/internal/config"
 	"github.com/paryty/paryty-v1.0/cluster/internal/models"
 	"github.com/paryty/paryty-v1.0/cluster/internal/pool"
+	parytyv1 "github.com/paryty/paryty-v1.0/cluster/internal/proto"
 	"github.com/paryty/paryty-v1.0/cluster/internal/storage"
+	"github.com/paryty/paryty-v1.0/cluster/internal/storage/warm"
 	"github.com/paryty/paryty-v1.0/cluster/internal/stream"
 	"github.com/twmb/franz-go/pkg/kgo"
+	"go.opentelemetry.io/otel/metric"
 	"go.uber.org/zap"
 )
 
@@ -35,6 +39,7 @@ type PipelineStore interface {
 	StoreSpan(ctx context.Context, tenant string, span *models.Span) error
 	StoreEvents(ctx context.Context, events []models.Event) error
 	StoreAggregatedMetric(ctx context.Context, tenant string, m *models.AggregatedMetric) error
+	StoreAnomaly(ctx context.Context, tenant string, anomaly *warm.AnomalyRecord) error
 }
 
 // PipelineProducer defines the publishing operations required by the Pipeline.
@@ -58,6 +63,33 @@ var (
 	_ PipelineProducer = (*stream.Producer)(nil)
 	_ PipelineConsumer = (*stream.Consumer)(nil)
 )
+
+// Pipeline mode constants for inter-stage transport.
+const (
+	// PipelineModeSingle (default) runs all stages in-process with Go channels.
+	PipelineModeSingle = "single"
+
+	// PipelineModeDistributed uses Redpanda topics between pipeline stages,
+	// enabling independent scaling of each stage. Requires the pipeline.proto
+	// serialization protocol.
+	PipelineModeDistributed = "distributed"
+)
+
+// GetPipelineMode reads PARYTY_PIPELINE_MODE from the environment.
+// Returns "single" if unset or invalid. When set to "distributed", the
+// pipeline serializes inter-stage messages via Protobuf and Redpanda
+// instead of in-process Go channels.
+func GetPipelineMode() string {
+	mode := os.Getenv("PARYTY_PIPELINE_MODE")
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case PipelineModeDistributed:
+		return PipelineModeDistributed
+	case "", PipelineModeSingle:
+		return PipelineModeSingle
+	default:
+		return PipelineModeSingle
+	}
+}
 
 // PipelineConfig holds configuration for the processing pipeline.
 type PipelineConfig struct {
@@ -220,6 +252,27 @@ func (m *MemoryMonitor) GetStats() MemoryStats {
 	return m.stats
 }
 
+// PipelineMetrics holds the OpenTelemetry instruments for the pipeline's
+// golden signals. If nil, metric recording is silently skipped (no-op).
+// The zero-value is safe to use: all methods on nil instruments are no-ops.
+type PipelineMetrics struct {
+	// MessagesTotal is the counter for all messages ingested through the pipeline.
+	// Golden signal: paryty.cluster.pipeline.messages.total
+	MessagesTotal metric.Int64Counter
+
+	// ErrorsTotal is the counter for processing errors.
+	// Golden signal: paryty.cluster.pipeline.errors.total
+	ErrorsTotal metric.Int64Counter
+
+	// QueueDepth is a gauge for the current consumer queue depth.
+	// Golden signal: paryty.cluster.pipeline.queue.depth
+	QueueDepth metric.Int64Gauge
+
+	// DeadLetterSize is a gauge for the dead letter queue size.
+	// Golden signal: paryty.pipeline.dead_letter.size
+	DeadLetterSize metric.Int64Gauge
+}
+
 // Pipeline is the single-binary orchestrator that runs aggregator, correlator,
 // enricher, and downsampler as in-process stages. It consumes from Redpanda,
 // routes messages by topic through the processing pipeline, and publishes
@@ -239,6 +292,7 @@ type Pipeline struct {
 	logger        *zap.Logger
 	tenant        string
 	memoryMonitor *MemoryMonitor
+	pipelineMetrics *PipelineMetrics
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -264,6 +318,7 @@ type Pipeline struct {
 //   - logger: structured logger. If nil, a no-op logger is used.
 //   - tenant: the tenant identifier for storage and publishing operations.
 //   - memConfig: memory budget configuration for the circuit breaker.
+//   - metrics: optional OpenTelemetry instruments for golden-signal recording. May be nil.
 func NewPipeline(
 	config PipelineConfig,
 	aggregator *Aggregator,
@@ -277,6 +332,7 @@ func NewPipeline(
 	logger *zap.Logger,
 	tenant string,
 	memConfig config.MemoryConfig,
+	metrics *PipelineMetrics,
 ) *Pipeline {
 	if logger == nil {
 		logger = zap.NewNop()
@@ -286,18 +342,19 @@ func NewPipeline(
 	}
 
 	return &Pipeline{
-		config:        config,
-		aggregator:    aggregator,
-		correlator:    correlator,
-		enricher:      enricher,
-		downsampler:   downsampler,
-		store:         store,
-		producer:      producer,
-		consumer:      consumer,
-		dragonfly:     dragonfly,
-		logger:        logger,
-		tenant:        tenant,
-		memoryMonitor: NewMemoryMonitor(memConfig, logger),
+		config:          config,
+		aggregator:      aggregator,
+		correlator:      correlator,
+		enricher:        enricher,
+		downsampler:     downsampler,
+		store:           store,
+		producer:        producer,
+		consumer:        consumer,
+		dragonfly:       dragonfly,
+		logger:          logger,
+		tenant:          tenant,
+		memoryMonitor:   NewMemoryMonitor(memConfig, logger),
+		pipelineMetrics: metrics,
 	}
 }
 
@@ -441,12 +498,21 @@ func (p *Pipeline) MemoryMonitorRef() *MemoryMonitor {
 
 // handleRecord is the topic-aware record handler for the consumer.
 // It routes messages by topic to the appropriate processing function.
+// Golden-signal metrics are recorded via OTel when PipelineMetrics is configured.
 func (p *Pipeline) handleRecord(ctx context.Context, record *kgo.Record) error {
 	if err := p.processMessage(ctx, record.Topic, string(record.Key), record.Value); err != nil {
 		p.errors.Add(1)
+		// Record OTel error counter.
+		if pm := p.pipelineMetrics; pm != nil {
+			pm.ErrorsTotal.Add(ctx, 1)
+		}
 		return err
 	}
 	p.processed.Add(1)
+	// Record OTel messages counter.
+	if pm := p.pipelineMetrics; pm != nil {
+		pm.MessagesTotal.Add(ctx, 1)
+	}
 	return nil
 }
 
@@ -458,6 +524,7 @@ func (p *Pipeline) handleRecord(ctx context.Context, record *kgo.Record) error {
 //   - network.events → parse NetworkEvent → correlator.BufferNetworkEvents
 //   - traces → parse Span → enricher.EnrichSpan → store.StoreSpan
 //   - events → parse Events → store.StoreEvents
+//   - anomalies → parse AnomalyEvent → store.StoreAnomaly
 //   - unknown → log warning and skip
 //
 // Tenant is extracted from the message key (format: "tenant_id:agent_id").
@@ -534,6 +601,34 @@ func (p *Pipeline) processMessage(ctx context.Context, topic, key string, value 
 			events = []models.Event{single}
 		}
 		return p.store.StoreEvents(ctx, events)
+
+	case strings.HasSuffix(topic, "anomalies"):
+		var anomalyEvent parytyv1.AnomalyEvent
+		if err := pool.PooledJSONUnmarshal(value, &anomalyEvent); err != nil {
+			p.logger.Warn("Failed to unmarshal AnomalyEvent",
+				zap.String("topic", topic),
+				zap.Error(err),
+			)
+			return nil
+		}
+
+		// Convert proto AnomalyEvent to warm.AnomalyRecord.
+		anomalyRecord := &warm.AnomalyRecord{
+			ID:            anomalyEvent.Id,
+			TenantID:      anomalyEvent.TenantId,
+			AgentID:       anomalyEvent.AgentId,
+			MetricName:    anomalyEvent.MetricName,
+			Severity:      anomalyEvent.Severity,
+			Score:         anomalyEvent.Score,
+			ExpectedValue: anomalyEvent.ExpectedValue,
+			ActualValue:   anomalyEvent.ActualValue,
+			Description:   anomalyEvent.Description,
+		}
+		if anomalyEvent.Timestamp != nil {
+			anomalyRecord.Timestamp = anomalyEvent.Timestamp.AsTime()
+		}
+
+		return p.store.StoreAnomaly(ctx, tenant, anomalyRecord)
 
 	default:
 		p.logger.Warn("Unknown topic, skipping message",

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+
+	"github.com/paryty/paryty-v1.0/cluster/internal/plan"
 )
 
 // writeJSON writes a JSON response with the given status code.
@@ -30,4 +32,19 @@ func parseFloat(s string, dst *float64) (float64, error) {
 	}
 	*dst = v
 	return v, nil
+}
+
+// tenantFromRequest extracts the authenticated tenant ID from the request
+// context (set by JWT auth middleware). Returns empty string and an error
+// if no tenant context exists.
+func tenantFromRequest(r *http.Request) (string, error) {
+	v := r.Context().Value(plan.CtxTenantID)
+	if v == nil {
+		return "", fmt.Errorf("missing tenant context")
+	}
+	tenantID, ok := v.(string)
+	if !ok || tenantID == "" {
+		return "", fmt.Errorf("missing tenant context")
+	}
+	return tenantID, nil
 }

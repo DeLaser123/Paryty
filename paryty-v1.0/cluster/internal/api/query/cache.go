@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -13,10 +14,11 @@ import (
 
 // CacheConfig contains configuration for the query cache.
 type CacheConfig struct {
-	Addr     string        `yaml:"addr" json:"addr"`
-	Password string        `yaml:"password" json:"password"`
-	DB       int           `yaml:"db" json:"db"`
-	TTL      time.Duration `yaml:"ttl" json:"ttl"`
+	Addr      string        `yaml:"addr" json:"addr"`
+	Password  string        `yaml:"password" json:"password"`
+	DB        int           `yaml:"db" json:"db"`
+	TTL       time.Duration `yaml:"ttl" json:"ttl"`
+	TLSConfig *tls.Config   `yaml:"-" json:"-"` // TLS config for encrypted Dragonfly connections
 }
 
 // QueryCache provides caching for query results.
@@ -27,11 +29,13 @@ type QueryCache struct {
 }
 
 // NewQueryCache creates a new query cache.
+// If cfg.TLSConfig is non-nil, the Dragonfly connection uses TLS.
 func NewQueryCache(cfg CacheConfig, logger *zap.Logger) *QueryCache {
 	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Addr,
-		Password: cfg.Password,
-		DB:       cfg.DB,
+		Addr:      cfg.Addr,
+		Password:  cfg.Password,
+		DB:        cfg.DB,
+		TLSConfig: cfg.TLSConfig,
 	})
 
 	return &QueryCache{

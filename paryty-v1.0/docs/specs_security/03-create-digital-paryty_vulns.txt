@@ -1,0 +1,84 @@
+================================================================================
+PARYTY SECURITY AUDIT — Spec 03: Create Digital Paryty
+Date: 2026-06-20
+Tools Used: semgrep Go, semgrep Rust, semgrep full, Go vet, gitleaks
+================================================================================
+
+VULN-03-001 | math/rand Used Instead of crypto/rand in Chaos Engine
+Severity: HIGH
+Pre-state:  chaos.go existed with math/rand
+Post-state: Same (unchanged)
+Evidence:   semgrep found go.lang.security.audit.crypto.math_random.math-random-used
+            at cluster/internal/simulation/chaos.go:80
+Analysis:   Go's `math/rand` uses a deterministic PRNG seeded with the current
+            time. In a chaos engineering context, predictable random values could
+            allow an attacker to predict chaos injection patterns and evade them.
+            This should use `crypto/rand` for non-deterministic randomness.
+Reproduce:  Check cluster/internal/simulation/chaos.go for `math/rand` or
+            `math/rand.Read` or `rand.Intn()` usage.
+Mitigation: Replace math/rand with crypto/rand or use math/rand/v2 seeded with
+            crypto/rand.Read. For non-security-critical chaos timing (jitter),
+            math/rand is acceptable; for security decisions, crypto/rand required.
+
+VULN-03-002 | WebSocket Missing Origin Check
+Severity: HIGH
+Pre-state:  websocket.go with no origin validation
+Post-state: Same (unchanged)
+Evidence:   semgrep found go.gorilla.security.audit.websocket-missing-origin-check
+            at cluster/internal/api/query/websocket.go:200
+Analysis:   The WebSocket upgrader does not check the Origin header. Any website
+            can open a WebSocket connection and read messages. Combined with the
+            flexible auth middleware (GinJWTAuthFlexible which reads token from
+            cookie), an attacker could host a malicious page that silently opens
+            a WebSocket and exfiltrates telemetry data.
+Reproduce:  Create a malicious HTML page on a different origin. Include JavaScript
+            that opens `new WebSocket("ws://paryty-cluster:8080/api/v1/ws")`.
+            If the user has a valid httpOnly cookie for the cluster domain, the
+            browser will send it automatically (cross-site WebSocket cookies are
+            NOT restricted by SameSite=Strict for WebSocket handshakes).
+Mitigation: Add origin check: `upgrader.CheckOrigin = func(r *http.Request) bool {
+            origin := r.Header.Get("Origin"); return origin == expectedOrigin }`
+
+VULN-03-003 | Twin Name Uniqueness Uses COUNT Without Index
+Severity: LOW
+Pre-state:  No uniqueness check
+Post-state: twin.go CreateTwin() checks `SELECT COUNT(*) FROM paryty_twins WHERE
+            tenant_id = $1 AND name = $2 AND deleted_at IS NULL`
+Evidence:   Code review of twin.go
+Analysis:   The COUNT query is not a race-safe uniqueness check. Two concurrent
+            requests could both pass the COUNT check and both insert. A UNIQUE
+            constraint ON (tenant_id, name) WHERE deleted_at IS NULL would be
+            structurally safe. However, the application-level check + DB race
+            window is very small in practice.
+Reproduce:  Send two simultaneous POST /api/v1/twins with same name. Possible
+            (though unlikely) to get both through.
+Mitigation: Add PostgreSQL partial unique index:
+            `CREATE UNIQUE INDEX idx_twins_tenant_name ON paryty_twins (tenant_id, name) WHERE deleted_at IS NULL`
+
+VULN-03-004 | Rust Unsafe Usage in Metal Process Scraper
+Severity: MEDIUM
+Pre-state:  agent/src/metal/process.rs with unsafe libc::poll call
+Post-state: Same (unchanged)
+Evidence:   semgrep found rust.lang.security.unsafe-usage.unsafe-usage at
+            agent/src/metal/process.rs:469
+Analysis:   The line `let ret = unsafe { libc::poll(&mut pfd, 1, timeout_ms) };`
+            uses unsafe FFI to call poll(). poll() is a well-understood syscall
+            with minimal risk, but correctness of pointer/lifetime handling needs
+            audit. The &mut pfd reference must be valid for the duration of poll.
+Reproduce:  Review agent/src/metal/process.rs:469 for unsafe block
+Mitigation: Add SAFETY comment documenting why the unsafe is sound. Ensure pfd
+            is not moved/dropped during the poll call. Consider wrapping in a
+            safe abstraction.
+
+VULN-03-005 | Go Vet — Pre-Existing Test Compilation Issues
+Severity: LOW
+Evidence:   go vet: internal/plan/quota_test.go:38 not enough arguments to NewPlanEngine
+            internal/api/handler/anomaly.go:59 unknown field Window
+            internal/api/ingestion/grpc_adapter_test.go:403 type mismatch
+Analysis:   These are pre-existing test code issues. Not security vulnerabilities
+            directly, but broken tests reduce security test coverage.
+Reproduce:  `go vet ./...` in cluster/
+
+================================================================================
+SUMMARY: 5 findings (0 CRITICAL, 2 HIGH, 1 MEDIUM, 2 LOW)
+================================================================================

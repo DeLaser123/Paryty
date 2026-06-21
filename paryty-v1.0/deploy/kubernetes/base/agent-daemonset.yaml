@@ -13,8 +13,8 @@ spec:
       labels:
         app.kubernetes.io/component: agent
     spec:
-      hostPID: true  # Required for eBPF process monitoring
-      hostNetwork: true  # Required for network traffic inspection
+      hostPID: true  # Required for eBPF kprobes on host processes
+      # hostNetwork removed — agents report via gRPC, don't need host network (INF-03)
       containers:
         - name: agent
           image: paryty/agent:v1.0.0  # Pin to specific version, never use :latest
@@ -32,6 +32,12 @@ spec:
                 configMapKeyRef:
                   name: paryty-config
                   key: LOG_LEVEL
+            - name: PARYTY_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: paryty-agent-credentials
+                  key: api-key
+                  optional: true  # Agent can be configured post-deploy via set-api-key
           volumeMounts:
             - name: proc
               mountPath: /host/proc
@@ -57,21 +63,23 @@ spec:
             initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
-            # Required for eBPF program loading and network traffic inspection
+            # Minimal privileges for eBPF kprobe attachment (INF-03)
             capabilities:
               add:
-                - SYS_ADMIN  # Required for eBPF
-                - NET_ADMIN   # Required for network monitoring
-                - SYS_PTRACE  # Required for process inspection
+                - NET_ADMIN   # Required for BPF_PROG_TYPE_SCHED_CLS
+                - SYS_PTRACE  # Required for kprobe attachment on some kernels
+                # SYS_ADMIN removed — not required for BPF_PROG_TYPE_KPROBE
             readOnlyRootFilesystem: true
-            runAsNonRoot: false  # Agent needs root for eBPF
-            allowPrivilegeEscalation: true
+            runAsNonRoot: false  # eBPF needs root for bpf() syscall
+            allowPrivilegeEscalation: false  # Capabilities set at startup, no further escalation
+            seccompProfile:
+              type: RuntimeDefault
       volumes:
         - name: proc
           hostPath:
-            path: /proc
+            path: /proc  # Full /proc needed for kallsyms, PID lookup, net stats
         - name: sys
           hostPath:
-            path: /sys
+            path: /sys   # Full /sys needed for BPF filesystem and kernel debug
       tolerations:
         - operator: Exists

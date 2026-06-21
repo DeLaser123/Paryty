@@ -1,5 +1,6 @@
 import { useAlerts } from '../hooks/useAlerts';
 import { ParytySelect } from './common/ParytySelect';
+import { AlertPanel } from './alerts/AlertPanel';
 
 export default function AlertView() {
   const alerts = useAlerts();
@@ -73,6 +74,12 @@ export default function AlertView() {
           ))}
         </div>
       </div>
+      {alerts.selectedAlert && (
+        <AlertPanel
+          alert={alerts.selectedAlert}
+          onClose={() => alerts.selectAlert(null)}
+        />
+      )}
     </div>
   );
 }

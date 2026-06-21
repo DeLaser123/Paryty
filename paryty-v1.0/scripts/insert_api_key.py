@@ -1,11 +1,17 @@
-import psycopg2
+import os
+import sys
 import bcrypt
+import psycopg2
 
-raw_key = "pk_live_6a89eaf0d573619d927dc19895039dc78897cfba8d1d5c39b079c828d552cbeb"
+raw_key = os.environ.get("PARYTY_API_KEY")
+if not raw_key:
+    print("Error: PARYTY_API_KEY environment variable not set")
+    sys.exit(1)
 
 # Generate hash
 hash_bytes = bcrypt.hashpw(raw_key.encode(), bcrypt.gensalt())
 hash_str = hash_bytes.decode()
+key_prefix = raw_key[:15]
 print(f"Generated hash: {hash_str}")
 
 # Verify it
@@ -14,16 +20,16 @@ print(f"Verification: {result}")
 
 # Connect to PostgreSQL
 conn = psycopg2.connect(
-    host="localhost",
-    port=5432,
-    database="paryty",
-    user="paryty",
-    password="paryty"
+    host=os.environ.get("PARYTY_DB_HOST", "localhost"),
+    port=int(os.environ.get("PARYTY_DB_PORT", "5432")),
+    database=os.environ.get("PARYTY_DB_NAME", "paryty"),
+    user=os.environ.get("PARYTY_DB_USER", "paryty"),
+    password=os.environ.get("PARYTY_DB_PASSWORD", "paryty")
 )
 cur = conn.cursor()
 
 # Delete existing key
-cur.execute("DELETE FROM api_keys WHERE key_prefix = %s", ("pk_live_6a89eaf0",))
+cur.execute("DELETE FROM api_keys WHERE key_prefix = %s", (key_prefix,))
 
 # Insert with proper hash
 cur.execute(
@@ -34,13 +40,13 @@ cur.execute(
         "11111111-1111-1111-1111-111111111111",
         "default-agent",
         hash_str,
-        "pk_live_6a89eaf0"
+        key_prefix
     )
 )
 conn.commit()
 
 # Verify
-cur.execute("SELECT key_hash FROM api_keys WHERE key_prefix = %s", ("pk_live_6a89eaf0",))
+cur.execute("SELECT key_hash FROM api_keys WHERE key_prefix = %s", (key_prefix,))
 stored_hash = cur.fetchone()[0]
 print(f"Stored hash: {stored_hash}")
 

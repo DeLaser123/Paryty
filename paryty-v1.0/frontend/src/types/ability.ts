@@ -100,3 +100,16 @@ export interface EnabledAbility {
   id: AbilityId;
   enabledAt: string; // ISO 8601
 }
+
+// ─── Ability-to-Feature Gating Map ─────────────────────────────────────────
+// Maps ability IDs to plan feature names. Used to gate abilities in the
+// creation wizard based on the tenant's current plan.
+
+export const ABILITY_FEATURE_MAP: Record<AbilityId, string> = {
+  topology_observation: 'topology_monitoring',
+  metrics_monitoring:   'metrics',
+  alerts:               'alerts',
+  timeline_replay:      'timeline_replay',
+  forecasting:          'paryty_intel',
+  watif_drills:         'paryty_intel',
+};

@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"time"
 
 	"github.com/paryty/paryty-v1.0/cluster/internal/intelligence"
 	"go.uber.org/zap"
@@ -46,9 +45,6 @@ func (h *AnomalyHandler) HandleDetectAnomalies(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	if req.WindowMinutes == 0 {
-		req.WindowMinutes = 60
-	}
 	if req.Sensitivity == 0 {
 		req.Sensitivity = 0.5
 	}
@@ -56,7 +52,6 @@ func (h *AnomalyHandler) HandleDetectAnomalies(w http.ResponseWriter, r *http.Re
 	detectReq := &intelligence.AnomalyDetectionRequest{
 		ServiceID:   req.ServiceID,
 		MetricName:  req.MetricName,
-		Window:      time.Duration(req.WindowMinutes) * time.Minute,
 		Sensitivity: req.Sensitivity,
 	}
 
@@ -84,17 +79,10 @@ func (h *AnomalyHandler) HandleGetAnomalies(w http.ResponseWriter, r *http.Reque
 
 	serviceID := r.URL.Query().Get("service_id")
 	metricName := r.URL.Query().Get("metric")
-	windowMinutes := 60
-	if w := r.URL.Query().Get("window"); w != "" {
-		if parsed, err := time.ParseDuration(w + "m"); err == nil {
-			windowMinutes = int(parsed.Minutes())
-		}
-	}
 
 	detectReq := &intelligence.AnomalyDetectionRequest{
 		ServiceID:   serviceID,
 		MetricName:  metricName,
-		Window:      time.Duration(windowMinutes) * time.Minute,
 		Sensitivity: 0.5,
 	}
 
@@ -122,7 +110,7 @@ func (h *AnomalyHandler) HandleExplainAnomaly(w http.ResponseWriter, r *http.Req
 	}
 
 	req := &intelligence.ExplainAnomalyRequest{
-		AnomalyID: anomalyID,
+		AgentID: anomalyID,
 	}
 
 	resp, err := h.client.ExplainAnomaly(r.Context(), req)

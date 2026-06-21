@@ -1,0 +1,729 @@
+﻿semgrep :                
+At line:1 char:1
++ semgrep scan --config auto --text 2>&1 | Out-File -FilePath D:\__Proj ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (               :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+               
+┌─────────────┐
+│ Scan Status │
+└─────────────┘
+  Scanning 770 files tracked by git with 1059 Code rules:
+                                                                                                                       
+ 
+  Language      Rules   Files          Origin      Rules                                                               
+ 
+ ─────────────────────────────        ───────────────────                                                              
+ 
+  <multilang>      71     513          Community    1059                                                               
+ 
+  ts              163     169                                                                                          
+ 
+  go               84     131                                                                                          
+ 
+  yaml             31     130                                                                                          
+ 
+  python          243      65                                                                                          
+ 
+  rust              4      32                                                                                          
+ 
+  bash              4      18                                                                                          
+ 
+  json              4      13                                                                                          
+ 
+  js              153       5                                                                                          
+ 
+  c                 5       5                                                                                          
+ 
+  php              38       2                                                                                          
+ 
+  dockerfile        6       1                                                                                          
+ 
+  html              1       1                                                                                          
+ 
+                                                                                                                       
+ 
+Warning: 1 timeout error(s) in cluster\internal\proto\agent.pb.go when running the following rules:
+[go.lang.security.injection.raw-html-format.raw-html-format]
+Warning: 1 timeout error(s) in cluster\internal\proto\auth.pb.go when running the following rules:
+[go.lang.security.injection.raw-html-format.raw-html-format]
+Warning: 1 timeout error(s) in cluster\internal\proto\query.pb.go when running the following rules:
+[go.lang.security.injection.tainted-url-host.tainted-url-host]
+                    
+                    
+┌──────────────────┐
+│ 62 Code Findings │
+└──────────────────┘
+                                                   
+    cluster\deploy\helm\paryty-frontend\values.yaml
+   ❯❯❱ javascript.lang.security.detect-insecure-websocket.detect-insecure-websocket
+          ❰❰ Blocking ❱❱
+          Insecure WebSocket Detected. WebSocket Secure (wss) should be used for all WebSocket connections.
+          Details: https://sg.run/GWyz                                                                     
+                                                                                                           
+           22┆ wsEndpoint: "ws://paryty-cluster-query:8080/ws"
+                                            
+    cluster\internal\api\handler\timeline.go
+    ❯❱ go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+          ❰❰ Blocking ❱❱
+          Detected 'Fprintf' or similar writing to 'http.ResponseWriter'. This bypasses HTML escaping that 
+          prevents cross-site scripting vulnerabilities. Instead, use the 'html/template' package to render
+          data to users.                                                                                   
+          Details: https://sg.run/7oqR                                                                     
+                                                                                                           
+          235┆ fmt.Fprintf(w, "event: frame\ndata: %s\n\n", data)
+   
+    ❯❱ go.lang.security.audit.xss.no-direct-write-to-responsewriter.no-direct-write-to-responsewriter
+          ❰❰ Blocking ❱❱
+          Detected directly writing or similar in 'http.ResponseWriter.write()'. This bypasses HTML escaping
+          that prevents cross-site scripting vulnerabilities. Instead, use the 'html/template' package and  
+          render data using 'template.Execute()'.                                                           
+          Details: https://sg.run/EkbA                                                                      
+                                                                                                            
+          293┆ w.Write(data) //nolint:errcheck
+            ⋮┆----------------------------------------
+          305┆ w.Write(data) //nolint:errcheck
+                                           
+    cluster\internal\api\query\websocket.go
+    ❯❱ go.gorilla.security.audit.websocket-missing-origin-check.websocket-missing-origin-check
+          ❰❰ Blocking ❱❱
+          The Origin header in the HTTP WebSocket handshake is used to guarantee that the connection accepted
+          by the WebSocket is from a trusted origin domain. Failure to enforce can lead to Cross Site Request
+          Forgery (CSRF). As per "gorilla/websocket" documentation: "A CheckOrigin function should carefully 
+          validate the request origin to prevent cross-site request forgery."                                
+          Details: https://sg.run/xXpz                                                                       
+                                                                                                             
+          102┆ conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
+                                              
+    cluster\internal\auth\auth_rest_adapter.go
+    ❯❱ go.lang.security.audit.net.cookie-missing-secure.cookie-missing-secure
+          ❰❰ Blocking ❱❱
+          A session cookie was detected without setting the 'Secure' flag. The 'secure' flag for cookies
+          prevents the client from transmitting the cookie over insecure channels such as HTTP. Set the 
+          'Secure' flag by setting 'Secure' to 'true' in the Options struct.                            
+          Details: https://sg.run/N4G7                                                                  
+                                                                                                        
+           ▶▶┆ Autofix ▶ http.Cookie{ Name:     "paryty_refresh_token", Value:    resp.RefreshToken, Path:
+              "/api/v1/auth", Expires:  refreshExpiresAt, HttpOnly: true, Secure:                         
+              a.cookieSecure, SameSite: http.SameSiteStrictMode, }                                        
+          143┆ http.SetCookie(c.Writer, &http.Cookie{
+          144┆    Name:     "paryty_refresh_token",
+          145┆    Value:    resp.RefreshToken,
+          146┆    Path:     "/api/v1/auth",
+          147┆    Expires:  refreshExpiresAt,
+          148┆    HttpOnly: true,
+          149┆    Secure:   a.cookieSecure,
+          150┆    SameSite: http.SameSiteStrictMode,
+          151┆ })
+            ⋮┆----------------------------------------
+           ▶▶┆ Autofix ▶ http.Cookie{ Name:     "paryty_access_token", Value:    resp.AccessToken, Path:     "/",
+              Expires:  accessExpiresAt, HttpOnly: true, Secure:   a.cookieSecure, SameSite:                     
+              http.SameSiteStrictMode, }                                                                         
+          155┆ http.SetCookie(c.Writer, &http.Cookie{
+          156┆    Name:     "paryty_access_token",
+          157┆    Value:    resp.AccessToken,
+          158┆    Path:     "/",
+          159┆    Expires:  accessExpiresAt,
+          160┆    HttpOnly: true,
+          161┆    Secure:   a.cookieSecure,
+          162┆    SameSite: http.SameSiteStrictMode,
+          163┆ })
+            ⋮┆----------------------------------------
+           ▶▶┆ Autofix ▶ http.Cookie{ Name:     "paryty_refresh_token", Value:    resp.RefreshToken, Path:
+              "/api/v1/auth", Expires:  refreshExpiresAt, HttpOnly: true, Secure:                         
+              a.cookieSecure, SameSite: http.SameSiteStrictMode, }                                        
+          234┆ http.SetCookie(c.Writer, &http.Cookie{
+          235┆    Name:     "paryty_refresh_token",
+          236┆    Value:    resp.RefreshToken,
+          237┆    Path:     "/api/v1/auth",
+          238┆    Expires:  refreshExpiresAt,
+          239┆    HttpOnly: true,
+          240┆    Secure:   a.cookieSecure,
+          241┆    SameSite: http.SameSiteStrictMode,
+          242┆ })
+            ⋮┆----------------------------------------
+           ▶▶┆ Autofix ▶ http.Cookie{ Name:     "paryty_access_token", Value:    resp.AccessToken, Path:     "/",
+              Expires:  accessExpiresAt, HttpOnly: true, Secure:   a.cookieSecure, SameSite:                     
+              http.SameSiteStrictMode, }                                                                         
+          247┆ http.SetCookie(c.Writer, &http.Cookie{
+          248┆    Name:     "paryty_access_token",
+          249┆    Value:    resp.AccessToken,
+          250┆    Path:     "/",
+          251┆    Expires:  accessExpiresAt,
+          252┆    HttpOnly: true,
+          253┆    Secure:   a.cookieSecure,
+          254┆    SameSite: http.SameSiteStrictMode,
+          255┆ })
+            ⋮┆----------------------------------------
+           ▶▶┆ Autofix ▶ http.Cookie{ Name:     "paryty_refresh_token", Value:    resp.RefreshToken, Path:
+              "/api/v1/auth", Expires:  refreshExpiresAt, HttpOnly: true, Secure:                         
+              a.cookieSecure, SameSite: http.SameSiteStrictMode, }                                        
+          329┆ http.SetCookie(c.Writer, &http.Cookie{
+          330┆    Name:     "paryty_refresh_token",
+          331┆    Value:    resp.RefreshToken,
+          332┆    Path:     "/api/v1/auth",
+          333┆    Expires:  refreshExpiresAt,
+          334┆    HttpOnly: true,
+          335┆    Secure:   a.cookieSecure,
+          336┆    SameSite: http.SameSiteStrictMode,
+          337┆ })
+            ⋮┆----------------------------------------
+           ▶▶┆ Autofix ▶ http.Cookie{ Name:     "paryty_refresh_token", Value:    "", Path:     "/api/v1/auth", MaxAge:
+              -1, // Delete cookie HttpOnly: true, Secure:   a.cookieSecure, SameSite:                                 
+              http.SameSiteStrictMode, }                                                                               
+          369┆ http.SetCookie(c.Writer, &http.Cookie{
+          370┆    Name:     "paryty_refresh_token",
+          371┆    Value:    "",
+          372┆    Path:     "/api/v1/auth",
+          373┆    MaxAge:   -1, // Delete cookie
+          374┆    HttpOnly: true,
+          375┆    Secure:   a.cookieSecure,
+          376┆    SameSite: http.SameSiteStrictMode,
+          377┆ })
+                                            
+    cluster\internal\monitoring\dashboard.go
+    ❯❱ go.lang.security.audit.xss.no-fprintf-to-responsewriter.no-fprintf-to-responsewriter
+          ❰❰ Blocking ❱❱
+          Detected 'Fprintf' or similar writing to 'http.ResponseWriter'. This bypasses HTML escaping that 
+          prevents cross-site scripting vulnerabilities. Instead, use the 'html/template' package to render
+          data to users.                                                                                   
+          Details: https://sg.run/7oqR                                                                     
+                                                                                                           
+           94┆ fmt.Fprintf(w, "paryty_uptime_seconds %f\n", time.Since(d.startTime).Seconds())
+            ⋮┆----------------------------------------
+          103┆ fmt.Fprintf(w, "paryty_service_healthy{service=\"%s\",address=\"%s\"} %d\n",
+          104┆    svc.Name, svc.Address, healthy)
+            ⋮┆----------------------------------------
+          110┆ fmt.Fprintf(w, "paryty_service_latency_seconds{service=\"%s\",address=\"%s\"} %f\n",
+          111┆    svc.Name, svc.Address, svc.Latency.Seconds())
+            ⋮┆----------------------------------------
+          118┆ fmt.Fprintf(w, "paryty_alerts_active %d\n", len(alerts))
+            ⋮┆----------------------------------------
+          127┆ fmt.Fprintf(w, "paryty_alert_firing{alert=\"%s\",severity=\"%s\"} %d\n",
+          128┆    alert.Name, alert.Severity, firing)
+                                        
+    cluster\internal\simulation\chaos.go
+    ❯❱ go.lang.security.audit.crypto.math_random.math-random-used
+          ❰❰ Blocking ❱❱
+          Do not use `math/rand`. Use `crypto/rand` instead.
+          Details: https://sg.run/6nK6                      
+                                                            
+           ▶▶┆ Autofix ▶ crypto/rand
+            8┆ "math/rand"
+   
+   ❯❯❱ go.lang.security.audit.dangerous-exec-command.dangerous-exec-command
+          ❰❰ Blocking ❱❱
+          Detected non-static command inside Command. Audit the input to 'exec.Command'. If unverified user  
+          data can reach this call site, this is a code injection vulnerability. A malicious actor can inject
+          a malicious script to execute arbitrary code.                                                      
+          Details: https://sg.run/W8lA                                                                       
+                                                                                                             
+          159┆ cmd := exec.CommandContext(ctx, k6Bin, args...)
+                                               
+    cluster\internal\storage\hot\metrics_ops.go
+    ❯❱ trailofbits.go.iterate-over-empty-map.iterate-over-empty-map
+          ❰❰ Blocking ❱❱
+          Iteration over a possibly empty map `keySet`. This is likely a bug or redundant code
+          Details: https://sg.run/08jj                                                        
+                                                                                              
+          324┆ keySet := make(map[string]struct{}) // track keys for EXPIRE batching
+          325┆
+          326┆ // ---- CPU metrics ----
+          327┆ for _, cpu := range batch.CPU {
+          328┆    ts := cpu.Timestamp
+          329┆    if ts.IsZero() {
+          330┆            ts = batch.Timestamp
+          331┆    }
+          332┆    addZAdd(ctx, pipe, tenant, agentID, "cpu.usage_percent", cpu.TotalUsagePct, ts, keySet)
+          333┆    addZAdd(ctx, pipe, tenant, agentID, "cpu.load_avg_1m", cpu.LoadAvg1m, ts, keySet)
+             [hid 84 additional lines, adjust with --max-lines-per-finding] 
+                                          
+    deploy\compose\docker-compose.dev.yaml
+   ❯❯❱ generic.secrets.security.detected-generic-secret.detected-generic-secret
+          ❰❰ Blocking ❱❱
+          Generic Secret detected     
+          Details: https://sg.run/l2o5
+                                      
+          190┆ PARYTY_JWT_SECRET: "61a61ee4dce5c4e8c6378b71bfefbfb7c94cfc54351ff6db8d93b2b4687b605d"
+                                            
+    deploy\compose\docker-compose.infra.yaml
+    ❯❱ yaml.docker-compose.security.no-new-privileges.no-new-privileges
+          ❰❰ Blocking ❱❱
+          Service 'redpanda' allows for privilege escalation via setuid or setgid binaries. Add 'no-new-
+          privileges:true' in 'security_opt' to prevent this.                                           
+          Details: https://sg.run/0n8q                                                                  
+                                                                                                        
+           11┆ redpanda:
+   
+    ❯❱ yaml.docker-compose.security.writable-filesystem-service.writable-filesystem-service
+          ❰❰ Blocking ❱❱
+          Service 'redpanda' is running with a writable root filesystem. This may allow malicious applications
+          to download and run additional payloads, or modify container files. If an application inside a      
+          container has to save something temporarily consider using a tmpfs. Add 'read_only: true' to this   
+          service to prevent this.                                                                            
+          Details: https://sg.run/e4JE                                                                        
+                                                                                                              
+           11┆ redpanda:
+   
+    ❯❱ yaml.docker-compose.security.no-new-privileges.no-new-privileges
+          ❰❰ Blocking ❱❱
+          Service 'dragonfly' allows for privilege escalation via setuid or setgid binaries. Add 'no-new-
+          privileges:true' in 'security_opt' to prevent this.                                            
+          Details: https://sg.run/0n8q                                                                   
+                                                                                                         
+           58┆ dragonfly:
+   
+    ❯❱ yaml.docker-compose.security.writable-filesystem-service.writable-filesystem-service
+          ❰❰ Blocking ❱❱
+          Service 'dragonfly' is running with a writable root filesystem. This may allow malicious          
+          applications to download and run additional payloads, or modify container files. If an application
+          inside a container has to save something temporarily consider using a tmpfs. Add 'read_only: true'
+          to this service to prevent this.                                                                  
+          Details: https://sg.run/e4JE                                                                      
+                                                                                                            
+           58┆ dragonfly:
+   
+    ❯❱ yaml.docker-compose.security.no-new-privileges.no-new-privileges
+          ❰❰ Blocking ❱❱
+          Service 'questdb' allows for privilege escalation via setuid or setgid binaries. Add 'no-new-
+          privileges:true' in 'security_opt' to prevent this.                                          
+          Details: https://sg.run/0n8q                                                                 
+                                                                                                       
+           71┆ questdb:
+   
+    ❯❱ yaml.docker-compose.security.writable-filesystem-service.writable-filesystem-service
+          ❰❰ Blocking ❱❱
+          Service 'questdb' is running with a writable root filesystem. This may allow malicious applications
+          to download and run additional payloads, or modify container files. If an application inside a     
+          container has to save something temporarily consider using a tmpfs. Add 'read_only: true' to this  
+          service to prevent this.                                                                           
+          Details: https://sg.run/e4JE                                                                       
+                                                                                                             
+           71┆ questdb:
+   
+    ❯❱ yaml.docker-compose.security.no-new-privileges.no-new-privileges
+          ❰❰ Blocking ❱❱
+          Service 'seaweedfs-master' allows for privilege escalation via setuid or setgid binaries. Add 'no-
+          new-privileges:true' in 'security_opt' to prevent this.                                           
+          Details: https://sg.run/0n8q                                                                      
+                                                                                                            
+           87┆ seaweedfs-master:
+   
+    ❯❱ yaml.docker-compose.security.writable-filesystem-service.writable-filesystem-service
+          ❰❰ Blocking ❱❱
+          Service 'seaweedfs-master' is running with a writable root filesystem. This may allow malicious   
+          applications to download and run additional payloads, or modify container files. If an application
+          inside a container has to save something temporarily consider using a tmpfs. Add 'read_only: true'
+          to this service to prevent this.                                                                  
+          Details: https://sg.run/e4JE                                                                      
+                                                                                                            
+           87┆ seaweedfs-master:
+   
+    ❯❱ yaml.docker-compose.security.no-new-privileges.no-new-privileges
+          ❰❰ Blocking ❱❱
+          Service 'seaweedfs-volume' allows for privilege escalation via setuid or setgid binaries. Add 'no-
+          new-privileges:true' in 'security_opt' to prevent this.                                           
+          Details: https://sg.run/0n8q                                                                      
+                                                                                                            
+          101┆ seaweedfs-volume:
+   
+    ❯❱ yaml.docker-compose.security.writable-filesystem-service.writable-filesystem-service
+          ❰❰ Blocking ❱❱
+          Service 'seaweedfs-volume' is running with a writable root filesystem. This may allow malicious   
+          applications to download and run additional payloads, or modify container files. If an application
+          inside a container has to save something temporarily consider using a tmpfs. Add 'read_only: true'
+          to this service to prevent this.                                                                  
+          Details: https://sg.run/e4JE                                                                      
+                                                                                                            
+          101┆ seaweedfs-volume:
+   
+    ❯❱ yaml.docker-compose.security.no-new-privileges.no-new-privileges
+          ❰❰ Blocking ❱❱
+          Service 'seaweedfs-filer' allows for privilege escalation via setuid or setgid binaries. Add 'no-
+          new-privileges:true' in 'security_opt' to prevent this.                                          
+          Details: https://sg.run/0n8q                                                                     
+                                                                                                           
+          113┆ seaweedfs-filer:
+   
+    ❯❱ yaml.docker-compose.security.writable-filesystem-service.writable-filesystem-service
+          ❰❰ Blocking ❱❱
+          Service 'seaweedfs-filer' is running with a writable root filesystem. This may allow malicious    
+          applications to download and run additional payloads, or modify container files. If an application
+          inside a container has to save something temporarily consider using a tmpfs. Add 'read_only: true'
+          to this service to prevent this.                                                                  
+          Details: https://sg.run/e4JE                                                                      
+                                                                                                            
+          113┆ seaweedfs-filer:
+   
+    ❯❱ yaml.docker-compose.security.no-new-privileges.no-new-privileges
+          ❰❰ Blocking ❱❱
+          Service 'seaweedfs-s3' allows for privilege escalation via setuid or setgid binaries. Add 'no-new-
+          privileges:true' in 'security_opt' to prevent this.                                               
+          Details: https://sg.run/0n8q                                                                      
+                                                                                                            
+          127┆ seaweedfs-s3:
+   
+    ❯❱ yaml.docker-compose.security.writable-filesystem-service.writable-filesystem-service
+          ❰❰ Blocking ❱❱
+          Service 'seaweedfs-s3' is running with a writable root filesystem. This may allow malicious       
+          applications to download and run additional payloads, or modify container files. If an application
+          inside a container has to save something temporarily consider using a tmpfs. Add 'read_only: true'
+          to this service to prevent this.                                                                  
+          Details: https://sg.run/e4JE                                                                      
+                                                                                                            
+          127┆ seaweedfs-s3:
+                            
+    deploy\docker\nginx.conf
+    ❯❱ generic.nginx.security.missing-internal.missing-internal
+          ❰❰ Blocking ❱❱
+          This location block contains a 'proxy_pass' directive but does not contain the 'internal' directive.
+          The 'internal' directive restricts access to this location to internal requests. Without 'internal',
+          an attacker could use your server for server-side request forgeries (SSRF). Include the 'internal'  
+          directive in this block to limit exposure.                                                          
+          Details: https://sg.run/Q5px                                                                        
+                                                                                                              
+           28┆ proxy_pass ${PARYTY_API_URL};
+            ⋮┆----------------------------------------
+           42┆ proxy_pass ${PARYTY_WS_URL};
+   
+    ❯❱ generic.nginx.security.possible-h2c-smuggling.possible-nginx-h2c-smuggling
+          ❰❰ Blocking ❱❱
+          Conditions for Nginx H2C smuggling identified. H2C smuggling allows upgrading HTTP/1.1 connections 
+          to lesser-known HTTP/2 over cleartext (h2c) connections which can allow a bypass of reverse proxy  
+          access controls, and lead to long-lived, unrestricted HTTP traffic directly to back-end servers. To
+          mitigate: WebSocket support required: Allow only the value websocket for HTTP/1.1 upgrade headers  
+          (e.g., Upgrade: websocket). WebSocket support not required: Do not forward Upgrade headers.        
+          Details: https://sg.run/ploZ                                                                       
+                                                                                                             
+           43┆ proxy_http_version 1.1;
+           44┆ proxy_set_header Upgrade $http_upgrade;
+           45┆ proxy_set_header Connection "upgrade";
+   
+    ❯❱ generic.nginx.security.header-redefinition.header-redefinition
+          ❰❰ Blocking ❱❱
+          The 'add_header' directive is called in a 'location' block after headers have been set at the server
+          block. Calling 'add_header' in the location block will actually overwrite the headers defined in the
+          server block, no matter which headers are set. To fix this, explicitly set all headers or set all   
+          headers in the server block.                                                                        
+          Details: https://sg.run/Lwl7                                                                        
+                                                                                                              
+           56┆ add_header Cache-Control "public, immutable";
+                                               
+    deploy\kubernetes\base\agent-daemonset.yaml
+    ❯❱ yaml.kubernetes.security.hostpid-pod.hostpid-pod
+          ❰❰ Blocking ❱❱
+          Pod is sharing the host process ID namespace. When paired with ptrace this can be used to escalate
+          privileges outside of the container. Remove the 'hostPID' key to disable this functionality.      
+          Details: https://sg.run/708R                                                                      
+                                                                                                            
+           16┆ hostPID: true  # Required for eBPF process monitoring
+   
+    ❯❱ yaml.kubernetes.security.hostnetwork-pod.hostnetwork-pod
+          ❰❰ Blocking ❱❱
+          Pod may use the node network namespace. This gives the pod access to the loopback device, services
+          listening on localhost, and could be used to snoop on network activity of other pods on the same  
+          node. Remove the 'hostNetwork' key to disable this functionality.                                 
+          Details: https://sg.run/E51A                                                                      
+                                                                                                            
+           17┆ hostNetwork: true  # Required for network traffic inspection
+   
+    ❯❱ yaml.kubernetes.security.allow-privilege-escalation-true.allow-privilege-escalation-true
+          ❰❰ Blocking ❱❱
+          In Kubernetes, each pod runs in its own isolated environment with its own  set of security policies.
+          However, certain container images may contain  `setuid` or `setgid` binaries that could allow an    
+          attacker to perform  privilege escalation and gain access to sensitive resources. To mitigate  this 
+          risk, it's recommended to add a `securityContext` to the container in  the pod, with the parameter  
+          `allowPrivilegeEscalation` set to `false`.  This will prevent the container from running any        
+          privileged processes and  limit the impact of any potential attacks.  In the container `agent` this 
+          parameter is set to `true` which makes this container much more vulnerable to privelege escalation  
+          attacks.                                                                                            
+          Details: https://sg.run/vw3W                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ false
+           68┆ allowPrivilegeEscalation: true
+                                                     
+    deploy\kubernetes\base\aggregator-deployment.yaml
+     ❱ yaml.kubernetes.security.run-as-non-root.run-as-non-root
+          ❰❰ Blocking ❱❱
+          When running containers in Kubernetes, it's important to ensure that they  are properly secured to  
+          prevent privilege escalation attacks.  One potential vulnerability is when a container is allowed to
+          run  applications as the root user, which could allow an attacker to gain  access to sensitive      
+          resources. To mitigate this risk, it's recommended to  add a `securityContext` to the container,    
+          with the parameter `runAsNonRoot`  set to `true`. This will ensure that the container runs as a non-
+          root user,  limiting the damage that could be caused by any potential attacks. By  adding a         
+          `securityContext` to the container in your Kubernetes pod, you can  help to ensure that your        
+          containerized applications are more secure and  less vulnerable to privilege escalation attacks.    
+          Details: https://sg.run/dgP5                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ spec: securityContext: runAsNonRoot: true #
+           16┆ spec:
+   
+    ❯❱ yaml.kubernetes.security.allow-privilege-escalation-no-securitycontext.allow-privilege-escalation-no-
+       securitycontext                                                                                      
+          ❰❰ Blocking ❱❱
+          In Kubernetes, each pod runs in its own isolated environment with its own set of security policies. 
+          However, certain container images may contain `setuid` or `setgid` binaries that could allow an     
+          attacker to perform privilege escalation and gain access to sensitive resources. To mitigate this   
+          risk, it's recommended to add a `securityContext` to the container in the pod, with the parameter   
+          `allowPrivilegeEscalation` set to `false`. This will prevent the container from running any         
+          privileged processes and limit the impact of any potential attacks. By adding a `securityContext` to
+          your Kubernetes pod, you can help to ensure that your containerized applications are more secure and
+          less vulnerable to privilege escalation attacks.                                                    
+          Details: https://sg.run/eleR                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ securityContext: allowPrivilegeEscalation: false name
+           18┆ - name: aggregator
+                                                     
+    deploy\kubernetes\base\correlator-deployment.yaml
+     ❱ yaml.kubernetes.security.run-as-non-root.run-as-non-root
+          ❰❰ Blocking ❱❱
+          When running containers in Kubernetes, it's important to ensure that they  are properly secured to  
+          prevent privilege escalation attacks.  One potential vulnerability is when a container is allowed to
+          run  applications as the root user, which could allow an attacker to gain  access to sensitive      
+          resources. To mitigate this risk, it's recommended to  add a `securityContext` to the container,    
+          with the parameter `runAsNonRoot`  set to `true`. This will ensure that the container runs as a non-
+          root user,  limiting the damage that could be caused by any potential attacks. By  adding a         
+          `securityContext` to the container in your Kubernetes pod, you can  help to ensure that your        
+          containerized applications are more secure and  less vulnerable to privilege escalation attacks.    
+          Details: https://sg.run/dgP5                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ spec: securityContext: runAsNonRoot: true #
+           16┆ spec:
+   
+    ❯❱ yaml.kubernetes.security.allow-privilege-escalation-no-securitycontext.allow-privilege-escalation-no-
+       securitycontext                                                                                      
+          ❰❰ Blocking ❱❱
+          In Kubernetes, each pod runs in its own isolated environment with its own set of security policies. 
+          However, certain container images may contain `setuid` or `setgid` binaries that could allow an     
+          attacker to perform privilege escalation and gain access to sensitive resources. To mitigate this   
+          risk, it's recommended to add a `securityContext` to the container in the pod, with the parameter   
+          `allowPrivilegeEscalation` set to `false`. This will prevent the container from running any         
+          privileged processes and limit the impact of any potential attacks. By adding a `securityContext` to
+          your Kubernetes pod, you can help to ensure that your containerized applications are more secure and
+          less vulnerable to privilege escalation attacks.                                                    
+          Details: https://sg.run/eleR                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ securityContext: allowPrivilegeEscalation: false name
+           18┆ - name: correlator
+                                                   
+    deploy\kubernetes\base\enricher-deployment.yaml
+     ❱ yaml.kubernetes.security.run-as-non-root.run-as-non-root
+          ❰❰ Blocking ❱❱
+          When running containers in Kubernetes, it's important to ensure that they  are properly secured to  
+          prevent privilege escalation attacks.  One potential vulnerability is when a container is allowed to
+          run  applications as the root user, which could allow an attacker to gain  access to sensitive      
+          resources. To mitigate this risk, it's recommended to  add a `securityContext` to the container,    
+          with the parameter `runAsNonRoot`  set to `true`. This will ensure that the container runs as a non-
+          root user,  limiting the damage that could be caused by any potential attacks. By  adding a         
+          `securityContext` to the container in your Kubernetes pod, you can  help to ensure that your        
+          containerized applications are more secure and  less vulnerable to privilege escalation attacks.    
+          Details: https://sg.run/dgP5                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ spec: securityContext: runAsNonRoot: true #
+           16┆ spec:
+   
+    ❯❱ yaml.kubernetes.security.allow-privilege-escalation-no-securitycontext.allow-privilege-escalation-no-
+       securitycontext                                                                                      
+          ❰❰ Blocking ❱❱
+          In Kubernetes, each pod runs in its own isolated environment with its own set of security policies. 
+          However, certain container images may contain `setuid` or `setgid` binaries that could allow an     
+          attacker to perform privilege escalation and gain access to sensitive resources. To mitigate this   
+          risk, it's recommended to add a `securityContext` to the container in the pod, with the parameter   
+          `allowPrivilegeEscalation` set to `false`. This will prevent the container from running any         
+          privileged processes and limit the impact of any potential attacks. By adding a `securityContext` to
+          your Kubernetes pod, you can help to ensure that your containerized applications are more secure and
+          less vulnerable to privilege escalation attacks.                                                    
+          Details: https://sg.run/eleR                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ securityContext: allowPrivilegeEscalation: false name
+           18┆ - name: enricher
+                                                    
+    deploy\kubernetes\base\ingestion-deployment.yaml
+     ❱ yaml.kubernetes.security.run-as-non-root.run-as-non-root
+          ❰❰ Blocking ❱❱
+          When running containers in Kubernetes, it's important to ensure that they  are properly secured to  
+          prevent privilege escalation attacks.  One potential vulnerability is when a container is allowed to
+          run  applications as the root user, which could allow an attacker to gain  access to sensitive      
+          resources. To mitigate this risk, it's recommended to  add a `securityContext` to the container,    
+          with the parameter `runAsNonRoot`  set to `true`. This will ensure that the container runs as a non-
+          root user,  limiting the damage that could be caused by any potential attacks. By  adding a         
+          `securityContext` to the container in your Kubernetes pod, you can  help to ensure that your        
+          containerized applications are more secure and  less vulnerable to privilege escalation attacks.    
+          Details: https://sg.run/dgP5                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ spec: securityContext: runAsNonRoot: true #
+           16┆ spec:
+   
+    ❯❱ yaml.kubernetes.security.allow-privilege-escalation-no-securitycontext.allow-privilege-escalation-no-
+       securitycontext                                                                                      
+          ❰❰ Blocking ❱❱
+          In Kubernetes, each pod runs in its own isolated environment with its own set of security policies. 
+          However, certain container images may contain `setuid` or `setgid` binaries that could allow an     
+          attacker to perform privilege escalation and gain access to sensitive resources. To mitigate this   
+          risk, it's recommended to add a `securityContext` to the container in the pod, with the parameter   
+          `allowPrivilegeEscalation` set to `false`. This will prevent the container from running any         
+          privileged processes and limit the impact of any potential attacks. By adding a `securityContext` to
+          your Kubernetes pod, you can help to ensure that your containerized applications are more secure and
+          less vulnerable to privilege escalation attacks.                                                    
+          Details: https://sg.run/eleR                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ securityContext: allowPrivilegeEscalation: false name
+           18┆ - name: ingestion
+                                                
+    deploy\kubernetes\base\query-deployment.yaml
+     ❱ yaml.kubernetes.security.run-as-non-root.run-as-non-root
+          ❰❰ Blocking ❱❱
+          When running containers in Kubernetes, it's important to ensure that they  are properly secured to  
+          prevent privilege escalation attacks.  One potential vulnerability is when a container is allowed to
+          run  applications as the root user, which could allow an attacker to gain  access to sensitive      
+          resources. To mitigate this risk, it's recommended to  add a `securityContext` to the container,    
+          with the parameter `runAsNonRoot`  set to `true`. This will ensure that the container runs as a non-
+          root user,  limiting the damage that could be caused by any potential attacks. By  adding a         
+          `securityContext` to the container in your Kubernetes pod, you can  help to ensure that your        
+          containerized applications are more secure and  less vulnerable to privilege escalation attacks.    
+          Details: https://sg.run/dgP5                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ spec: securityContext: runAsNonRoot: true #
+           16┆ spec:
+   
+    ❯❱ yaml.kubernetes.security.allow-privilege-escalation-no-securitycontext.allow-privilege-escalation-no-
+       securitycontext                                                                                      
+          ❰❰ Blocking ❱❱
+          In Kubernetes, each pod runs in its own isolated environment with its own set of security policies. 
+          However, certain container images may contain `setuid` or `setgid` binaries that could allow an     
+          attacker to perform privilege escalation and gain access to sensitive resources. To mitigate this   
+          risk, it's recommended to add a `securityContext` to the container in the pod, with the parameter   
+          `allowPrivilegeEscalation` set to `false`. This will prevent the container from running any         
+          privileged processes and limit the impact of any potential attacks. By adding a `securityContext` to
+          your Kubernetes pod, you can help to ensure that your containerized applications are more secure and
+          less vulnerable to privilege escalation attacks.                                                    
+          Details: https://sg.run/eleR                                                                        
+                                                                                                              
+           ▶▶┆ Autofix ▶ securityContext: allowPrivilegeEscalation: false name
+           18┆ - name: query
+                                   
+    intelligence\pipeline\config.py
+    ❯❱ python.lang.security.audit.eval-detected.eval-detected
+          ❰❰ Blocking ❱❱
+          Detected the use of eval(). eval() can be dangerous if used to evaluate dynamic content. If this 
+          content can be input from outside the program, this may be a code injection vulnerability. Ensure
+          evaluated content is not definable by external sources.                                          
+          Details: https://sg.run/ZvrD                                                                     
+                                                                                                           
+           77┆ target_type = eval(target_type)  # noqa: S307 â€“ controlled eval
+                               
+    scripts\kimi_https_proxy.py
+    ❯❱ python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+          ❰❰ Blocking ❱❱
+          Detected a dynamic value being used with urllib. urllib supports 'file://' schemes, so a dynamic    
+          value controlled by a malicious actor may allow them to read arbitrary files. Audit uses of urllib  
+          calls to ensure user data cannot control the URLs, or consider using the 'requests' library instead.
+          Details: https://sg.run/dKZZ                                                                        
+                                                                                                              
+           84┆ with urllib.request.urlopen(req, context=ctx, timeout=300) as resp:
+                         
+    scripts\kimi_proxy.py
+    ❯❱ python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+          ❰❰ Blocking ❱❱
+          Detected a dynamic value being used with urllib. urllib supports 'file://' schemes, so a dynamic    
+          value controlled by a malicious actor may allow them to read arbitrary files. Audit uses of urllib  
+          calls to ensure user data cannot control the URLs, or consider using the 'requests' library instead.
+          Details: https://sg.run/dKZZ                                                                        
+                                                                                                              
+           52┆ with urllib.request.urlopen(req, context=ctx) as resp:
+            ⋮┆----------------------------------------
+          101┆ with urllib.request.urlopen(req, context=ctx) as resp:
+                         
+    scripts\quick_test.py
+    ❯❱ python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+          ❰❰ Blocking ❱❱
+          Detected a dynamic value being used with urllib. urllib supports 'file://' schemes, so a dynamic    
+          value controlled by a malicious actor may allow them to read arbitrary files. Audit uses of urllib  
+          calls to ensure user data cannot control the URLs, or consider using the 'requests' library instead.
+          Details: https://sg.run/dKZZ                                                                        
+                                                                                                              
+           11┆ with urllib.request.urlopen(req, context=ctx, timeout=300) as r:
+                         
+    scripts\smoke_test.py
+    ❯❱ python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+          ❰❰ Blocking ❱❱
+          Detected a dynamic value being used with urllib. urllib supports 'file://' schemes, so a dynamic    
+          value controlled by a malicious actor may allow them to read arbitrary files. Audit uses of urllib  
+          calls to ensure user data cannot control the URLs, or consider using the 'requests' library instead.
+          Details: https://sg.run/dKZZ                                                                        
+                                                                                                              
+           29┆ resp = urllib.request.urlopen(rq, timeout=10, context=ctx)
+                          
+    scripts\test_nvidia.py
+    ❯❱ python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+          ❰❰ Blocking ❱❱
+          Detected a dynamic value being used with urllib. urllib supports 'file://' schemes, so a dynamic    
+          value controlled by a malicious actor may allow them to read arbitrary files. Audit uses of urllib  
+          calls to ensure user data cannot control the URLs, or consider using the 'requests' library instead.
+          Details: https://sg.run/dKZZ                                                                        
+                                                                                                              
+           27┆ with urllib.request.urlopen(req, context=ctx, timeout=120) as resp:
+   
+    ❯❱ python.lang.security.audit.insecure-transport.urllib.insecure-request-object.insecure-request-object
+          ❰❰ Blocking ❱❱
+          Detected a 'urllib.request.Request()' object using an insecure transport protocol, 'http://'. This
+          connection will not be encrypted. Use 'https://' instead.                                         
+          Details: https://sg.run/YvAe                                                                      
+                                                                                                            
+           ▶▶┆ Autofix ▶ PROXY_URL = "https://127.0.0.1:8765/v1/chat/completions" proxy_payload = json.dumps({ "model":
+              "kimi-k2.6", "messages": [{"role": "user", "content": "hi"}], "max_tokens": 10,                          
+              "stream": False }).encode()  start = time.time() req2 =                                                  
+              urllib.request.Request(PROXY_URL, data=proxy_payload, method="POST")                                     
+           38┆ PROXY_URL = "http://127.0.0.1:8765/v1/chat/completions"
+           39┆ proxy_payload = json.dumps({
+           40┆     "model": "kimi-k2.6",
+           41┆     "messages": [{"role": "user", "content": "hi"}],
+           42┆     "max_tokens": 10,
+           43┆     "stream": False
+           44┆ }).encode()
+           45┆
+           46┆ start = time.time()
+           47┆ req2 = urllib.request.Request(PROXY_URL, data=proxy_payload, method="POST")
+            ⋮┆----------------------------------------
+           ▶▶┆ Autofix ▶ urllib.request.Request(PROXY_URL, data=proxy_payload, method="POST")
+           47┆ req2 = urllib.request.Request(PROXY_URL, data=proxy_payload, method="POST")
+   
+    ❯❱ python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+          ❰❰ Blocking ❱❱
+          Detected a dynamic value being used with urllib. urllib supports 'file://' schemes, so a dynamic    
+          value controlled by a malicious actor may allow them to read arbitrary files. Audit uses of urllib  
+          calls to ensure user data cannot control the URLs, or consider using the 'requests' library instead.
+          Details: https://sg.run/dKZZ                                                                        
+                                                                                                              
+           50┆ with urllib.request.urlopen(req2, timeout=120) as resp:
+                             
+    scripts\test_proxy_e2e.py
+    ❯❱ python.lang.security.audit.dynamic-urllib-use-detected.dynamic-urllib-use-detected
+          ❰❰ Blocking ❱❱
+          Detected a dynamic value being used with urllib. urllib supports 'file://' schemes, so a dynamic    
+          value controlled by a malicious actor may allow them to read arbitrary files. Audit uses of urllib  
+          calls to ensure user data cannot control the URLs, or consider using the 'requests' library instead.
+          Details: https://sg.run/dKZZ                                                                        
+                                                                                                              
+           31┆ with urllib.request.urlopen(req, context=ctx, timeout=300) as resp:
+                
+                
+┌──────────────┐
+│ Scan Summary │
+└──────────────┘
+✅ Scan completed successfully.
+ • Findings: 62 (62 blocking)
+ • Rules run: 645
+ • Targets scanned: 770
+ • Parsed lines: ~99.9%
+ • Scan skipped: 
+   ◦ Files larger than  files 1.0 MB: 2
+   ◦ Files matching .semgrepignore patterns: 81
+ • Scan was limited to files tracked by git
+ • For a detailed list of skipped files and lines, run semgrep with the --verbose flag
+Ran 645 rules on 770 files: 62 findings.
+
+📢 Too many findings? Try Semgrep Pro for more powerful queries and less noise.
+   See https://sg.run/false-positives.
+

@@ -90,12 +90,14 @@ type HotConfig struct {
 
 // WarmConfig configures the QuestDB (warm) tier.
 type WarmConfig struct {
-	Addr     string `yaml:"addr"`
-	ILPAddr  string `yaml:"ilp_addr"`
-	Database string `yaml:"database"`
-	Username string `yaml:"username"`
-	Password string `yaml:"password"`
-	MaxConns int    `yaml:"max_conns"`
+	Addr        string `yaml:"addr"`
+	ILPAddr     string `yaml:"ilp_addr"`
+	Database    string `yaml:"database"`
+	Username    string `yaml:"username"`
+	Password    string `yaml:"password"`
+	MaxConns    int    `yaml:"max_conns"`
+	SSLMode     string `yaml:"sslmode"`
+	SSLRootCert string `yaml:"sslrootcert"`
 }
 
 // ColdConfig configures the SeaweedFS (cold) tier.
@@ -316,12 +318,14 @@ func (c *Config) ToHotConfig() hot.Config {
 // ToWarmConfig converts to the warm storage package Config.
 func (c *Config) ToWarmConfig() warm.Config {
 	return warm.Config{
-		Addr:     c.Cluster.Storage.Warm.Addr,
-		ILPAddr:  c.Cluster.Storage.Warm.ILPAddr,
-		Database: c.Cluster.Storage.Warm.Database,
-		Username: c.Cluster.Storage.Warm.Username,
-		Password: c.Cluster.Storage.Warm.Password,
-		MaxConns: c.Cluster.Storage.Warm.MaxConns,
+		Addr:        c.Cluster.Storage.Warm.Addr,
+		ILPAddr:     c.Cluster.Storage.Warm.ILPAddr,
+		Database:    c.Cluster.Storage.Warm.Database,
+		Username:    c.Cluster.Storage.Warm.Username,
+		Password:    c.Cluster.Storage.Warm.Password,
+		MaxConns:    c.Cluster.Storage.Warm.MaxConns,
+		SSLMode:     c.Cluster.Storage.Warm.SSLMode,
+		SSLRootCert: c.Cluster.Storage.Warm.SSLRootCert,
 	}
 }
 

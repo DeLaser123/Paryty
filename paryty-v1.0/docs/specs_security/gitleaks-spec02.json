@@ -1,0 +1,22 @@
+[
+ {
+  "RuleID": "jwt",
+  "Description": "Uncovered a JSON Web Token, which may lead to unauthorized access to web applications and sensitive user data.",
+  "StartLine": 194,
+  "EndLine": 194,
+  "StartColumn": 25,
+  "EndColumn": 133,
+  "Match": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U\"",
+  "Secret": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U",
+  "File": "D:/__Projects/Paryty/paryty-v1.0/cluster/tests/integration/auth_flow_test.go",
+  "SymlinkFile": "",
+  "Commit": "",
+  "Entropy": 5.3317676,
+  "Author": "",
+  "Email": "",
+  "Date": "",
+  "Message": "",
+  "Tags": [],
+  "Fingerprint": "D:/__Projects/Paryty/paryty-v1.0/cluster/tests/integration/auth_flow_test.go:jwt:194"
+ }
+]

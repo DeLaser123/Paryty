@@ -22,7 +22,7 @@ import (
 // SchemaVersion is the current schema version. Increment this when adding
 // new migrations. Each version corresponds to a migration script in the
 // migration registry.
-const SchemaVersion = 3
+const SchemaVersion = 4
 
 // ---- Column Type Constants ----
 
@@ -425,6 +425,28 @@ func DefaultSchema() SchemaDefinition {
 				},
 			},
 
+			// ---- Anomaly Detection Table ----
+
+			// anomalies stores anomaly detection results from the intelligence
+			// layer (Python ML services). Anomalies are published to Redpanda
+			// and consumed by the pipeline for warm storage persistence.
+			{
+				Name:        "anomalies",
+				PartitionBy: PartitionByDay,
+				Columns: []ColumnDefinition{
+					{Name: "timestamp", Type: ColTypeTimestamp},
+					{Name: "id", Type: ColTypeSymbol, Indexed: true},
+					{Name: "tenant_id", Type: ColTypeSymbol, Indexed: true},
+					{Name: "severity", Type: ColTypeSymbol},
+					{Name: "metric_name", Type: ColTypeSymbol},
+					{Name: "agent_id", Type: ColTypeSymbol},
+					{Name: "score", Type: ColTypeDouble},
+					{Name: "expected_value", Type: ColTypeDouble},
+					{Name: "actual_value", Type: ColTypeDouble},
+					{Name: "description", Type: ColTypeString},
+				},
+			},
+
 			// paryty_schema_version tracks applied migration versions.
 			// Not WAL/partitioned — small metadata table.
 			{
@@ -456,8 +478,8 @@ func (sm *SchemaManager) registerMigrations() {
 		},
 	}
 
-	// Migration v1 → v2: Add db_queries and topology_snapshots tables.
-	sm.migration[2] = migrationEntry{
+	// Migration v2 → v3: Add db_queries and topology_snapshots tables.
+	sm.migration[3] = migrationEntry{
 		description: "add db_queries and topology_snapshots tables (Phase 4)",
 		up: func(ctx context.Context, pool *pgxpool.Pool) error {
 			schema := DefaultSchema()
@@ -476,11 +498,20 @@ func (sm *SchemaManager) registerMigrations() {
 		},
 	}
 
-	// Migration v2 → v3: Placeholder for future changes.
-	sm.migration[3] = migrationEntry{
-		description: "placeholder for future schema changes",
-		up: func(_ context.Context, _ *pgxpool.Pool) error {
-			sm.logger.Info("migration v3: no-op placeholder applied")
+	// Migration v3 → v4: Add anomalies table for anomaly detection results.
+	sm.migration[4] = migrationEntry{
+		description: "add anomalies table for anomaly detection storage",
+		up: func(ctx context.Context, pool *pgxpool.Pool) error {
+			schema := DefaultSchema()
+			for _, table := range schema.Tables {
+				if table.Name == "anomalies" {
+					ddl := BuildCreateTableDDL(table)
+					sm.logger.Info("applying migration: creating anomalies table")
+					if _, err := pool.Exec(ctx, ddl); err != nil {
+						return fmt.Errorf("create table anomalies: %w", err)
+					}
+				}
+			}
 			return nil
 		},
 	}
@@ -948,4 +979,17 @@ var newTableStatements = []string{
 		applied_at TIMESTAMP,
 		description STRING
 	)`,
+
+	`CREATE TABLE IF NOT EXISTS anomalies (
+		timestamp TIMESTAMP,
+		id SYMBOL,
+		tenant_id SYMBOL,
+		severity SYMBOL,
+		metric_name SYMBOL,
+		agent_id SYMBOL,
+		score DOUBLE,
+		expected_value DOUBLE,
+		actual_value DOUBLE,
+		description STRING
+	) TIMESTAMP(timestamp) PARTITION BY DAY WAL`,
 }

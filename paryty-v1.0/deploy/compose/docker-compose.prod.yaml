@@ -1,0 +1,351 @@
+# =============================================================================
+# Paryty Production Docker Compose
+# =============================================================================
+# WARNING: This is a production configuration. All services run with TLS
+# enabled. Certificates are expected at ./certs/ (generated or provided).
+#
+# Usage:
+#   1. Generate self-signed certs:  ./scripts/generate-certs.sh
+#   2. podman-compose --env-file ../../.env.prod -f docker-compose.prod.yaml up -d
+#
+# Port mappings use SSL/TLS listeners. Ingress should be behind a reverse
+# proxy (nginx/caddy/traefik) that terminates TLS for frontend traffic.
+# =============================================================================
+version: '3.8'
+
+services:
+  # ── Infrastructure ───────────────────────────────────────────────────────
+
+  redpanda:
+    image: docker.io/redpandadata/redpanda:latest
+    ports:
+      - "${PARYTY_PORT_REDPANDA_KAFKA}:9093"    # Kafka SSL
+      - "${PARYTY_PORT_REDPANDA_ADMIN}:9644"    # Admin API (no TLS — internal)
+    cap_add:
+      - SYS_NICE
+      - IPC_LOCK
+    security_opt:
+      - label=disable
+    command:
+      - redpanda
+      - start
+      - --smp
+      - '1'
+      - --memory
+      - 1G
+      - --overprovisioned
+      - --node-id
+      - '0'
+      - --check=false
+      - --kafka-addr
+      - SSL://0.0.0.0:9093
+      - --advertise-kafka-addr
+      - SSL://redpanda:9093
+      - --pandaproxy-addr
+      - TLS://0.0.0.0:8083
+      - --advertise-pandaproxy-addr
+      - TLS://redpanda:8083
+      - --schema-registry-addr
+      - TLS://0.0.0.0:8084
+      - --advertise-schema-registry-addr
+      - TLS://redpanda:8084
+      - --rpc-addr
+      - 0.0.0.0:33145
+      - --advertise-rpc-addr
+      - redpanda:33145
+    environment:
+      - REDPANDA_RPK_TLS_KEY=/etc/redpanda/certs/redpanda.key
+      - REDPANDA_RPK_TLS_CERT=/etc/redpanda/certs/redpanda.crt
+      - REDPANDA_RPK_TLS_TRUSTSTORE=/etc/redpanda/certs/ca.crt
+    volumes:
+      - ./certs/redpanda:/etc/redpanda/certs:ro
+      - /mnt/d/ParytyData/redpanda:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:latest
+    ports:
+      - "${PARYTY_PORT_DRAGONFLY}:6379"   # Plaintext (internal)
+      - "6380:6380"                         # TLS port
+    command: >
+      dragonfly
+      --tls
+      --tls_cert_file=/etc/dragonfly/certs/server.crt
+      --tls_key_file=/etc/dragonfly/certs/server.key
+      --tls_port=6380
+      --requirepass=${PARYTY_DRAGONFLY_PASSWORD}
+    volumes:
+      - ./certs/dragonfly:/etc/dragonfly/certs:ro
+      - /mnt/d/ParytyData/dragonfly:/data
+    healthcheck:
+      test: ["CMD", "dragonfly", "--version"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+
+  questdb:
+    image: questdb/questdb:latest
+    ports:
+      - "${PARYTY_PORT_QUESTDB_WEB}:9000"  # Web console + REST
+      - "${PARYTY_PORT_QUESTDB_ILP}:9009"  # ILP (plaintext internally)
+      - "${PARYTY_PORT_QUESTDB_PG}:8812"   # PG wire (TLS enabled)
+    environment:
+      - QDB_PG_TLS_ENABLED=true
+      - QDB_PG_TLS_CERT_PATH=/etc/questdb/certs/server.crt
+      - QDB_PG_TLS_PRIVATE_KEY_PATH=/etc/questdb/certs/server.key
+    volumes:
+      - ./certs/questdb:/etc/questdb/certs:ro
+      - questdb_data:/var/lib/questdb
+    healthcheck:
+      test: ["CMD", "bash", "-c", "</dev/tcp/localhost/9000"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "${PARYTY_PORT_POSTGRES}:5432"
+    command: >
+      postgres
+      -c ssl=on
+      -c ssl_cert_file=/etc/postgres/certs/server.crt
+      -c ssl_key_file=/etc/postgres/certs/server.key
+    volumes:
+      - ./certs/postgres:/etc/postgres/certs:ro
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: paryty
+      POSTGRES_USER: paryty
+      POSTGRES_PASSWORD: ${PARYTY_POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U paryty -d paryty"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  seaweedfs-master:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "${PARYTY_PORT_SWFS_MASTER}:9333"        # Master server
+      - "${PARYTY_PORT_SWFS_MASTER_GRPC}:19333"  # Master gRPC (plaintext internal)
+    command: master -ip=seaweedfs-master -port=9333 -volumePreallocate=false
+    volumes:
+      - /mnt/d/ParytyData/seaweedfs-master:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9333/cluster/status || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  seaweedfs-volume:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "${PARYTY_PORT_SWFS_VOLUME}:8080"        # Volume server
+      - "${PARYTY_PORT_SWFS_VOLUME_GRPC}:18080"  # Volume gRPC (plaintext internal)
+    command: volume -mserver=seaweedfs-master:9333 -port=8080 -publicUrl=localhost:${PARYTY_PORT_SWFS_VOLUME}
+    volumes:
+      - /mnt/d/ParytyData/seaweedfs-volume:/data
+    depends_on:
+      - seaweedfs-master
+    healthcheck:
+      test: ["CMD-SHELL", "cat /proc/net/tcp | grep -q :1F90"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  seaweedfs-filer:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "${PARYTY_PORT_SWFS_FILER}:8888"         # Filer server
+      - "${PARYTY_PORT_SWFS_FILER_GRPC}:18888"   # Filer gRPC (plaintext internal)
+    command: filer -master=seaweedfs-master:9333 -port=8888
+    volumes:
+      - /mnt/d/ParytyData/seaweedfs-filer:/data
+    depends_on:
+      - seaweedfs-master
+      - seaweedfs-volume
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8888/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  seaweedfs-s3:
+    image: chrislusf/seaweedfs:latest
+    ports:
+      - "${PARYTY_PORT_SWFS_S3}:8333"  # S3 API gateway (HTTPS via cert flags)
+    command: >
+      s3
+      -filer=seaweedfs-filer:8888
+      -port=8333
+      -cert=/etc/seaweedfs/certs/server.crt
+      -key=/etc/seaweedfs/certs/server.key
+    volumes:
+      - ./certs/seaweedfs:/etc/seaweedfs/certs:ro
+    depends_on:
+      - seaweedfs-filer
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8333"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Paryty Services ──────────────────────────────────────────────────────
+
+  paryty-ingestion:
+    image: paryty/ingestion:latest
+    ports:
+      - "${PARYTY_PORT_INGESTION}:8443"  # gRPC ingestion (TLS)
+    environment:
+      DATABASE_URL: postgres://paryty:${PARYTY_POSTGRES_PASSWORD}@postgres:5432/paryty?sslmode=verify-full
+      PARYTY_INGESTION_PORT: "8443"
+      PARYTY_REDPANDA_BROKERS: redpanda:9093
+      PARYTY_DRAGONFLY_ADDR: dragonfly:6380
+      PARYTY_DRAGONFLY_PASSWORD: ${PARYTY_DRAGONFLY_PASSWORD}
+      PARYTY_QUESTDB_ADDR: questdb:8812
+      PARYTY_QUESTDB_ILP_ADDR: questdb:9009
+      PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
+      PARYTY_SEAWEEDFS_USE_SSL: "true"
+      PARYTY_QUESTDB_USERNAME: "${PARYTY_QUESTDB_USERNAME:-admin}"
+      PARYTY_QUESTDB_PASSWORD: "${PARYTY_QUESTDB_PASSWORD:-quest}"
+      PARYTY_TLS_CERT_FILE: /etc/paryty/certs/server.crt
+      PARYTY_TLS_KEY_FILE: /etc/paryty/certs/server.key
+      PARYTY_TLS_CA_FILE: /etc/paryty/certs/ca.crt
+      PARYTY_REQUIRE_TLS: "true"
+    volumes:
+      - ./certs/paryty:/etc/paryty/certs:ro
+      - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
+    depends_on:
+      - redpanda
+      - dragonfly
+      - questdb
+      - seaweedfs-s3
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 8443"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  paryty-query:
+    image: paryty/query:latest
+    ports:
+      - "${PARYTY_PORT_QUERY}:8443"  # REST/WS/SSE API (HTTPS)
+    environment:
+      DATABASE_URL: postgres://paryty:${PARYTY_POSTGRES_PASSWORD}@postgres:5432/paryty?sslmode=verify-full
+      PARYTY_JWT_SECRET: "${PARYTY_JWT_SECRET}"
+      PARYTY_DEV_MODE: "false"
+      PARYTY_REDPANDA_BROKERS: redpanda:9093
+      PARYTY_DRAGONFLY_ADDR: dragonfly:6380
+      PARYTY_DRAGONFLY_PASSWORD: ${PARYTY_DRAGONFLY_PASSWORD}
+      PARYTY_QUESTDB_ADDR: questdb:8812
+      PARYTY_QUESTDB_ILP_ADDR: questdb:9009
+      PARYTY_QUESTDB_USERNAME: "${PARYTY_QUESTDB_USERNAME:-admin}"
+      PARYTY_QUESTDB_PASSWORD: "${PARYTY_QUESTDB_PASSWORD:-quest}"
+      PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
+      PARYTY_SEAWEEDFS_USE_SSL: "true"
+      PARYTY_CORS_ORIGINS: "${PARYTY_CORS_ORIGINS}"
+      PARYTY_INTELLIGENCE_ADDR: "paryty-intelligence:50051"
+      PARYTY_TLS_CERT_FILE: /etc/paryty/certs/server.crt
+      PARYTY_TLS_KEY_FILE: /etc/paryty/certs/server.key
+      PARYTY_TLS_CA_FILE: /etc/paryty/certs/ca.crt
+      PARYTY_REQUIRE_TLS: "true"
+    volumes:
+      - ./certs/paryty:/etc/paryty/certs:ro
+      - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
+      - ../../configs/cluster/plans.yaml:/app/configs/cluster/plans.yaml:ro
+    depends_on:
+      - redpanda
+      - dragonfly
+      - questdb
+      - seaweedfs-s3
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- https://localhost:8443/health --no-check-certificate || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+
+  paryty-pipeline:
+    image: paryty/pipeline:latest
+    environment:
+      PARYTY_REDPANDA_BROKERS: redpanda:9093
+      PARYTY_DRAGONFLY_ADDR: dragonfly:6380
+      PARYTY_DRAGONFLY_PASSWORD: ${PARYTY_DRAGONFLY_PASSWORD}
+      PARYTY_QUESTDB_ADDR: questdb:8812
+      PARYTY_QUESTDB_ILP_ADDR: questdb:9009
+      PARYTY_SEAWEEDFS_ENDPOINT: seaweedfs-s3:8333
+      PARYTY_SEAWEEDFS_ACCESS_KEY: "${PARYTY_SEAWEEDFS_ACCESS_KEY}"
+      PARYTY_SEAWEEDFS_SECRET_KEY: "${PARYTY_SEAWEEDFS_SECRET_KEY}"
+      PARYTY_SEAWEEDFS_BUCKET: paryty
+      PARYTY_SEAWEEDFS_USE_SSL: "true"
+      PARYTY_QUESTDB_USERNAME: "${PARYTY_QUESTDB_USERNAME:-admin}"
+      PARYTY_QUESTDB_PASSWORD: "${PARYTY_QUESTDB_PASSWORD:-quest}"
+      PARYTY_TLS_CERT_FILE: /etc/paryty/certs/server.crt
+      PARYTY_TLS_KEY_FILE: /etc/paryty/certs/server.key
+      PARYTY_REQUIRE_TLS: "true"
+    volumes:
+      - ./certs/paryty:/etc/paryty/certs:ro
+      - ../../configs/cluster/cluster.yaml:/app/configs/cluster/cluster.yaml:ro
+    depends_on:
+      - redpanda
+      - dragonfly
+      - questdb
+      - seaweedfs-s3
+    restart: on-failure
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f /app/service"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  # ── Phase 6: Intelligence Layer ──────────────────────────────────────────
+
+  paryty-intelligence:
+    image: paryty-intelligence:latest
+    ports:
+      - "${PARYTY_PORT_INTELLIGENCE}:50051"  # gRPC intelligence service
+    environment:
+      INTELLIGENCE_PORT: "50051"
+      QUESTDB_HOST: questdb
+      QUESTDB_PORT: "8812"
+      QUESTDB_DATABASE: paryty
+      QUESTDB_SSL: "true"
+      DRAGONFLY_HOST: dragonfly
+      DRAGONFLY_PORT: "6380"
+      DRAGONFLY_SSL: "true"
+      LOG_LEVEL: info
+      PARYTY_DEV_MODE: "false"
+    volumes:
+      - /mnt/d/ParytyData/intelligence/models:/data/models
+      - ../../configs/intelligence/intelligence.yaml:/app/config/intelligence.yaml:ro
+    depends_on:
+      - questdb
+      - dragonfly
+      - redpanda
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; ch = grpc.insecure_channel('localhost:50051'); ch.close()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  questdb_data:
+  postgres_data:

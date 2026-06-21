@@ -136,7 +136,8 @@ func (h *IntelHandlers) handleForecast(c *gin.Context) {
 		req.Confidence = 0.95
 	}
 	if req.ServiceID == "" {
-		req.ServiceID = "default"
+		c.JSON(http.StatusBadRequest, gin.H{"error": "serviceId is required"})
+		return
 	}
 
 	freq := &intelligence.ForecastRequest{
@@ -209,7 +210,8 @@ func (h *IntelHandlers) handleForecastBatch(c *gin.Context) {
 			q.Confidence = 0.95
 		}
 		if q.ServiceID == "" {
-			q.ServiceID = "default"
+			c.JSON(http.StatusBadRequest, gin.H{"error": "serviceId is required for all queries"})
+			return
 		}
 		batchReq.Requests = append(batchReq.Requests, intelligence.ForecastRequest{
 			TenantID:        tenantID,
@@ -295,13 +297,12 @@ func (h *IntelHandlers) handleModelAccuracy(c *gin.Context) {
 		}
 	}
 	if len(result) == 0 {
-		result["default"] = gin.H{
-			"bestModel":       "Ensemble",
-			"weights":         gin.H{"Linear Regression": 0.0, "Prophet": 0.0, "XGBoost": 0.0},
-			"accuracy":        gin.H{"Linear Regression": 0.0, "Prophet": 0.0, "XGBoost": 0.0},
-			"lastTrained":     "",
-			"trainingSamples": 0,
-		}
+		c.JSON(http.StatusAccepted, gin.H{
+			"status":  "untrained",
+			"message": "No forecasting models trained yet. Models require at least 7 days of historical data.",
+			"models":  gin.H{},
+		})
+		return
 	}
 
 	c.JSON(http.StatusOK, result)
@@ -363,7 +364,8 @@ func (h *IntelHandlers) handleDetectAnomalies(c *gin.Context) {
 		req.Sensitivity = 0.5
 	}
 	if req.AgentId == "" {
-		req.AgentId = "default"
+		c.JSON(http.StatusBadRequest, gin.H{"error": "agentId is required"})
+		return
 	}
 
 	detectReq := &intelligence.AnomalyDetectionRequest{

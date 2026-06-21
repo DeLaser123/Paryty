@@ -1,11 +1,16 @@
 """Quick test: NVIDIA API directly, then via proxy."""
+import os
+import sys
 import urllib.request
 import json
 import ssl
 import time
 
 NVIDIA_URL = "https://integrate.api.nvidia.com/v1/chat/completions"
-NVIDIA_KEY = "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"
+NVIDIA_KEY = os.environ.get("NVIDIA_API_KEY")
+if not NVIDIA_KEY:
+    print("Error: NVIDIA_API_KEY environment variable not set")
+    sys.exit(1)
 
 payload = json.dumps({
     "model": "moonshotai/kimi-k2.6",

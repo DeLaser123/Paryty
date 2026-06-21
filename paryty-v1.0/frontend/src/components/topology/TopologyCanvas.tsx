@@ -9,8 +9,10 @@
  */
 
 import { useRef, useEffect, useCallback } from 'react';
+import clsx from 'clsx';
 import { useTopology } from '../../hooks/useTopology';
 import { useTopologyStore } from '../../stores/topologyStore';
+import type { HealthFilter } from '../../stores/topologyStore';
 import { TopologyRenderer } from '../../engine/renderer';
 import { MemoryBudget } from '../../engine/memoryBudget';
 import { TopologyControls } from './TopologyControls';
@@ -19,6 +21,13 @@ import { ClusterBreadcrumb } from './ClusterBreadcrumb';
 import { NodeDetailPanel } from './NodeDetailPanel';
 import { EdgeDetailPanel } from './EdgeDetailPanel';
 import { useKeyboard } from '../../hooks/useKeyboard';
+
+const HEALTH_FILTERS: { value: HealthFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'healthy', label: 'Healthy' },
+  { value: 'degraded', label: 'Degraded' },
+  { value: 'unhealthy', label: 'Unhealthy' },
+];
 
 /**
  * Main topology view replacing the old TopologyView.
@@ -49,6 +58,8 @@ export function TopologyCanvas() {
   const selectedEdge = useTopologyStore((s) => s.selectedEdge);
   const selectNode = useTopologyStore((s) => s.selectNode);
   const selectEdge = useTopologyStore((s) => s.selectEdge);
+  const filterHealth = useTopologyStore((s) => s.filterHealth);
+  const setFilterHealth = useTopologyStore((s) => s.setFilterHealth);
   const { isSearchOpen, setIsSearchOpen } = useKeyboard();
 
   // Mount renderer — enforced single-instance even under StrictMode
@@ -91,7 +102,28 @@ export function TopologyCanvas() {
     });
     resizeObserver.observe(container);
 
+    // Handle WebGL context loss/restore — critical for GPU availability.
+    // On context loss: destroy renderer and flag for recreation.
+    // On context restore: trigger full reinitialization by resetting the ref.
+    const canvas = container.querySelector('canvas');
+    const onContextLost = () => {
+      mainThreadBudget.stop();
+      renderer.destroy();
+      rendererCreatedRef.current = false;
+    };
+    const onContextRestored = () => {
+      rendererCreatedRef.current = false;
+    };
+    if (canvas) {
+      canvas.addEventListener('webglcontextlost', onContextLost);
+      canvas.addEventListener('webglcontextrestored', onContextRestored);
+    }
+
     return () => {
+      if (canvas) {
+        canvas.removeEventListener('webglcontextlost', onContextLost);
+        canvas.removeEventListener('webglcontextrestored', onContextRestored);
+      }
       rendererCreatedRef.current = false;
       resizeObserver.disconnect();
       mainThreadBudget.stop();
@@ -134,6 +166,38 @@ export function TopologyCanvas() {
 
         {/* Overlay controls */}
         <TopologyControls />
+
+        {/* Health filter bar */}
+        <div
+          className="topology-health-filter"
+          role="group"
+          aria-label="Filter by health status"
+          style={{
+            position: 'absolute',
+            top: 'var(--aef-space-3)',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            display: 'flex',
+            gap: 'var(--aef-space-1)',
+            background: 'var(--aef-surface)',
+            borderRadius: 'var(--aef-radius-md)',
+            padding: 'var(--aef-space-1)',
+            border: '1px solid var(--aef-border)',
+            zIndex: 10,
+          }}
+        >
+          {HEALTH_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              className={clsx('aef-btn', filterHealth === f.value ? 'aef-btn-active' : 'aef-btn-inactive')}
+              onClick={() => setFilterHealth(f.value)}
+              style={{ padding: '2px 8px', fontSize: 11 }}
+              data-testid={`health-filter-${f.value}`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
 
         {/* Cluster breadcrumb */}
         <ClusterBreadcrumb />

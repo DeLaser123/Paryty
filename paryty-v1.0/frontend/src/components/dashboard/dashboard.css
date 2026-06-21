@@ -1564,4 +1564,28 @@
   margin-top: var(--aef-space-2);
 }
 
+/* ── Loading Skeleton ─────────────────────────────────────────────── */
+
+@keyframes dp-skeleton-shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.dp-skeleton {
+  background: linear-gradient(90deg, var(--aef-surface-low) 25%, var(--aef-surface-card) 50%, var(--aef-surface-low) 75%);
+  background-size: 200% 100%;
+  animation: dp-skeleton-shimmer 1.5s ease-in-out infinite;
+  border-radius: var(--aef-radius-control);
+}
+
+.dp-skeleton-card {
+  height: 180px;
+  border-radius: var(--aef-radius-card);
+}
+
+.dp-skeleton-row {
+  height: 48px;
+  border-radius: var(--aef-radius-control);
+}
+
 
